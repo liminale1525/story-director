@@ -9,36 +9,51 @@ const INPUT_ENTRY_ID = 'story-director-input-entry';
 const INPUT_BUTTON_ID = 'story-director-input-button';
 
 const DEFAULT_BLUEPRINT = `【故事基底】
-时代、地域、社会秩序、超自然/科技/权力结构、日常生活质感。
+时代、地域、社会秩序、日常生活质感、超自然/科技/权力结构，以及这些设定如何影响普通人的生活。
 
 【核心题材】
-例如：慢热恋爱、悬疑调查、群像成长、家族纠葛、黑暗奇幻、末日求生。
+例如：慢热恋爱、悬疑调查、群像成长、家族纠葛、黑暗奇幻、末日求生、权谋博弈、都市传闻。
 
 【当前主线】
-{{user}} 与主要角色正在面对什么局面？主线背后有哪些尚未揭开的矛盾？
+{{user}} 与主要角色正在面对什么局面？表层事件是什么，背后尚未揭开的矛盾、秘密或利益冲突是什么？
 
 【长期走向】
-关系、真相、阵营、个人成长或世界变化最终可能通向哪些方向？
+关系、真相、阵营、个人成长或世界变化最终可能通向哪些方向？可以列出多个可能走向，方便剧情保留变数。
 
 【主要角色与关系】
-- {{user}}：身份、动机、能力边界、当前处境。
-- {{char}}：身份、欲望、弱点、与 {{user}} 的张力。
-- 重要NPC：姓名、立场、交际圈、可能带来的支线。
+- {{user}}：身份、动机、能力边界、当前处境、正在逃避或追求的事。
+- {{char}}：身份、欲望、弱点、与 {{user}} 的张力、可能隐瞒的信息。
+- 重要NPC：姓名、立场、交际圈、资源、矛盾点、可能带来的支线。
 
 【世界社交网】
-角色之间可以有各自的亲友、同事、敌人、旧识、组织关系和共同交际圈。世界变化可以先发生在 {{user}} 视野之外，再通过传闻、邀约、冲突或偶遇进入剧情。
+角色之间可以有各自的亲友、同事、敌人、旧识、组织关系和共同交际圈。世界变化可以先发生在 {{user}} 视野之外，再通过传闻、邀约、冲突、委托、误会、新闻或偶遇进入剧情。
 
 【变量与新角色】
-任务、节点、角色世界可以依据叙事需要自然引入新NPC、临时盟友、竞争者、目击者、线人或共同圈层角色，为剧情注入流动性。
+任务、节点、角色世界可以依据叙事需要自然引入新NPC、临时盟友、竞争者、目击者、线人、旧相识、共同圈层角色或外部势力。新变量不需要每次出现，依据当前剧情密度和节奏概率进入。
+
+【任务与节点偏好】
+希望出现什么类型的任务？例如调查、试探、护送、谈判、潜入、日常约定、情感选择、阵营抉择、公共事件、支线插曲。
+
+【角色世界偏好】
+希望角色们如何自主行动？例如各自推进目标、交换情报、产生误会、寻找盟友、隐藏动机、被外部事件牵动。
 
 【剧情偏好】
-节奏、情感浓度、悬疑密度、日常比例、冲突强度、支线开放度。
+节奏、情感浓度、悬疑密度、日常比例、冲突强度、支线开放度、叙事视角、篇章推进速度。
 
 【避雷与边界】
 不希望出现的剧情、关系走向、题材或叙事处理方式。
 
 【导演特别说明】
-写下你希望导演参考的节奏、氛围、关系推进、支线灵感或本轮重点。`;
+写下你希望本轮参考的重点：氛围、关系推进、线索方向、支线灵感、节奏偏好或需要暂时搁置的内容。`;
+
+function isLegacyBlueprint(text) {
+  const value = String(text || '').trim();
+  return value.includes('现代都市 / 校园 / 西幻 / 末日 / 无限流 / 其他')
+    || value.includes('例如：慢热恋爱、悬疑调查、群像成长、轻喜剧、黑暗奇幻')
+    || value.includes('【给导演的额外叮嘱】')
+    || (value.includes('【故事基底】') && !value.includes('【任务与节点偏好】'))
+    || (value.includes('【世界观】') && value.includes('【剧情基调】') && value.includes('【长期目标】'));
+}
 
 const DEFAULT_SYSTEM_PROMPT = `你是一位顶尖剧作家导演，长期为沉浸式角色扮演故事设计暗线、节奏、冲突、人物动机与可选择的推进路径。
 
@@ -259,6 +274,10 @@ function getChatStore() {
     meta[MODULE_NAME] = { blueprint: DEFAULT_BLUEPRINT, plan: null, history: [], messageCounter: 0, updatedAt: '' };
   }
   mergeDefaults(meta[MODULE_NAME], { blueprint: DEFAULT_BLUEPRINT, plan: null, history: [], messageCounter: 0, updatedAt: '' });
+  if (isLegacyBlueprint(meta[MODULE_NAME].blueprint)) {
+    meta[MODULE_NAME].blueprint = DEFAULT_BLUEPRINT;
+    meta[MODULE_NAME].blueprintEdited = false;
+  }
   return meta[MODULE_NAME];
 }
 
@@ -439,7 +458,7 @@ function getCurrentPresetName() {
     context.preset_settings,
     context.settings?.preset_settings,
   ].flatMap(parseAnyString).filter((name) => !isNoisePresetName(name));
-  return uniqueClean(candidates)[0] || '当前使用预设';
+  return uniqueClean(candidates)[0] || '';
 }
 
 function getCurrentPresetEntries() {
@@ -469,7 +488,7 @@ function parseNameSource(source) {
 
 function listPresetNames() {
   const context = ctx();
-  const names = [getCurrentPresetName()];
+  const names = [getCurrentPresetName()].filter(Boolean);
   const sources = [
     globalThis.preset_names,
     globalThis.presetNames,
@@ -492,7 +511,7 @@ function listPresetNames() {
 
 function getPresetEntries(name) {
   const currentName = getCurrentPresetName();
-  if (name === currentName || name === '当前使用预设') {
+  if (currentName && name === currentName) {
     const currentEntries = getCurrentPresetEntries();
     if (currentEntries.length) return currentEntries;
   }
@@ -1091,7 +1110,6 @@ function renderModal() {
     ['castworld', '角色世界'],
     ['context', '扩展'],
     ['settings', '幕后'],
-    ['plug', '🔌'],
   ];
   const wasOpen = modal.classList.contains('open');
   modal.className = `sd-theme-${settings.theme === 'dark' ? 'dark' : 'light'}${wasOpen ? ' open' : ''}`;
@@ -1104,7 +1122,7 @@ function renderModal() {
           <p>故事自成脉络&nbsp;&nbsp;命运早有伏笔</p>
         </div>
         <div class="sd-header-actions">
-          <button class="sd-plug-shortcut" title="API与日志">🔌</button>
+          <button class="sd-plug-shortcut" title="API与日志">⚙</button>
           <button class="sd-theme-toggle" title="切换外观" aria-label="切换外观"><span></span></button>
           <button class="sd-close" title="关闭">×</button>
         </div>
@@ -1113,6 +1131,7 @@ function renderModal() {
         ${tabs.map(([id, label]) => `<button class="sd-tab ${activeTab === id ? 'active' : ''}" data-tab="${id}">${label}</button>`).join('')}
       </nav>
       <main class="sd-body">${renderActiveTab()}</main>
+      ${renderInjectDock()}
     </section>`;
   modal.querySelector('.sd-backdrop')?.addEventListener('click', closeModal);
   modal.querySelector('.sd-window')?.addEventListener('click', (event) => event.stopPropagation());
@@ -1147,6 +1166,11 @@ function renderActiveTab() {
   }
 }
 
+function renderInjectDock() {
+  if (!['tasksnodes', 'castworld'].includes(activeTab) || !currentPlan()) return '';
+  return '<div class="sd-inject-dock"><button class="sd-btn sd-primary sd-inject-selected" type="button" disabled>写入已选 <span>0</span></button></div>';
+}
+
 function metricBar(label, value) {
   const n = Math.max(0, Math.min(100, Number(value || 0)));
   return `<div class="sd-metric sd-progress-metric"><div class="sd-metric-top"><span>${label}</span><b>${n}%</b></div><div class="sd-bar"><i style="width:${n}%"></i></div></div>`;
@@ -1177,7 +1201,7 @@ function renderDashboardTab() {
       ${metricBar('进度', st.progress)}
       <div class="sd-circle-grid">${metricCircle('张力', st.tension)}${metricCircle('情感', st.romance)}${metricCircle('悬疑', st.mystery)}${metricCircle('危险', st.danger)}</div>
     </section>
-    <div class="sd-grid sd-grid-4">
+    <div class="sd-grid sd-grid-4 sd-dashboard-counts">
       ${countCard('任务', p.quests?.length || 0, 'tasksnodes')}
       ${countCard('节点', p.story_nodes?.length || 0, 'tasksnodes')}
       ${countCard('角色', p.npc_updates?.length || 0, 'castworld')}
@@ -1218,7 +1242,7 @@ function renderCastWorldTab() {
 }
 
 function renderPlanSection(title, items, kind) {
-  return `<details class="sd-card sd-plan-section"><summary><h3>${htmlEscape(title)}</h3><span>${items?.length || 0} 条</span></summary>${renderItemList(items || [], kind)}</details>`;
+  return `<section class="sd-card sd-plan-section"><div class="sd-section-title"><h3>${htmlEscape(title)}</h3><span>${items?.length || 0} 条</span></div>${renderItemList(items || [], kind)}</section>`;
 }
 
 function renderNoPlan(text = '尚未生成剧情规划') {
@@ -1233,17 +1257,51 @@ function renderItemList(items, kind) {
 function renderItemCard(item, kind, idx) {
   const title = item.title || item.name || `项目 ${idx + 1}`;
   const prompt = item.inject_prompt || item.objective || item.event || item.next_action || item.content || '';
+  const injectId = `${kind}-${idx}-${getContextItemId(item)}`;
+  const chips = renderItemChips(item, kind);
   const fields = [];
   if (kind === 'quest') {
-    fields.push(['目标', item.objective], ['说明', item.description], ['优先级', item.priority], ['状态', item.status], ['期限', item.deadline], ['触发', item.trigger], ['收获', item.reward]);
+    fields.push(['目标', item.objective], ['说明', item.description], ['触发', item.trigger], ['收获', item.reward]);
   } else if (kind === 'node') {
-    fields.push(['触发', item.trigger], ['伏笔', item.foreshadowing], ['事件', item.event], ['后果', item.consequences], ['优先级', item.priority]);
+    fields.push(['触发', item.trigger], ['伏笔', item.foreshadowing], ['事件', item.event], ['后果', item.consequences]);
   } else if (kind === 'npc') {
-    fields.push(['定位', item.role], ['目标', item.current_goal], ['进度', item.progress !== undefined ? `${item.progress}%` : ''], ['情绪', item.emotional_state], ['行动', item.next_action], ['隐情', item.hidden_agenda], ['关系网', item.relationship_to_user]);
+    fields.push(['目标', item.current_goal], ['行动', item.next_action], ['隐情', item.hidden_agenda], ['关系网', item.relationship_to_user]);
   } else {
-    fields.push(['类型', item.type], ['内容', item.content], ['影响', item.impact], ['时机', item.timing]);
+    fields.push(['内容', item.content], ['影响', item.impact]);
   }
-  return `<article class="sd-item-card"><div class="sd-card-title"><h4>${htmlEscape(title)}</h4>${badge(item.type || item.priority || item.status || '')}</div><dl>${fields.filter(([, v]) => v !== undefined && v !== '').map(([k, v]) => `<dt>${htmlEscape(k)}</dt><dd>${htmlEscape(v)}</dd>`).join('')}</dl>${prompt ? `<div class="sd-inject-preview"><pre>${htmlEscape(prompt)}</pre></div><button class="sd-btn sd-inject" data-text="${htmlEscape(prompt)}">写入输入框</button>` : ''}</article>`;
+  return `<details class="sd-item-card sd-item-fold">
+    <summary>
+      <div class="sd-item-summary-main"><h4>${htmlEscape(title)}</h4>${chips ? `<div class="sd-mini-chip-row">${chips}</div>` : ''}</div>
+      ${prompt ? `<label class="sd-inject-select-label" title="加入多选写入"><input type="checkbox" class="sd-select-inject" data-text="${htmlEscape(prompt)}" data-id="${htmlEscape(injectId)}"> 多选</label>` : ''}
+    </summary>
+    <div class="sd-item-detail">
+      <dl>${fields.filter(([, v]) => v !== undefined && v !== '').map(([k, v]) => `<dt>${htmlEscape(k)}</dt><dd>${htmlEscape(v)}</dd>`).join('')}</dl>
+      ${prompt ? `<div class="sd-inject-preview"><pre>${htmlEscape(prompt)}</pre></div><div class="sd-button-row"><button class="sd-btn sd-inject" data-text="${htmlEscape(prompt)}">写入输入框</button></div>` : ''}
+    </div>
+  </details>`;
+}
+
+function renderItemChips(item, kind) {
+  const chips = [];
+  const push = (label, value) => {
+    if (value !== undefined && value !== null && String(value).trim() !== '') chips.push(`<span class="sd-badge"><b>${htmlEscape(label)}</b>${htmlEscape(value)}</span>`);
+  };
+  if (kind === 'quest') {
+    push('类型', item.type);
+    push('优先级', item.priority);
+    push('状态', item.status);
+    push('期限', item.deadline);
+  } else if (kind === 'node') {
+    push('优先级', item.priority);
+  } else if (kind === 'npc') {
+    push('定位', item.role);
+    if (item.progress !== undefined) push('进度', `${item.progress}%`);
+    push('情绪', item.emotional_state);
+  } else {
+    push('类型', item.type);
+    push('时机', item.timing);
+  }
+  return chips.join('');
 }
 
 function badge(text) {
@@ -1292,12 +1350,12 @@ function renderContextTab() {
       <div class="sd-tag-rule-list">${renderTagRules()}</div>
       <div class="sd-button-row"><button type="button" class="sd-btn sd-add-tag-rule">添加标签</button></div>
     </details>
-    <details class="sd-accordion">
+    <details class="sd-accordion" open>
       <summary><b>预设</b><span>${contextScanCache.scannedAt ? '已刷新' : '待刷新'}</span></summary>
       <div class="sd-button-row"><button type="button" class="sd-btn sd-refresh-context">刷新</button></div>
       ${renderPresetSourcePanel()}
     </details>
-    <details class="sd-accordion">
+    <details class="sd-accordion" open>
       <summary><b>世界书</b><span>${contextScanCache.scannedAt ? '已刷新' : '待刷新'}</span></summary>
       <div class="sd-button-row"><button type="button" class="sd-btn sd-refresh-context">拉取</button></div>
       ${renderWorldBookSourcePanel()}
@@ -1305,47 +1363,45 @@ function renderContextTab() {
 }
 
 function renderTagRules() {
-  const rules = getTagRules();
-  const list = rules.length ? rules : [{ name: '', action: 'remove' }];
-  return list.map((rule, index) => `<div class="sd-tag-rule-row"><input class="text_pole sd-tag-rule-name" data-index="${index}" placeholder="标签名，如 thinking" value="${htmlEscape(rule.name)}"><select class="text_pole sd-tag-rule-action" data-index="${index}"><option value="remove" ${rule.action !== 'extract' ? 'selected' : ''}>屏蔽</option><option value="extract" ${rule.action === 'extract' ? 'selected' : ''}>提取</option></select><button type="button" class="sd-icon-btn sd-delete-tag-rule" data-index="${index}" title="删除">×</button></div>`).join('');
+  const rawRules = Array.isArray(settings.contextOptions.tagRules) ? settings.contextOptions.tagRules : [];
+  const list = rawRules.length ? rawRules : [{ name: '', action: 'remove' }];
+  return list.map((rule, index) => `<div class="sd-tag-rule-row"><input class="text_pole sd-tag-rule-name" data-index="${index}" placeholder="标签名，如 thinking" value="${htmlEscape(rule.name || '')}"><select class="text_pole sd-tag-rule-action" data-index="${index}"><option value="remove" ${rule.action !== 'extract' ? 'selected' : ''}>屏蔽</option><option value="extract" ${rule.action === 'extract' ? 'selected' : ''}>提取</option></select><button type="button" class="sd-icon-btn sd-delete-tag-rule" data-index="${index}" title="删除">×</button></div>`).join('');
 }
 
 function renderPresetSourcePanel() {
   const currentName = contextScanCache.currentPresetName || getCurrentPresetName();
   const names = uniqueClean([currentName, ...(contextScanCache.presetNames || listPresetNames())]).filter((name) => !isNoisePresetName(name));
   if (!names.length) return '<p class="sd-muted">未读取到预设。</p>';
-  const selected = getSelectedPresetNames();
-  const choiceRows = names.map((name) => `<label class="checkbox_label sd-source-row"><input type="checkbox" class="sd-toggle-preset" data-name="${htmlEscape(name)}" ${selected.includes(name) ? 'checked' : ''}> <span>${htmlEscape(name)}</span>${name === currentName ? badge('当前使用') : ''}</label>`).join('');
-  return `<div class="sd-context-block"><h3>选择预设</h3><div class="sd-chip-row">${selected.map((name) => `<button type="button" class="sd-chip sd-unselect-preset" data-name="${htmlEscape(name)}">${htmlEscape(name)} ×</button>`).join('') || '<span class="sd-muted">尚未选择预设。</span>'}</div><div class="sd-source-list">${choiceRows}</div></div>${renderSelectedPresetEntries(selected)}`;
+  const selected = getSelectedPresetNames().filter((name) => names.includes(name));
+  const choiceRows = names.map((name) => `<label class="checkbox_label sd-source-row"><input type="checkbox" class="sd-toggle-preset" data-name="${htmlEscape(name)}" ${selected.includes(name) ? 'checked' : ''}><span>${htmlEscape(name)}</span>${currentName && name === currentName ? badge('当前使用') : ''}</label>`).join('');
+  return `<details class="sd-context-block" open><summary><b>选择预设</b><span>${selected.length}/${names.length}</span></summary><div class="sd-source-list">${choiceRows}</div></details>${renderSelectedPresetEntries(selected)}`;
 }
 
 function renderSelectedPresetEntries(selectedNames) {
-  if (!selectedNames.length) return '';
   const rows = [];
   for (const name of selectedNames) {
     const items = contextScanCache.presets?.[name] || getPresetEntries(name);
     (items || []).forEach((item, index) => rows.push(renderContextEntry('preset', name, item, index, selectedNames.length > 1 ? name : '')));
   }
-  return `<div class="sd-context-block"><h3>预设条目 <span class="sd-muted">${rows.length} 条</span></h3>${rows.join('') || '<p class="sd-muted">未读取到条目。</p>'}</div>`;
+  return `<details class="sd-context-block" open><summary><b>预设条目</b><span>${rows.length} 条</span></summary>${rows.join('') || '<p class="sd-muted">选择预设后点击刷新。</p>'}</details>`;
 }
 
 function renderWorldBookSourcePanel() {
   const boundNames = contextScanCache.boundWorldBookNames || detectBoundWorldBookNames();
-  const names = uniqueClean([...boundNames, ...(contextScanCache.worldBookNames || [])]);
+  const names = uniqueClean([...boundNames, ...(contextScanCache.worldBookNames || [])]).filter(Boolean);
   if (!names.length) return '<p class="sd-muted">未读取到世界书。</p>';
-  const selected = getSelectedWorldBookNames();
-  const choiceRows = names.map((name) => `<label class="checkbox_label sd-source-row"><input type="checkbox" class="sd-toggle-worldbook" data-name="${htmlEscape(name)}" ${selected.includes(name) ? 'checked' : ''}> <span>${htmlEscape(name)}</span>${boundNames.includes(name) ? badge('当前绑定') : ''}</label>`).join('');
-  return `<div class="sd-context-block"><h3>选择世界书</h3><div class="sd-chip-row">${selected.map((name) => `<button type="button" class="sd-chip sd-unselect-worldbook" data-name="${htmlEscape(name)}">${htmlEscape(name)} ×</button>`).join('') || '<span class="sd-muted">尚未选择世界书。</span>'}</div><div class="sd-source-list">${choiceRows}</div></div>${renderSelectedWorldBookEntries(selected)}`;
+  const selected = getSelectedWorldBookNames().filter((name) => names.includes(name));
+  const choiceRows = names.map((name) => `<label class="checkbox_label sd-source-row"><input type="checkbox" class="sd-toggle-worldbook" data-name="${htmlEscape(name)}" ${selected.includes(name) ? 'checked' : ''}><span>${htmlEscape(name)}</span>${boundNames.includes(name) ? badge('当前绑定') : ''}</label>`).join('');
+  return `<details class="sd-context-block" open><summary><b>选择世界书</b><span>${selected.length}/${names.length}</span></summary><div class="sd-source-list">${choiceRows}</div></details>${renderSelectedWorldBookEntries(selected)}`;
 }
 
 function renderSelectedWorldBookEntries(selectedNames) {
-  if (!selectedNames.length) return '';
   const rows = [];
   for (const name of selectedNames) {
     const items = contextScanCache.worldBooks?.[name] || [];
     (items || []).forEach((item, index) => rows.push(renderContextEntry('world', name, item, index, selectedNames.length > 1 ? name : '')));
   }
-  return `<div class="sd-context-block"><h3>世界书条目 <span class="sd-muted">${rows.length} 条</span></h3>${rows.join('') || '<p class="sd-muted">选择世界书后点击拉取。</p>'}</div>`;
+  return `<details class="sd-context-block" open><summary><b>世界书条目</b><span>${rows.length} 条</span></summary>${rows.join('') || '<p class="sd-muted">选择世界书后点击拉取。</p>'}</details>`;
 }
 
 function renderContextEntry(kind, groupName, item, index, sourceLabel = '') {
@@ -1353,7 +1409,7 @@ function renderContextEntry(kind, groupName, item, index, sourceLabel = '') {
   const title = item.name || item.identifier || item.comment || item.role || (Array.isArray(item.key) ? item.key.join(', ') : item.key) || `条目 ${index + 1}`;
   const content = item.content || item.prompt || item.message || item.text || '';
   const checked = kind === 'preset' ? isPresetItemSelected(groupName, id) : isWorldItemSelected(groupName, id);
-  return `<details class="sd-context-item" ${checked ? 'open' : ''}><summary><label><input type="checkbox" class="sd-context-check" data-kind="${kind}" data-group="${htmlEscape(groupName)}" data-id="${htmlEscape(String(id))}" ${checked ? 'checked' : ''}> ${htmlEscape(title)} ${sourceLabel ? infoTag(sourceLabel) : ''}</label></summary><pre>${htmlEscape(cleanContextText(content).slice(0, 2000))}</pre></details>`;
+  return `<details class="sd-context-item"><summary><label class="sd-context-entry-label"><input type="checkbox" class="sd-context-check" data-kind="${kind}" data-group="${htmlEscape(groupName)}" data-id="${htmlEscape(String(id))}" ${checked ? 'checked' : ''}><span>${htmlEscape(title)}</span>${sourceLabel ? infoTag(sourceLabel) : ''}</label></summary><pre>${htmlEscape(cleanContextText(content).slice(0, 2000))}</pre></details>`;
 }
 
 function renderDirectorSettingsTab() {
@@ -1378,35 +1434,36 @@ function renderDirectorSettingsTab() {
 function renderPlugTab() {
   const isExternal = settings.providerMode === 'external';
   const log = settings.lastLog || DEFAULT_SETTINGS.lastLog;
-  const models = uniqueClean(settings.availableModels || []);
+  const models = uniqueClean([settings.model, ...(settings.availableModels || [])]);
+  const profiles = Array.isArray(settings.apiProfiles) ? settings.apiProfiles : [];
   return `
     <section class="sd-card">
       <h3>模型来源</h3>
       <label class="radio_label"><input type="radio" name="sd-provider" value="external" ${isExternal ? 'checked' : ''}> OpenAI（自定义）</label>
-      <label class="radio_label"><input type="radio" name="sd-provider" value="sillytavern" ${!isExternal ? 'checked' : ''}> 使用SillyTavern当前🔌设置</label>
+      <label class="radio_label"><input type="radio" name="sd-provider" value="sillytavern" ${!isExternal ? 'checked' : ''}> 使用SillyTavern当前API设置</label>
     </section>
     <section class="sd-card ${isExternal ? '' : 'sd-disabled-card'}">
       <h3>API</h3>
+      <label>API预设</label>
+      <div class="sd-inline-field sd-api-profile-row"><select class="text_pole sd-api-profile-select"><option value="">选择API预设</option>${profiles.map((profile) => `<option value="${htmlEscape(profile.id)}">${htmlEscape(profile.name || profile.model || '未命名API')}</option>`).join('')}</select><button class="sd-btn sd-load-api-profile">载入</button><button class="sd-btn sd-danger sd-delete-api-profile">删除</button></div>
       <label>API URL</label><input class="text_pole sd-api-url" placeholder="https://api.example.com/v1" value="${htmlEscape(settings.apiUrl || '')}">
       <label>API Key</label><input class="text_pole sd-api-key" type="password" placeholder="sk-..." value="${htmlEscape(settings.apiKey || '')}">
       <label>模型</label>
       <div class="sd-inline-field"><select class="text_pole sd-model-select"><option value="">选择模型</option>${models.map((m) => `<option value="${htmlEscape(m)}" ${m === settings.model ? 'selected' : ''}>${htmlEscape(m)}</option>`).join('')}</select><button class="sd-btn sd-fetch-models">拉取模型</button></div>
-      <input class="text_pole sd-model-input" placeholder="模型名称" value="${htmlEscape(settings.model || '')}">
       <label>Temperature</label><input class="text_pole sd-temperature" type="number" min="0" max="2" step="0.05" value="${htmlEscape(settings.temperature)}">
       <div class="sd-button-row"><button class="sd-btn sd-save-api">保存API</button><button class="sd-btn sd-save-api-profile">保存为预设</button></div>
-    </section>
-    <section class="sd-card">
-      <h3>API预设</h3>
-      <div class="sd-template-list">${renderApiProfiles()}</div>
     </section>
     <section class="sd-card"><h3>日志</h3><p><b>${htmlEscape(log.status || 'none')}</b> · ${htmlEscape(log.time || '-')} · ${htmlEscape(log.duration || '-')}</p>${log.error ? `<p class="sd-error">${htmlEscape(log.error)}</p>` : ''}</section>
     <details class="sd-accordion"><summary><b>Response</b><span>最近一次返回</span></summary><pre>${htmlEscape(log.response || '暂无')}</pre></details>`;
 }
 
-function renderApiProfiles() {
-  const profiles = Array.isArray(settings.apiProfiles) ? settings.apiProfiles : [];
-  if (!profiles.length) return '<p class="sd-muted">暂无API预设。</p>';
-  return profiles.map((profile) => `<article class="sd-template-card"><div><h4>${htmlEscape(profile.name || profile.model || '未命名API')}</h4><p class="sd-muted">${htmlEscape(profile.apiUrl || '')} · ${htmlEscape(profile.model || '')}</p></div><div class="sd-button-row"><button class="sd-btn sd-load-api-profile" data-id="${htmlEscape(profile.id)}">载入</button><button class="sd-btn sd-danger sd-delete-api-profile" data-id="${htmlEscape(profile.id)}">删除</button></div></article>`).join('');
+function updateInjectDock(root = document) {
+  const dockButton = root.querySelector?.('.sd-inject-selected');
+  if (!dockButton) return;
+  const count = root.querySelectorAll('.sd-select-inject:checked').length;
+  const span = dockButton.querySelector('span');
+  if (span) span.textContent = String(count);
+  dockButton.disabled = count === 0;
 }
 
 function bindActiveTabEvents(root) {
@@ -1434,9 +1491,22 @@ function bindActiveTabEvents(root) {
     toast(ok ? '已写入输入框。' : '未找到输入框。', ok ? 'success' : 'error');
     if (ok) closeModal();
   }));
+  root.querySelectorAll('.sd-select-inject').forEach((el) => {
+    el.addEventListener('click', (event) => event.stopPropagation());
+    el.addEventListener('change', () => updateInjectDock(root));
+  });
+  root.querySelector('.sd-inject-selected')?.addEventListener('click', () => {
+    const texts = Array.from(root.querySelectorAll('.sd-select-inject:checked')).map((el) => el.dataset.text || '').filter(Boolean);
+    if (!texts.length) return;
+    const ok = injectToInput(texts.join('\n\n'));
+    toast(ok ? `已写入 ${texts.length} 项。` : '未找到输入框。', ok ? 'success' : 'error');
+    if (ok) closeModal();
+  });
+  updateInjectDock(root);
 
   root.querySelector('.sd-save-blueprint')?.addEventListener('click', async () => {
     getChatStore().blueprint = root.querySelector('.sd-blueprint')?.value || DEFAULT_BLUEPRINT;
+    getChatStore().blueprintEdited = true;
     await saveMetadata();
     toast('当前剧本已保存。', 'success');
   });
@@ -1515,10 +1585,13 @@ function bindActiveTabEvents(root) {
     await setWorldBookNameSelected(el.dataset.name, false);
     renderModal();
   }));
-  root.querySelectorAll('.sd-context-check').forEach((el) => el.addEventListener('change', () => {
-    if (el.dataset.kind === 'preset') setPresetItemSelected(el.dataset.group, el.dataset.id, el.checked);
-    else setWorldItemSelected(el.dataset.group, el.dataset.id, el.checked);
-  }));
+  root.querySelectorAll('.sd-context-check').forEach((el) => {
+    el.addEventListener('click', (event) => event.stopPropagation());
+    el.addEventListener('change', () => {
+      if (el.dataset.kind === 'preset') setPresetItemSelected(el.dataset.group, el.dataset.id, el.checked);
+      else setWorldItemSelected(el.dataset.group, el.dataset.id, el.checked);
+    });
+  });
 
   root.querySelector('.sd-save-director-settings')?.addEventListener('click', () => {
     settings.autoRefresh = !!root.querySelector('.sd-auto-refresh')?.checked;
@@ -1546,13 +1619,10 @@ function bindActiveTabEvents(root) {
     saveSettings();
     fetchModels();
   });
-  root.querySelector('.sd-model-select')?.addEventListener('change', (e) => {
-    if (e.target.value) root.querySelector('.sd-model-input').value = e.target.value;
-  });
   root.querySelector('.sd-save-api')?.addEventListener('click', () => {
     settings.apiUrl = root.querySelector('.sd-api-url')?.value || '';
     settings.apiKey = root.querySelector('.sd-api-key')?.value || '';
-    settings.model = root.querySelector('.sd-model-input')?.value || '';
+    settings.model = root.querySelector('.sd-model-select')?.value || '';
     settings.temperature = Number(root.querySelector('.sd-temperature')?.value || 0.75);
     saveSettings();
     toast('API已保存。', 'success');
@@ -1560,35 +1630,41 @@ function bindActiveTabEvents(root) {
   root.querySelector('.sd-save-api-profile')?.addEventListener('click', async () => {
     const apiUrl = root.querySelector('.sd-api-url')?.value || '';
     const apiKey = root.querySelector('.sd-api-key')?.value || '';
-    const model = root.querySelector('.sd-model-input')?.value || '';
+    const model = root.querySelector('.sd-model-select')?.value || '';
     const temperature = Number(root.querySelector('.sd-temperature')?.value || 0.75);
     const name = await promptInput('保存API预设', '预设名称：', model || 'API预设');
     if (!name) return;
     settings.apiProfiles ||= [];
-    settings.apiProfiles.push({ id: uid('api'), name, apiUrl, apiKey, model, temperature });
+    const existing = settings.apiProfiles.find((x) => x.name === name);
+    const profile = { id: existing?.id || uid('api'), name, apiUrl, apiKey, model, temperature };
+    settings.apiProfiles = existing ? settings.apiProfiles.map((x) => x.id === existing.id ? profile : x) : [...settings.apiProfiles, profile];
     saveSettings();
     toast('API预设已保存。', 'success');
     renderModal();
   });
-  root.querySelectorAll('.sd-load-api-profile').forEach((el) => el.addEventListener('click', () => {
-    const profile = (settings.apiProfiles || []).find((x) => x.id === el.dataset.id);
-    if (!profile) return;
+  root.querySelector('.sd-load-api-profile')?.addEventListener('click', () => {
+    const id = root.querySelector('.sd-api-profile-select')?.value || '';
+    const profile = (settings.apiProfiles || []).find((x) => x.id === id);
+    if (!profile) return toast('请先选择API预设。', 'warning');
     settings.providerMode = 'external';
     settings.apiUrl = profile.apiUrl || '';
     settings.apiKey = profile.apiKey || '';
     settings.model = profile.model || '';
     settings.temperature = Number(profile.temperature || 0.75);
+    if (settings.model && !settings.availableModels.includes(settings.model)) settings.availableModels = uniqueClean([settings.model, ...(settings.availableModels || [])]);
     saveSettings();
     toast('API预设已载入。', 'success');
     renderModal();
-  }));
-  root.querySelectorAll('.sd-delete-api-profile').forEach((el) => el.addEventListener('click', async () => {
+  });
+  root.querySelector('.sd-delete-api-profile')?.addEventListener('click', async () => {
+    const id = root.querySelector('.sd-api-profile-select')?.value || '';
+    if (!id) return toast('请先选择API预设。', 'warning');
     const yes = await confirmDialog('删除API预设', '确认删除这个API预设？');
     if (!yes) return;
-    settings.apiProfiles = (settings.apiProfiles || []).filter((x) => x.id !== el.dataset.id);
+    settings.apiProfiles = (settings.apiProfiles || []).filter((x) => x.id !== id);
     saveSettings();
     renderModal();
-  }));
+  });
 }
 
 async function promptInput(title, text, value = '') {
