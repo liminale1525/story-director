@@ -850,3 +850,25 @@
     min-width: 104px;
   }
 }
+
+/* v0.4.2 behind panel */
+.sd-auto-row {
+  grid-template-columns: auto 96px !important;
+  justify-content: start;
+  align-items: center;
+}
+
+.sd-auto-row label,
+.sd-auto-row input.text_pole {
+  margin: 0 !important;
+}
+
+.sd-prompt-editor {
+  min-height: 220px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: .92em;
+}
+
+.sd-output-format {
+  min-height: 340px;
+}

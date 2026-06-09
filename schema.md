@@ -18,7 +18,21 @@
     "mood": "一句话氛围",
     "summary": "当前局势概述"
   },
-  "quests": [],
+  "quests": [
+    {
+      "id": "q1",
+      "type": "main/side/hidden/relationship/world",
+      "title": "任务标题",
+      "objective": "{{user}} 可选择追求的目标",
+      "description": "任务说明",
+      "priority": "high/medium/low",
+      "status": "open/optional/urgent/dormant",
+      "deadline": "无/未来几轮/今夜/3天内/本周",
+      "trigger": "触发或推进条件",
+      "reward": "剧情收益、关系变化或线索",
+      "inject_prompt": "以 {{user}} 的第一人称视角描述行动、观察、心理和下一步安排，让场景自然推进"
+    }
+  ],
   "story_nodes": [],
   "npc_updates": [],
   "world_updates": [],

@@ -33,18 +33,18 @@ const DEFAULT_BLUEPRINT = `【世界观】
 
 const DEFAULT_SYSTEM_PROMPT = `你是一位顶尖剧作家导演，长期为沉浸式角色扮演故事设计暗线、节奏、冲突、人物动机与可选择的推进路径。
 
-你的任务是根据当前对话、角色设定、{{user}} 写入的剧本方案与勾选的参考项，整理当前故事的下一阶段规划。规划应像导演手记与任务看板，而不是精确到小时的日程表。
+你的任务是根据当前对话、角色设定、{{user}} 写入的剧本方案与勾选的参考项，整理当前故事的下一阶段规划。规划可以呈现为导演手记与任务看板的结合体：既能看清篇章方向、人物动机和世界变化，也能留下足够的即兴余地，让后续互动自然生长。
 
 核心原则：
 1. 以篇章阶段、任务目标、触发节点、NPC自主行动和世界变化为主，让剧情可推进也可变动。
-2. 尊重已经发生的剧情事实、角色关系与人设，不推翻既有事件，不替 {{user}} 强行决定唯一行动。
+2. 尊重已经发生的剧情事实、角色关系与人设，延续既有事件，并保留 {{user}} 的行动选择。
 3. 任务要可选择、可延后、可因 {{user}} 的行动改变结果，保留即兴空间。
 4. NPC拥有独立目标、情绪和下一步行动，即使 {{user}} 暂时不干预，世界也会自然流动。
 5. 任务、剧情节点、角色动向、世界回声应各有侧重：任务强调可选择目标；节点强调触发与后果；角色动向强调人物自主行动；世界回声强调环境、势力、传闻或日程变化。
-6. 默认给出 3-5 个任务、3-5 个剧情节点、2-4 个角色动向、2-4 个世界回声；若当前信息不足，可以少量输出但不要强行灌水。
-7. 输出必须是一个JSON对象，不要Markdown，不要代码块，不要解释文本。
+6. 默认给出 3-5 个任务、3-5 个剧情节点、2-4 个角色动向、2-4 个世界回声；若当前信息不足，可按已有素材保持精炼。
+7. 输出为纯 JSON 对象，直接以 { 开始并以 } 结束。
 8. 所有数组字段都可以为空数组，但字段名必须完整保留。
-9. 每个可写入输入框的项目都要给出 inject_prompt。inject_prompt 不要写成 {{user}} 对 {{char}} 的一句对白，也不要写成孤立碎碎念；应采用“第三人称叙事 + {{user}} 第一人称视角”的混合文本，包含行动、观察、心理和可供角色回应的情境，同时避免暴露插件或导演系统。`;
+9. 每个可写入输入框的项目都要给出 inject_prompt。inject_prompt 采用“第三人称叙事 + {{user}} 第一人称视角”的混合文本，包含行动、观察、心理和可供角色回应的情境，同时避免暴露插件或导演系统。`;
 
 const JSON_SCHEMA_TEXT = `固定输出格式：
 {
@@ -74,7 +74,7 @@ const JSON_SCHEMA_TEXT = `固定输出格式：
       "deadline": "无/未来几轮/今夜/3天内/本周",
       "trigger": "触发或推进条件",
       "reward": "剧情收益、关系变化或线索",
-      "inject_prompt": "可直接写入输入框的推进文本：第三人称叙事 + {{user}} 第一人称视角，不要只写一句对白"
+      "inject_prompt": "可直接写入输入框的推进文本：以 {{user}} 的第一人称视角描述行动、观察、心理和下一步安排，让场景自然推进"
     }
   ],
   "story_nodes": [
@@ -84,7 +84,7 @@ const JSON_SCHEMA_TEXT = `固定输出格式：
       "trigger": "触发条件：地点/时间/对话/任务完成/{{user}} 无行动时",
       "foreshadowing": "伏笔或前置信号",
       "event": "会发生什么",
-      "consequences": "可能后果，不要锁死唯一结果",
+      "consequences": "可能后果，保留多种走向与互动余地",
       "priority": "high/medium/low",
       "inject_prompt": "可直接写入输入框的推进文本：让场景、行动、感受与可回应的变化同时出现"
     }
@@ -128,6 +128,7 @@ const DEFAULT_SETTINGS = Object.freeze({
   floatPosition: { x: null, y: null },
   theme: 'light',
   systemPrompt: DEFAULT_SYSTEM_PROMPT,
+  outputFormat: JSON_SCHEMA_TEXT,
   autoRefresh: false,
   autoRefreshEvery: 10,
   templates: [
@@ -224,7 +225,16 @@ function migrateSettings(s) {
   s.enabledWorldBooksByChat ||= {};
   s.selectedPresetItems ||= {};
   s.selectedWorldBookItemsByChat ||= {};
+  if (typeof s.systemPrompt === 'string') s.systemPrompt = s.systemPrompt.replace(/\u73a9\u5bb6/g, '{{user}}');
+  if (typeof s.outputFormat === 'string') s.outputFormat = s.outputFormat.replace(/\u73a9\u5bb6/g, '{{user}}');
+  if (!s.outputFormat) s.outputFormat = JSON_SCHEMA_TEXT;
+  if (typeof s.systemPrompt === 'string' && (s.systemPrompt.includes('规划应像导演手记与任务看板，而不是精确到小时的日程表') || s.systemPrompt.includes('inject_prompt \u4e0d\u8981写成'))) s.systemPrompt = DEFAULT_SYSTEM_PROMPT;
+  if (typeof s.outputFormat === 'string' && (s.outputFormat.includes('\u4e0d\u8981只写一句对白') || s.outputFormat.includes('\u4e0d\u8981锁死唯一结果'))) s.outputFormat = JSON_SCHEMA_TEXT;
   if (s.lastLog) delete s.lastLog.request;
+}
+
+function getOutputFormatText() {
+  return settings?.outputFormat || JSON_SCHEMA_TEXT;
 }
 
 function saveSettings() {
@@ -744,8 +754,8 @@ async function buildPrompt() {
   const extra = await buildExtraContextText();
   if (extra) pieces.push(`【参考项】\n${extra}\n`);
   if (store.plan) pieces.push(`【上一次审片状态】\n${JSON.stringify(store.plan, null, 2)}\n`);
-  pieces.push(JSON_SCHEMA_TEXT);
-  pieces.push('请只输出JSON对象。所有百分比数值范围为0-100。任务、剧情节点、NPC动态和世界变化都要贴合当前故事，保留 {{user}} 的选择自由。');
+  pieces.push(getOutputFormatText());
+  pieces.push('请输出纯 JSON 对象。所有百分比数值范围为0-100。任务、剧情节点、NPC动态和世界变化都要贴合当前故事，并保留 {{user}} 的选择自由。');
   return pieces.join('\n\n');
 }
 
@@ -1043,7 +1053,7 @@ function renderModal() {
     ['tasksnodes', '任务节点'],
     ['castworld', '角色世界'],
     ['context', '扩展'],
-    ['settings', '设置'],
+    ['settings', '幕后'],
   ];
   const wasOpen = modal.classList.contains('open');
   modal.className = `sd-theme-${settings.theme === 'dark' ? 'dark' : 'light'}${wasOpen ? ' open' : ''}`;
@@ -1063,14 +1073,10 @@ function renderModal() {
       </nav>
       <main class="sd-body">${renderActiveTab()}</main>
     </section>`;
-  if (!modal.dataset.isolated) {
-    modal.dataset.isolated = '1';
-    ['pointerdown', 'mousedown', 'touchstart', 'click'].forEach((type) => {
-      modal.addEventListener(type, (event) => {
-        if (event.target.closest('.sd-window')) event.stopPropagation();
-      }, true);
-    });
-  }
+  const windowEl = modal.querySelector('.sd-window');
+  ['pointerdown', 'mousedown', 'touchstart', 'click'].forEach((type) => {
+    windowEl?.addEventListener(type, (event) => event.stopPropagation());
+  });
   modal.querySelector('.sd-backdrop')?.addEventListener('click', closeModal);
   modal.querySelector('.sd-close')?.addEventListener('click', closeModal);
   modal.querySelector('.sd-plug-shortcut')?.addEventListener('click', () => { activeTab = 'plug'; renderModal(); });
@@ -1106,7 +1112,7 @@ function renderActiveTab() {
 function renderDashboardTab() {
   const p = currentPlan();
   if (!p) {
-    return `<section class="sd-card sd-plan-card"><h3>剧情规划</h3><div class="sd-empty">还没有审片结果。刷新后这里会显示故事状态、导演手记和可写入的推进文本。</div><div class="sd-button-row sd-center"><button class="sd-btn sd-primary sd-generate-main">刷新剧情</button>${busy ? '<button class="sd-btn sd-stop">取消</button>' : ''}</div></section>${renderPromptReviewSection()}`;
+    return `<section class="sd-card sd-plan-card"><h3>剧情规划</h3><div class="sd-empty">还没有审片结果。刷新后这里会显示故事状态、导演手记和可写入的推进文本。</div><div class="sd-button-row sd-center"><button class="sd-btn sd-primary sd-generate-main">刷新剧情</button>${busy ? '<button class="sd-btn sd-stop">取消</button>' : ''}</div></section>`;
   }
   const st = p.story_status || {};
   return `
@@ -1131,12 +1137,7 @@ function renderDashboardTab() {
       ${countCard('世界', p.world_updates?.length || 0, 'castworld')}
     </div>
     <section class="sd-card"><h3>导演手记</h3><p>${htmlEscape(p.director_comment || '暂无')}</p><p class="sd-muted">${htmlEscape(p.next_refresh_hint || '')}</p></section>
-    ${renderPromptReviewSection()}
     ${renderHistorySection()}`;
-}
-
-function renderPromptReviewSection() {
-  return `<details class="sd-card sd-prompt-review"><summary><h3>幕后提示词审稿</h3><span class="sd-muted">系统提示词与输出格式</span></summary><h4>系统提示词</h4><pre>${htmlEscape(settings.systemPrompt || DEFAULT_SYSTEM_PROMPT)}</pre><h4>输出格式</h4><pre>${htmlEscape(JSON_SCHEMA_TEXT)}</pre></details>`;
 }
 
 function metric(label, value, variant = '') {
@@ -1320,13 +1321,16 @@ function renderDirectorSettingsTab() {
     <section class="sd-card">
       <h3>刷新</h3>
       <label class="checkbox_label"><input type="checkbox" class="sd-auto-refresh" ${settings.autoRefresh ? 'checked' : ''}> 自动刷新剧情</label>
-      <label>每多少楼层刷新</label>
-      <input class="text_pole sd-auto-every" type="number" min="2" max="50" value="${htmlEscape(settings.autoRefreshEvery || 10)}">
+      <div class="sd-inline-field sd-auto-row"><label>每多少楼层刷新</label><input class="text_pole sd-auto-every" type="number" min="2" max="50" value="${htmlEscape(settings.autoRefreshEvery || 10)}"></div>
     </section>
     <section class="sd-card">
-      <h3>系统提示词</h3>
-      <textarea class="text_pole sd-textarea sd-system-prompt" spellcheck="false">${htmlEscape(settings.systemPrompt || DEFAULT_SYSTEM_PROMPT)}</textarea>
-      <div class="sd-button-row"><button class="sd-btn sd-save-director-settings">保存设置</button><button class="sd-btn sd-reset-system">恢复默认</button></div>
+      <h3>幕后提示词</h3>
+      <p class="sd-muted">这里会影响生成审片、任务节点、角色世界和写入文本的风格。</p>
+      <label>系统提示词</label>
+      <textarea class="text_pole sd-textarea sd-system-prompt sd-prompt-editor" spellcheck="false">${htmlEscape(settings.systemPrompt || DEFAULT_SYSTEM_PROMPT)}</textarea>
+      <label>输出格式</label>
+      <textarea class="text_pole sd-textarea sd-output-format sd-prompt-editor" spellcheck="false">${htmlEscape(getOutputFormatText())}</textarea>
+      <div class="sd-button-row"><button class="sd-btn sd-primary sd-save-director-settings">保存幕后</button><button class="sd-btn sd-reset-behind">恢复默认</button></div>
     </section>`;
 }
 
@@ -1471,11 +1475,13 @@ function bindActiveTabEvents(root) {
     settings.autoRefresh = !!root.querySelector('.sd-auto-refresh')?.checked;
     settings.autoRefreshEvery = Math.max(2, Math.min(50, Number(root.querySelector('.sd-auto-every')?.value || 10)));
     settings.systemPrompt = root.querySelector('.sd-system-prompt')?.value || DEFAULT_SYSTEM_PROMPT;
+    settings.outputFormat = root.querySelector('.sd-output-format')?.value || JSON_SCHEMA_TEXT;
     saveSettings();
-    toast('设置已保存。', 'success');
+    toast('幕后已保存。', 'success');
   });
-  root.querySelector('.sd-reset-system')?.addEventListener('click', () => {
+  root.querySelector('.sd-reset-behind')?.addEventListener('click', () => {
     settings.systemPrompt = DEFAULT_SYSTEM_PROMPT;
+    settings.outputFormat = JSON_SCHEMA_TEXT;
     saveSettings();
     renderModal();
   });
