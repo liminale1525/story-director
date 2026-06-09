@@ -1814,3 +1814,160 @@
     max-height: calc(100vh - 28px) !important;
   }
 }
+
+/* v0.4.7 focused refinements */
+#story-director-modal .sd-template-io-row {
+  display: grid;
+  grid-template-columns: auto minmax(160px, 1fr) minmax(120px, 160px);
+  gap: 8px;
+  align-items: center;
+  margin-top: 10px;
+}
+
+#story-director-modal .sd-template-io-row .sd-btn,
+#story-director-modal .sd-template-io-row .sd-file-label {
+  width: 100%;
+  min-width: 0;
+}
+
+#story-director-modal .sd-template-select-all {
+  margin: 0 !important;
+  white-space: nowrap;
+}
+
+#story-director-modal .sd-template-card {
+  display: grid !important;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  align-items: start !important;
+}
+
+#story-director-modal .sd-template-pick {
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  margin: 3px 0 0 !important;
+}
+
+#story-director-modal .sd-template-main h4 {
+  margin-bottom: 4px !important;
+}
+
+#story-director-modal .sd-mini-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#story-director-modal .sd-template-actions {
+  display: flex !important;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 6px;
+}
+
+#story-director-modal .sd-template-actions .sd-icon-btn {
+  flex: 0 0 34px;
+  width: 34px;
+  height: 34px;
+  font-size: 15px;
+}
+
+#story-director-modal .sd-template-actions .sd-load-template {
+  min-width: 76px;
+}
+
+#story-director-modal .sd-api-profile-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 44px;
+  gap: 8px;
+  align-items: center;
+  margin: 0 0 10px;
+}
+
+#story-director-modal .sd-api-profile-actions .sd-load-api-profile {
+  width: 100%;
+}
+
+#story-director-modal .sd-api-profile-actions .sd-delete-api-profile {
+  width: 44px;
+  height: 36px;
+  font-size: 16px;
+}
+
+#story-director-modal .sd-refresh-row {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+  margin: 8px 0 6px;
+}
+
+#story-director-modal .sd-refresh-row .checkbox_label {
+  margin: 0 !important;
+}
+
+#story-director-modal .sd-floor-refresh {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 8px;
+  margin: 0 !important;
+  white-space: nowrap;
+}
+
+#story-director-modal .sd-floor-refresh input {
+  width: 72px !important;
+  margin: 0 !important;
+  text-align: center;
+}
+
+#story-director-modal .sd-floor-status {
+  margin: 6px 0 0 !important;
+}
+
+#story-director-modal .sd-inline-setting {
+  display: grid !important;
+  grid-template-columns: auto auto;
+  justify-content: start;
+  align-items: center;
+  column-gap: 18px;
+  row-gap: 8px;
+  margin: 8px 15px 10px !important;
+}
+
+#story-director-modal .sd-inline-setting .checkbox_label {
+  margin: 0 !important;
+}
+
+#story-director-modal .sd-depth-field {
+  margin: 0 !important;
+}
+
+@media (max-width: 560px) {
+  #story-director-modal .sd-template-io-row {
+    grid-template-columns: 1fr;
+  }
+
+  #story-director-modal .sd-template-card {
+    grid-template-columns: 30px minmax(0, 1fr) !important;
+  }
+
+  #story-director-modal .sd-template-actions {
+    grid-column: 1 / -1;
+    width: 100%;
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) 44px 44px !important;
+    margin-top: 8px !important;
+  }
+
+  #story-director-modal .sd-template-actions .sd-btn,
+  #story-director-modal .sd-template-actions .sd-icon-btn {
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  #story-director-modal .sd-refresh-row,
+  #story-director-modal .sd-inline-setting {
+    grid-template-columns: 1fr;
+    align-items: start;
+  }
+}
