@@ -15,7 +15,7 @@ const DEFAULT_BLUEPRINT = `【世界观】
 例如：慢热恋爱、悬疑调查、群像成长、轻喜剧、黑暗奇幻
 
 【长期目标】
-玩家和主要角色最终想完成什么？
+用户和主要角色最终想完成什么？
 
 【主要角色与关系】
 - <user>：
@@ -33,16 +33,16 @@ const DEFAULT_BLUEPRINT = `【世界观】
 
 const DEFAULT_SYSTEM_PROMPT = `你是一位顶尖剧作家导演，长期为沉浸式角色扮演故事设计暗线、节奏、冲突、人物动机与可选择的推进路径。
 
-你的任务是根据当前对话、角色设定、玩家写入的剧本方案与勾选的参考项，整理当前故事的下一阶段规划。规划应像导演手记与任务看板，而不是精确到小时的日程表。
+你的任务是根据当前对话、角色设定、用户写入的剧本方案与勾选的参考项，整理当前故事的下一阶段规划。规划应像导演手记与任务看板，而不是精确到小时的日程表。
 
 核心原则：
 1. 以篇章阶段、任务目标、触发节点、NPC自主行动和世界变化为主，让剧情可推进也可变动。
-2. 尊重已经发生的剧情事实、角色关系与人设，不推翻既有事件，不替玩家强行决定唯一行动。
-3. 任务要可选择、可延后、可因玩家行动改变结果，保留即兴空间。
-4. NPC拥有独立目标、情绪和下一步行动，即使玩家暂时不干预，世界也会自然流动。
+2. 尊重已经发生的剧情事实、角色关系与人设，不推翻既有事件，不替用户强行决定唯一行动。
+3. 任务要可选择、可延后、可因用户行动改变结果，保留即兴空间。
+4. NPC拥有独立目标、情绪和下一步行动，即使用户暂时不干预，世界也会自然流动。
 5. 输出必须是一个JSON对象，不要Markdown，不要代码块，不要解释文本。
 6. 所有数组字段都可以为空数组，但字段名必须完整保留。
-7. 每个可写入输入框的项目都要给出 inject_prompt。inject_prompt 使用玩家可直接发送给角色的口吻，避免暴露插件或导演系统。`;
+7. 每个可写入输入框的项目都要给出 inject_prompt。inject_prompt 使用用户可直接发送给角色的口吻，避免暴露插件或导演系统。`;
 
 const JSON_SCHEMA_TEXT = `固定输出格式：
 {
@@ -65,26 +65,26 @@ const JSON_SCHEMA_TEXT = `固定输出格式：
       "id": "q1",
       "type": "main/side/hidden/relationship/world",
       "title": "任务标题",
-      "objective": "玩家可选择追求的目标",
+      "objective": "用户可选择追求的目标",
       "description": "任务说明，写明为何此刻适合出现",
       "priority": "high/medium/low",
       "status": "open/optional/urgent/dormant",
       "deadline": "无/未来几轮/今夜/3天内/本周",
       "trigger": "触发或推进条件",
       "reward": "剧情收益、关系变化或线索",
-      "inject_prompt": "玩家可直接发送到输入框的推进文本"
+      "inject_prompt": "用户可直接发送到输入框的推进文本"
     }
   ],
   "story_nodes": [
     {
       "id": "n1",
       "title": "剧情节点标题",
-      "trigger": "触发条件：地点/时间/对话/任务完成/玩家无行动时",
+      "trigger": "触发条件：地点/时间/对话/任务完成/用户无行动时",
       "foreshadowing": "伏笔或前置信号",
       "event": "会发生什么",
       "consequences": "可能后果，不要锁死唯一结果",
       "priority": "high/medium/low",
-      "inject_prompt": "玩家可直接发送到输入框的推进文本"
+      "inject_prompt": "用户可直接发送到输入框的推进文本"
     }
   ],
   "npc_updates": [
@@ -97,7 +97,7 @@ const JSON_SCHEMA_TEXT = `固定输出格式：
       "next_action": "NPC接下来会做什么",
       "hidden_agenda": "隐藏动机；若无则写无",
       "relationship_to_user": "与<user>关系变化",
-      "inject_prompt": "玩家可直接发送到输入框的互动文本"
+      "inject_prompt": "用户可直接发送到输入框的互动文本"
     }
   ],
   "world_updates": [
@@ -105,9 +105,9 @@ const JSON_SCHEMA_TEXT = `固定输出格式：
       "type": "news/weather/faction/rumor/environment/calendar/other",
       "title": "世界变化标题",
       "content": "世界变化内容",
-      "impact": "对玩家、NPC或主线的影响",
+      "impact": "对用户、NPC或主线的影响",
       "timing": "现在/今晚/未来几轮/未来3天/本周",
-      "inject_prompt": "玩家可直接发送到输入框的推进文本"
+      "inject_prompt": "用户可直接发送到输入框的推进文本"
     }
   ],
   "director_comment": "导演评语：分析节奏、冲突、情感线和下一步建议，80-160字",
@@ -141,7 +141,8 @@ const DEFAULT_SETTINGS = Object.freeze({
     contextDepth: 5,
     includeCharDesc: true,
     includeUserDesc: false,
-    tagMode: 'remove', // remove | extract
+    removeTags: true,
+    extractTags: false,
     tagNames: '',
   },
   selectedPresetItems: {},
@@ -151,7 +152,6 @@ const DEFAULT_SETTINGS = Object.freeze({
     status: 'none',
     time: '',
     duration: '',
-    request: '',
     response: '',
     error: '',
   },
@@ -205,6 +205,13 @@ function migrateSettings(s) {
   }
   delete s.maxContextMessages;
   if (s.contextOptions) {
+    if (typeof s.contextOptions.tagMode !== 'undefined') {
+      s.contextOptions.extractTags = s.contextOptions.tagMode === 'extract';
+      s.contextOptions.removeTags = s.contextOptions.tagMode !== 'extract';
+      delete s.contextOptions.tagMode;
+    }
+    if (typeof s.contextOptions.removeTags === 'undefined') s.contextOptions.removeTags = true;
+    if (typeof s.contextOptions.extractTags === 'undefined') s.contextOptions.extractTags = false;
     delete s.contextOptions.manualContext;
     delete s.contextOptions.presetNames;
     delete s.contextOptions.worldBookNames;
@@ -294,25 +301,30 @@ function parseTagNames() {
 }
 
 function cleanContextText(text) {
-  let value = String(text || '');
-  value = value.replace(/<!--[\s\S]*?-->/g, '');
+  let value = String(text || '').replace(/<!--[\s\S]*?-->/g, '');
   const tags = parseTagNames();
-  if (settings.contextOptions.tagMode === 'extract') {
-    const extracted = [];
-    for (const tag of tags) {
-      const reg = new RegExp(`<${escapeRegExp(tag)}\\b[^>]*>([\\s\\S]*?)<\\/${escapeRegExp(tag)}>`, 'gi');
-      let match;
-      while ((match = reg.exec(value)) !== null) extracted.push(match[1].trim());
-    }
+  const extracted = [];
+
+  for (const tag of tags) {
+    const reg = new RegExp(`<${escapeRegExp(tag)}\\b[^>]*>([\\s\\S]*?)<\\/${escapeRegExp(tag)}>`, 'gi');
+    let match;
+    while ((match = reg.exec(value)) !== null) extracted.push(match[1].trim());
+  }
+
+  if (settings.contextOptions.extractTags && !settings.contextOptions.removeTags) {
     value = extracted.join('\n\n');
   } else {
-    for (const tag of tags) {
-      const reg = new RegExp(`<${escapeRegExp(tag)}\\b[^>]*>[\\s\\S]*?<\\/${escapeRegExp(tag)}>`, 'gi');
-      value = value.replace(reg, '');
+    if (settings.contextOptions.removeTags) {
+      for (const tag of tags) {
+        const reg = new RegExp(`<${escapeRegExp(tag)}\\b[^>]*>[\\s\\S]*?<\\/${escapeRegExp(tag)}>`, 'gi');
+        value = value.replace(reg, '');
+      }
     }
     value = value.replace(/<script[\s\S]*?<\/script>/gi, '').replace(/<style[\s\S]*?<\/style>/gi, '');
-    value = value.replace(/<[^>]+>/g, '');
+    if (settings.contextOptions.removeTags) value = value.replace(/<[^>]+>/g, '');
+    if (settings.contextOptions.extractTags && extracted.length) value = `${value.trim()}\n\n${extracted.join('\n\n')}`;
   }
+
   return value.replace(/\n{3,}/g, '\n\n').trim();
 }
 
@@ -364,37 +376,111 @@ function uniqueClean(list) {
   return [...new Set((list || []).map((x) => String(x || '').trim()).filter(Boolean))];
 }
 
-function detectCurrentPresetNames() {
-  const context = ctx();
-  const candidates = [];
-  try {
-    const helperCurrent = globalThis.TavernHelper?.getCurrentPreset?.();
-    candidates.push(...parseAnyString(helperCurrent?.name || helperCurrent));
-  } catch (_) {}
-  const paths = [
-    globalThis.power_user?.preset_settings,
-    globalThis.power_user?.instruct?.preset,
-    globalThis.preset_settings,
-    globalThis.oai_settings?.preset_settings,
-    globalThis.textgenerationwebui_settings?.preset,
-    globalThis.novelai_settings?.preset,
-    context.power_user?.preset_settings,
-    context.settings?.preset_settings,
-    context.preset_settings,
+function normalizePresetEntries(data, source = '') {
+  const entries = [];
+  const seen = new Set();
+  const push = (title, content, meta = {}) => {
+    const text = String(content || '').trim();
+    if (!text) return;
+    const key = `${title}::${text.slice(0, 80)}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    entries.push({
+      uid: meta.uid ?? meta.id ?? `${source}-${entries.length + 1}`,
+      name: title || meta.name || `条目 ${entries.length + 1}`,
+      role: meta.role || meta.identifier || '',
+      content: text,
+      enabled: meta.enabled !== false && meta.disabled !== true,
+    });
+  };
+  const visitPrompt = (item, idx = 0) => {
+    if (!item) return;
+    if (typeof item === 'string') return push(`提示词 ${idx + 1}`, item, { uid: idx });
+    if (Array.isArray(item)) return item.forEach(visitPrompt);
+    if (typeof item !== 'object') return;
+    const title = item.name || item.identifier || item.title || item.role || `提示词 ${idx + 1}`;
+    push(title, item.content ?? item.message ?? item.prompt ?? item.text ?? item.value, { ...item, uid: item.identifier ?? item.id ?? item.uid ?? idx });
+  };
+
+  if (Array.isArray(data)) data.forEach(visitPrompt);
+  if (Array.isArray(data?.prompts)) data.prompts.forEach(visitPrompt);
+  if (data?.prompts && typeof data.prompts === 'object' && !Array.isArray(data.prompts)) Object.values(data.prompts).forEach(visitPrompt);
+
+  const fields = [
+    ['story_string', '故事模板'], ['system_prompt', '系统提示词'], ['main_prompt', '主提示词'], ['nsfw_prompt', '附加提示词'],
+    ['jailbreak_prompt', '越狱提示词'], ['impersonation_prompt', '代写提示词'], ['new_chat_prompt', '新聊天提示词'],
+    ['new_group_chat_prompt', '新群聊提示词'], ['new_example_chat_prompt', '示例聊天提示词'], ['continue_nudge_prompt', '继续提示词'],
+    ['bias_preset_selected', '偏置提示词'], ['prompt', '提示词'], ['content', '内容'], ['input_sequence', '用户序列'],
+    ['output_sequence', '角色序列'], ['system_sequence', '系统序列'], ['last_output_sequence', '末尾序列'],
+    ['prefix', '前缀'], ['suffix', '后缀'], ['separator', '分隔符'],
   ];
-  for (const p of paths) candidates.push(...parseAnyString(p));
-  return uniqueClean(candidates);
+  for (const [key, label] of fields) {
+    if (typeof data?.[key] === 'string') push(label, data[key], { uid: key });
+  }
+  return entries;
+}
+
+function readPresetManager(apiId, label) {
+  const context = ctx();
+  try {
+    if (typeof context.getPresetManager !== 'function') return null;
+    const manager = apiId ? context.getPresetManager(apiId) : context.getPresetManager();
+    if (!manager) return null;
+    const name = manager.getSelectedPresetName?.() || manager.getSelectedPreset?.() || '';
+    let data = null;
+    try { data = manager.getPresetSettings?.(name); } catch (_) {}
+    if (!data && name) {
+      try { data = manager.getCompletionPresetByName?.(name); } catch (_) {}
+    }
+    const entries = normalizePresetEntries(data, `${label}-${name}`);
+    if (!name && !entries.length) return null;
+    return { key: `${label}：${name || '当前'}`, name: name || '当前', label, entries };
+  } catch (error) {
+    console.warn(`[${MODULE_NAME}] preset manager read failed`, label, error);
+    return null;
+  }
+}
+
+function detectCurrentPresetGroups() {
+  const groups = [];
+  const seen = new Set();
+  const add = (group) => {
+    if (!group || !group.entries?.length) return;
+    const key = group.key;
+    if (seen.has(key)) return;
+    seen.add(key);
+    groups.push(group);
+  };
+
+  add(readPresetManager('', '当前预设'));
+  add(readPresetManager('openai', 'Chat Completion预设'));
+  add(readPresetManager('textgenerationwebui', 'Text Completion预设'));
+  add(readPresetManager('context', '上下文模板'));
+  add(readPresetManager('instruct', '指令模板'));
+  add(readPresetManager('sysprompt', '系统提示词'));
+  add(readPresetManager('reasoning', '推理模板'));
+
+  const fallbacks = [
+    ['OpenAI设置', globalThis.oai_settings],
+    ['文本补全设置', globalThis.textgenerationwebui_settings],
+    ['上下文设置', globalThis.power_user?.context],
+    ['指令设置', globalThis.power_user?.instruct],
+    ['系统提示词', globalThis.power_user?.sysprompt],
+  ];
+  for (const [label, data] of fallbacks) {
+    const entries = normalizePresetEntries(data, label);
+    add({ key: label, name: label, label, entries });
+  }
+
+  return groups;
+}
+
+function detectCurrentPresetNames() {
+  return detectCurrentPresetGroups().map((x) => x.key);
 }
 
 function getPresetEntries(name) {
-  try {
-    const preset = globalThis.TavernHelper?.getPreset?.(name);
-    if (preset && Array.isArray(preset.prompts)) return preset.prompts;
-    if (preset && Array.isArray(preset)) return preset;
-  } catch (error) {
-    console.warn(`[${MODULE_NAME}] get preset failed`, name, error);
-  }
-  return [];
+  return detectCurrentPresetGroups().find((x) => x.key === name)?.entries || [];
 }
 
 async function getWorldBookEntries(name) {
@@ -429,10 +515,13 @@ async function getWorldBookEntries(name) {
 }
 
 function normalizeWorldBookEntries(wb, name = '') {
-  if (Array.isArray(wb)) return wb;
-  if (wb?.entries) return Object.values(wb.entries);
-  if (name && wb?.[name]?.entries) return Object.values(wb[name].entries);
-  if (wb && typeof wb === 'object') return Object.values(wb).filter((x) => x && typeof x === 'object');
+  const attachWorld = (items) => (items || [])
+    .filter((x) => x && typeof x === 'object' && (x.content || x.text || x.key || x.comment || x.uid !== undefined))
+    .map((x) => ({ world: x.world || name, ...x }));
+  if (Array.isArray(wb)) return attachWorld(wb);
+  if (wb?.entries) return attachWorld(Object.values(wb.entries));
+  if (name && wb?.[name]?.entries) return attachWorld(Object.values(wb[name].entries));
+  if (wb && typeof wb === 'object') return attachWorld(Object.values(wb));
   return [];
 }
 
@@ -451,38 +540,71 @@ async function listWorldBooks() {
       if (Array.isArray(data)) names.push(...parseAnyString(data));
       if (Array.isArray(data?.world_names)) names.push(...parseAnyString(data.world_names));
       if (Array.isArray(data?.worldNames)) names.push(...parseAnyString(data.worldNames));
-      if (data && typeof data === 'object' && !Array.isArray(data)) names.push(...Object.keys(data));
+      if (data && typeof data === 'object' && !Array.isArray(data)) {
+        for (const [key, value] of Object.entries(data)) {
+          if (Array.isArray(value)) continue;
+          if (value && typeof value === 'object' && value.entries) names.push(key);
+        }
+      }
     }
   } catch (_) {}
   names.push(...parseAnyString(globalThis.world_names));
   names.push(...parseAnyString(globalThis.world_info_names));
-  return uniqueClean(names).filter((x) => !['world_names', 'worldNames', 'settings'].includes(x));
+  return uniqueClean(names).filter((x) => !['world_names', 'worldNames', 'settings', 'globalSelect', 'charLore'].includes(x));
+}
+
+function detectCharacterKeys(ch, context) {
+  const keys = [];
+  keys.push(ch?.avatar, ch?.data?.avatar, ch?.name, ch?.data?.name, context.name2);
+  try {
+    if (typeof globalThis.getCharaFilename === 'function' && context.characterId !== undefined) keys.push(globalThis.getCharaFilename(context.characterId));
+  } catch (_) {}
+  return uniqueClean(keys).flatMap((x) => uniqueClean([x, x.replace(/\.[^.]+$/, '')]));
 }
 
 function detectBoundWorldBookNames() {
   const context = ctx();
   const ch = context.characters?.[context.characterId] || {};
+  const power = globalThis.power_user || context.power_user || {};
   const candidates = [];
-  candidates.push(...parseAnyString(context.world_names));
-  candidates.push(...parseAnyString(context.worldNames));
-  candidates.push(...parseAnyString(globalThis.world_names));
-  candidates.push(...parseAnyString(globalThis.selected_world_info));
+
+  candidates.push(...parseAnyString(context.chatMetadata?.world_info));
+  candidates.push(...parseAnyString(globalThis.chat_metadata?.world_info));
+  candidates.push(...parseAnyString(power.persona_description_lorebook));
   candidates.push(...parseAnyString(ch.world));
   candidates.push(...parseAnyString(ch.data?.world));
   candidates.push(...parseAnyString(ch.data?.extensions?.world));
   candidates.push(...parseAnyString(ch.data?.extensions?.world_info));
   candidates.push(...parseAnyString(ch.data?.character_book?.name));
+
+  if (context.groupId && Array.isArray(context.groups)) {
+    const group = context.groups.find((g) => g.id === context.groupId);
+    candidates.push(...parseAnyString(group?.world_info));
+    candidates.push(...parseAnyString(group?.world));
+    candidates.push(...parseAnyString(group?.chat_metadata?.world_info));
+  }
+
+  const charKeys = detectCharacterKeys(ch, context);
+  const charLore = globalThis.world_info?.charLore || context.world_info?.charLore || [];
+  for (const record of Array.isArray(charLore) ? charLore : []) {
+    const recordName = String(record?.name || '');
+    if (charKeys.some((key) => key && (recordName === key || recordName.replace(/\.[^.]+$/, '') === key))) {
+      candidates.push(...parseAnyString(record.extraBooks));
+    }
+  }
+
   return uniqueClean(candidates);
 }
 
 async function refreshContextSources(showToast = true) {
-  const presetNames = detectCurrentPresetNames();
+  const presetGroups = detectCurrentPresetGroups();
+  const presetNames = presetGroups.map((x) => x.key);
   const boundNames = detectBoundWorldBookNames();
   const allWorldNames = await listWorldBooks();
   const otherNames = allWorldNames.filter((n) => !boundNames.includes(n));
   const cache = { presets: {}, boundWorldBooks: {}, otherWorldBooks: {}, presetNames, boundWorldBookNames: boundNames, otherWorldBookNames: otherNames, scannedAt: new Date().toISOString() };
 
-  for (const name of presetNames) cache.presets[name] = getPresetEntries(name);
+  for (const group of presetGroups) cache.presets[group.key] = group.entries;
   for (const name of boundNames) cache.boundWorldBooks[name] = await getWorldBookEntries(name);
 
   const worldStore = getWorldSelectionStore();
@@ -554,7 +676,7 @@ async function buildExtraContextText() {
   }
   if (settings.contextOptions.includeUserDesc) {
     const desc = await resolveMacro(getPersonaDescription());
-    if (desc) output += `\n【玩家人设】\n${cleanContextText(desc)}\n`;
+    if (desc) output += `\n【用户人设】\n${cleanContextText(desc)}\n`;
   }
 
   for (const [presetName, entries] of Object.entries(contextScanCache.presets || {})) {
@@ -592,7 +714,7 @@ async function buildPrompt() {
   if (extra) pieces.push(`【参考项】\n${extra}\n`);
   if (store.plan) pieces.push(`【上一次审片状态】\n${JSON.stringify(store.plan, null, 2)}\n`);
   pieces.push(JSON_SCHEMA_TEXT);
-  pieces.push('请只输出JSON对象。所有百分比数值范围为0-100。任务、剧情节点、NPC动态和世界变化都要贴合当前故事，保留玩家选择自由。');
+  pieces.push('请只输出JSON对象。所有百分比数值范围为0-100。任务、剧情节点、NPC动态和世界变化都要贴合当前故事，保留用户选择自由。');
   return pieces.join('\n\n');
 }
 
@@ -669,7 +791,7 @@ async function generateDirectorPlan(showSuccessToast = true, silentFailure = fal
   try {
     const userPrompt = await buildPrompt();
     messages = [{ role: 'system', content: settings.systemPrompt || DEFAULT_SYSTEM_PROMPT }, { role: 'user', content: userPrompt }];
-    settings.lastLog = { status: 'loading', time: new Date().toLocaleString(), duration: '', request: JSON.stringify(messages, null, 2), response: '', error: '' };
+    settings.lastLog = { status: 'loading', time: new Date().toLocaleString(), duration: '', response: '', error: '' };
     saveSettings();
 
     const raw = settings.providerMode === 'sillytavern' ? await callSillyTavernModel(messages) : await callExternalApi(messages);
@@ -943,7 +1065,6 @@ function renderModal() {
     ['castworld', '角色世界'],
     ['context', '扩展'],
     ['settings', '设置'],
-    ['plug', '🔌'],
   ];
   const wasOpen = modal.classList.contains('open');
   modal.className = `sd-theme-${settings.theme === 'dark' ? 'dark' : 'light'}${wasOpen ? ' open' : ''}`;
@@ -956,9 +1077,9 @@ function renderModal() {
           <p>故事自成脉络&nbsp;&nbsp;命运早有伏笔</p>
         </div>
         <div class="sd-header-actions">
-          <button class="sd-plug-shortcut" title="API与日志">🔌</button>
-          <button class="sd-theme-toggle" title="切换外观">🎨</button>
-          <button class="sd-close" title="关闭">×</button>
+          <button class="sd-plug-shortcut" type="button" title="API与日志" aria-label="API与日志">🔌</button>
+          <button class="sd-theme-toggle" type="button" title="切换外观" aria-label="切换外观"><span>☀</span><span>☾</span></button>
+          <button class="sd-close" type="button" title="关闭" aria-label="关闭">×</button>
         </div>
       </header>
       <nav class="sd-tabs">
@@ -966,6 +1087,10 @@ function renderModal() {
       </nav>
       <main class="sd-body">${renderActiveTab()}</main>
     </section>`;
+  const windowEl = modal.querySelector('.sd-window');
+  ['click', 'mousedown', 'mouseup', 'pointerdown', 'pointerup', 'touchstart', 'touchend'].forEach((type) => {
+    windowEl?.addEventListener(type, (event) => event.stopPropagation());
+  });
   modal.querySelector('.sd-backdrop')?.addEventListener('click', closeModal);
   modal.querySelector('.sd-close')?.addEventListener('click', closeModal);
   modal.querySelector('.sd-plug-shortcut')?.addEventListener('click', () => { activeTab = 'plug'; renderModal(); });
@@ -1006,7 +1131,7 @@ function metric(label, value) {
 function renderDashboardTab() {
   const p = currentPlan();
   if (!p) {
-    return `<section class="sd-card sd-plan-card"><h3>剧情规划</h3><div class="sd-empty">尚未生成剧情规划</div><div class="sd-button-row sd-center"><button class="sd-btn sd-primary sd-generate-main">刷新剧情</button>${busy ? '<button class="sd-btn sd-stop">取消</button>' : ''}</div></section>`;
+    return `<section class="sd-card sd-plan-card"><h3>审片待生成</h3><div class="sd-empty">还没有当前故事的审片结果。</div><div class="sd-button-row sd-center"><button class="sd-btn sd-primary sd-generate-main">刷新剧情</button>${busy ? '<button class="sd-btn sd-stop">取消</button>' : ''}</div></section>`;
   }
   const st = p.story_status || {};
   return `
@@ -1050,18 +1175,24 @@ function formatDateTime(date) {
 
 function renderTasksNodesTab() {
   const p = currentPlan();
-  if (!p) return renderNoPlan();
+  if (!p) return renderNoPlan('tasksnodes');
   return `<section class="sd-card"><h3>任务</h3>${renderItemList(p.quests || [], 'quest')}</section><section class="sd-card"><h3>节点</h3>${renderItemList(p.story_nodes || [], 'node')}</section>`;
 }
 
 function renderCastWorldTab() {
   const p = currentPlan();
-  if (!p) return renderNoPlan();
+  if (!p) return renderNoPlan('castworld');
   return `<section class="sd-card"><h3>角色动向</h3>${renderItemList(p.npc_updates || [], 'npc')}</section><section class="sd-card"><h3>世界回声</h3>${renderItemList(p.world_updates || [], 'world')}</section>`;
 }
 
-function renderNoPlan() {
-  return `<section class="sd-card sd-plan-card"><div class="sd-empty">尚未生成剧情规划</div><div class="sd-button-row sd-center"><button class="sd-btn sd-primary sd-generate-main">刷新剧情</button>${busy ? '<button class="sd-btn sd-stop">取消</button>' : ''}</div></section>`;
+function renderNoPlan(kind = 'dashboard') {
+  const map = {
+    dashboard: ['审片待生成', '还没有当前故事的审片结果。'],
+    tasksnodes: ['任务节点待生成', '刷新后会在这里显示可推进任务和剧情触发节点。'],
+    castworld: ['角色世界待生成', '刷新后会在这里显示角色动向和世界变化。'],
+  };
+  const [title, desc] = map[kind] || map.dashboard;
+  return `<section class="sd-card sd-plan-card"><h3>${htmlEscape(title)}</h3><div class="sd-empty">${htmlEscape(desc)}</div><div class="sd-button-row sd-center"><button class="sd-btn sd-primary sd-generate-main">刷新剧情</button>${busy ? '<button class="sd-btn sd-stop">取消</button>' : ''}</div></section>`;
 }
 
 function renderItemList(items, kind) {
@@ -1118,25 +1249,42 @@ function formatDate(date) {
 function renderContextTab() {
   const opts = settings.contextOptions;
   return `
-    <section class="sd-card"><h3>扩展设定</h3><p class="sd-muted">勾选后将会作为剧情导演参考项。</p></section>
     <details class="sd-accordion" open>
-      <summary><b>基础引用</b><span>对话与设定</span></summary>
-      <label class="checkbox_label"><input type="checkbox" class="sd-opt" data-key="includeChatHistory" ${opts.includeChatHistory ? 'checked' : ''}> 引用近期对话</label>
-      <label>引用最近几条对话</label><input class="text_pole sd-context-depth" type="number" min="1" max="200" value="${htmlEscape(opts.contextDepth || 5)}">
-      <label class="checkbox_label"><input type="checkbox" class="sd-opt" data-key="includeCharDesc" ${opts.includeCharDesc ? 'checked' : ''}> 引用当前角色设定</label>
-      <label class="checkbox_label"><input type="checkbox" class="sd-opt" data-key="includeUserDesc" ${opts.includeUserDesc ? 'checked' : ''}> 引用玩家人设</label>
+      <summary><b>基础引用</b><span>勾选后将会作为剧情导演参考项</span></summary>
+      <div class="sd-option-list">
+        <label class="checkbox_label"><input type="checkbox" class="sd-opt" data-key="includeChatHistory" ${opts.includeChatHistory ? 'checked' : ''}> 引用近期对话</label>
+        <label class="sd-field-label">引用最近几条对话</label><input class="text_pole sd-context-depth" type="number" min="1" max="200" value="${htmlEscape(opts.contextDepth || 5)}">
+        <label class="checkbox_label"><input type="checkbox" class="sd-opt" data-key="includeCharDesc" ${opts.includeCharDesc ? 'checked' : ''}> 引用当前角色设定</label>
+        <label class="checkbox_label"><input type="checkbox" class="sd-opt" data-key="includeUserDesc" ${opts.includeUserDesc ? 'checked' : ''}> 引用用户人设</label>
+      </div>
     </details>
     <details class="sd-accordion">
-      <summary><b>上下文处理</b><span>标签</span></summary>
-      <label class="radio_label"><input type="radio" name="sd-tag-mode" value="remove" ${opts.tagMode !== 'extract' ? 'checked' : ''}> 屏蔽HTML和标签</label>
-      <label class="radio_label"><input type="radio" name="sd-tag-mode" value="extract" ${opts.tagMode === 'extract' ? 'checked' : ''}> 提取标签</label>
-      <input class="text_pole sd-tag-names" placeholder="多个标签用逗号分隔 如：content,thinking…" value="${htmlEscape(opts.tagNames || '')}">
+      <summary><b>上下文处理</b><span>HTML与标签</span></summary>
+      <div class="sd-option-list">
+        <div class="sd-inline-options">
+          <label class="checkbox_label"><input type="checkbox" class="sd-tag-opt" data-key="removeTags" ${opts.removeTags ? 'checked' : ''}> 屏蔽HTML和标签</label>
+          <label class="checkbox_label"><input type="checkbox" class="sd-tag-opt" data-key="extractTags" ${opts.extractTags ? 'checked' : ''}> 提取标签</label>
+        </div>
+        <input class="text_pole sd-tag-names" placeholder="多个标签用逗号分隔 如：content,thinking…" value="${htmlEscape(opts.tagNames || '')}">
+      </div>
     </details>
     <details class="sd-accordion" open>
       <summary><b>预设&世界书</b><span>${contextScanCache.scannedAt ? '已刷新' : '待刷新'}</span></summary>
-      <div class="sd-button-row"><button class="sd-btn sd-refresh-context">刷新</button></div>
+      <div class="sd-button-row sd-option-list"><button class="sd-btn sd-refresh-context">刷新</button></div>
       ${renderScannedContext()}
     </details>`;
+}
+
+function getSelectedWorldBookNamesForDisplay() {
+  const enabledStore = getEnabledWorldBookStore();
+  const names = [...(contextScanCache.boundWorldBookNames || []), ...Object.entries(enabledStore).filter(([, enabled]) => enabled).map(([name]) => name)];
+  return uniqueClean(names);
+}
+
+function renderSelectedWorldBookSummary() {
+  const names = getSelectedWorldBookNamesForDisplay();
+  if (!names.length) return '';
+  return `<div class="sd-selected-worldbooks"><b>已选择世界书</b><div>${names.map((name) => `<span class="sd-chip">${htmlEscape(name)}</span>`).join('')}</div></div>`;
 }
 
 function renderScannedContext() {
@@ -1144,9 +1292,10 @@ function renderScannedContext() {
   const boundHtml = Object.entries(contextScanCache.boundWorldBooks || {}).map(([name, items]) => renderContextGroup('world', name, items, '绑定世界书')).join('');
   const otherLoadedHtml = Object.entries(contextScanCache.otherWorldBooks || {}).map(([name, items]) => renderContextGroup('world', name, items, '其他世界书')).join('');
   const otherNames = (contextScanCache.otherWorldBookNames || []).filter((n) => !contextScanCache.otherWorldBooks?.[n]);
-  const otherNameHtml = otherNames.length ? `<details class="sd-context-group"><summary><b>其他世界书</b><span>${otherNames.length} 本</span></summary>${otherNames.map((name) => `<label class="checkbox_label sd-worldbook-name"><input type="checkbox" class="sd-toggle-wb" data-name="${htmlEscape(name)}" ${getEnabledWorldBookStore()[name] ? 'checked' : ''}> ${htmlEscape(name)}</label>`).join('')}</details>` : '';
-  if (!presetHtml && !boundHtml && !otherLoadedHtml && !otherNameHtml) return '<p class="sd-muted">未读取到预设或世界书。</p>';
-  return `<div class="sd-scanned">${presetHtml}${boundHtml}${otherLoadedHtml}${otherNameHtml}</div>`;
+  const otherNameHtml = otherNames.length ? `<details class="sd-context-group"><summary><b>其他世界书</b><span>${otherNames.length} 本</span></summary><div class="sd-option-list">${otherNames.map((name) => `<label class="checkbox_label sd-worldbook-name"><input type="checkbox" class="sd-toggle-wb" data-name="${htmlEscape(name)}" ${getEnabledWorldBookStore()[name] ? 'checked' : ''}> ${htmlEscape(name)}</label>`).join('')}</div></details>` : '';
+  const selected = renderSelectedWorldBookSummary();
+  if (!presetHtml && !boundHtml && !otherLoadedHtml && !otherNameHtml) return '<p class="sd-muted sd-option-list">未读取到预设或世界书。</p>';
+  return `<div class="sd-scanned">${selected}${presetHtml}${boundHtml}${otherLoadedHtml}${otherNameHtml}</div>`;
 }
 
 function renderContextGroup(kind, name, items, titlePrefix) {
@@ -1156,7 +1305,7 @@ function renderContextGroup(kind, name, items, titlePrefix) {
     const content = item.content || item.message || item.text || '';
     const checked = kind === 'preset' ? isPresetItemSelected(name, id) : isWorldItemSelected(name, id);
     return `<details class="sd-context-item"><summary><label><input type="checkbox" class="sd-context-check" data-kind="${kind}" data-group="${htmlEscape(name)}" data-id="${htmlEscape(String(id))}" ${checked ? 'checked' : ''}> ${htmlEscape(title)}</label></summary><pre>${htmlEscape(cleanContextText(content).slice(0, 2000))}</pre></details>`;
-  }).join('') || '<p class="sd-muted">未读取到条目。</p>';
+  }).join('') || '<p class="sd-muted sd-option-list">未读取到条目。</p>';
   return `<details class="sd-context-group" open><summary><b>${htmlEscape(titlePrefix)}：${htmlEscape(name)}</b><span>${items?.length || 0} 条</span></summary>${rows}</details>`;
 }
 
@@ -1165,7 +1314,7 @@ function renderDirectorSettingsTab() {
     <section class="sd-card">
       <h3>刷新</h3>
       <label class="checkbox_label"><input type="checkbox" class="sd-auto-refresh" ${settings.autoRefresh ? 'checked' : ''}> 自动刷新剧情</label>
-      <label>每多少条AI回复后自动刷新</label>
+      <label>每多少楼层刷新</label>
       <input class="text_pole sd-auto-every" type="number" min="2" max="50" value="${htmlEscape(settings.autoRefreshEvery || 10)}">
     </section>
     <section class="sd-card">
@@ -1189,13 +1338,11 @@ function renderPlugTab() {
       <label>API URL</label><input class="text_pole sd-api-url" placeholder="https://api.example.com/v1" value="${htmlEscape(settings.apiUrl || '')}">
       <label>API Key</label><input class="text_pole sd-api-key" type="password" placeholder="sk-..." value="${htmlEscape(settings.apiKey || '')}">
       <label>模型</label>
-      <div class="sd-inline-field"><select class="text_pole sd-model-select"><option value="">手动输入或拉取模型</option>${(settings.availableModels || []).map((m) => `<option value="${htmlEscape(m)}" ${m === settings.model ? 'selected' : ''}>${htmlEscape(m)}</option>`).join('')}</select><button class="sd-btn sd-fetch-models">拉取模型</button></div>
-      <input class="text_pole sd-model-input" placeholder="模型名称" value="${htmlEscape(settings.model || '')}">
+      <div class="sd-inline-field"><input class="text_pole sd-model-input" list="sd-model-list" placeholder="模型名称" value="${htmlEscape(settings.model || '')}"><datalist id="sd-model-list">${(settings.availableModels || []).map((m) => `<option value="${htmlEscape(m)}"></option>`).join('')}</datalist><button class="sd-btn sd-fetch-models">拉取模型</button></div>
       <label>Temperature</label><input class="text_pole sd-temperature" type="number" min="0" max="2" step="0.05" value="${htmlEscape(settings.temperature)}">
       <div class="sd-button-row"><button class="sd-btn sd-save-api">保存API</button></div>
     </section>
     <section class="sd-card"><h3>日志</h3><p><b>${htmlEscape(log.status || 'none')}</b> · ${htmlEscape(log.time || '-')} · ${htmlEscape(log.duration || '-')}</p>${log.error ? `<p class="sd-error">${htmlEscape(log.error)}</p>` : ''}</section>
-    <details class="sd-accordion"><summary><b>Request</b><span>最近一次请求</span></summary><pre>${htmlEscape(log.request || '暂无')}</pre></details>
     <details class="sd-accordion"><summary><b>Response</b><span>最近一次返回</span></summary><pre>${htmlEscape(log.response || '暂无')}</pre></details>`;
 }
 
@@ -1265,8 +1412,8 @@ function bindActiveTabEvents(root) {
     settings.contextOptions.contextDepth = Math.max(1, Math.min(200, Number(e.target.value || 5)));
     saveSettings();
   });
-  root.querySelectorAll('input[name="sd-tag-mode"]').forEach((el) => el.addEventListener('change', () => {
-    settings.contextOptions.tagMode = el.value;
+  root.querySelectorAll('.sd-tag-opt').forEach((el) => el.addEventListener('change', () => {
+    settings.contextOptions[el.dataset.key] = el.checked;
     saveSettings();
   }));
   root.querySelector('.sd-tag-names')?.addEventListener('change', (e) => {
@@ -1308,9 +1455,6 @@ function bindActiveTabEvents(root) {
     settings.apiKey = root.querySelector('.sd-api-key')?.value || '';
     saveSettings();
     fetchModels();
-  });
-  root.querySelector('.sd-model-select')?.addEventListener('change', (e) => {
-    if (e.target.value) root.querySelector('.sd-model-input').value = e.target.value;
   });
   root.querySelector('.sd-save-api')?.addEventListener('click', () => {
     settings.apiUrl = root.querySelector('.sd-api-url')?.value || '';
@@ -1389,7 +1533,7 @@ function renderInputMenuEntry() {
     entry.id = INPUT_ENTRY_ID;
     entry.className = 'list-group-item flex-container story-director-input-entry';
     entry.innerHTML = '<span class="sd-menu-glyph">剧</span><span>浮生剧编</span>';
-    entry.addEventListener('click', () => openModal('dashboard'));
+    entry.addEventListener('click', (event) => { event.preventDefault(); event.stopPropagation(); openModal('dashboard'); });
     menu.appendChild(entry);
     return;
   }
@@ -1403,7 +1547,7 @@ function renderInputMenuEntry() {
   button.type = 'button';
   button.title = '浮生剧编';
   button.textContent = '剧';
-  button.addEventListener('click', () => openModal('dashboard'));
+  button.addEventListener('click', (event) => { event.preventDefault(); event.stopPropagation(); openModal('dashboard'); });
   if (textarea && textarea.parentElement === parent) parent.insertBefore(button, textarea);
   else parent.insertBefore(button, parent.firstChild);
 }
@@ -1449,6 +1593,9 @@ function bindEvents() {
   source.on(types.CHAT_CHANGED || 'chat_changed', rerenderHandler);
   source.on(types.GROUP_UPDATED || 'group_updated', rerenderHandler);
   source.on(types.CHARACTER_SELECTED || 'character_selected', rerenderHandler);
+  source.on(types.PRESET_CHANGED || 'preset_changed', rerenderHandler);
+  source.on(types.MAIN_API_CHANGED || 'main_api_changed', rerenderHandler);
+  source.on(types.WORLDINFO_SETTINGS_UPDATED || 'worldinfo_settings_updated', rerenderHandler);
 }
 
 function init() {
