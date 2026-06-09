@@ -2,6 +2,7 @@
 
 const MODULE_NAME = 'story_director_liminale';
 const EXTENSION_NAME = '剧情导演';
+const EXTENSION_VERSION = '0.4.1';
 const SETTINGS_PANEL_ID = 'story-director-settings';
 const MODAL_ID = 'story-director-modal';
 const FLOAT_ID = 'story-director-float';
@@ -141,9 +142,7 @@ const DEFAULT_SETTINGS = Object.freeze({
     contextDepth: 5,
     includeCharDesc: true,
     includeUserDesc: false,
-    removeTags: true,
-    extractTags: false,
-    tagNames: '',
+    tagRules: [{ name: 'thinking', action: 'remove' }],
   },
   selectedPresetItems: {},
   selectedWorldBookItemsByChat: {},
@@ -152,6 +151,7 @@ const DEFAULT_SETTINGS = Object.freeze({
     status: 'none',
     time: '',
     duration: '',
+    request: '',
     response: '',
     error: '',
   },
@@ -205,17 +205,18 @@ function migrateSettings(s) {
   }
   delete s.maxContextMessages;
   if (s.contextOptions) {
-    if (typeof s.contextOptions.tagMode !== 'undefined') {
-      s.contextOptions.extractTags = s.contextOptions.tagMode === 'extract';
-      s.contextOptions.removeTags = s.contextOptions.tagMode !== 'extract';
-      delete s.contextOptions.tagMode;
+    if (!Array.isArray(s.contextOptions.tagRules)) {
+      const rawTags = String(s.contextOptions.tagNames || '').trim();
+      const names = rawTags ? rawTags.split(/[,，\s\n]+/).map((x) => x.trim().replace(/^<|>$/g, '')).filter(Boolean) : ['thinking'];
+      const action = s.contextOptions.tagMode === 'extract' ? 'extract' : 'remove';
+      s.contextOptions.tagRules = names.map((name) => ({ name, action }));
     }
-    if (typeof s.contextOptions.removeTags === 'undefined') s.contextOptions.removeTags = true;
-    if (typeof s.contextOptions.extractTags === 'undefined') s.contextOptions.extractTags = false;
     delete s.contextOptions.manualContext;
     delete s.contextOptions.presetNames;
     delete s.contextOptions.worldBookNames;
     delete s.contextOptions.removeHtmlComments;
+    delete s.contextOptions.tagMode;
+    delete s.contextOptions.tagNames;
   }
 }
 
@@ -294,37 +295,31 @@ function getPersonaDescription() {
   return power.persona_description || globalThis.name2_description || context.user?.description || '';
 }
 
-function parseTagNames() {
-  const raw = String(settings.contextOptions.tagNames || '').trim();
-  const list = raw.split(/[,，\s\n]+/).map((x) => x.trim().replace(/^<|>$/g, '')).filter(Boolean);
-  return list.length ? list : ['thinking'];
+
+
+function parseTagRules() {
+  const incoming = Array.isArray(settings.contextOptions.tagRules) ? settings.contextOptions.tagRules : [];
+  const rules = incoming.map((rule) => {
+    const name = String(rule?.name || '').trim().replace(/^<|>$/g, '');
+    const action = rule?.action === 'extract' ? 'extract' : 'remove';
+    return name ? { name, action } : null;
+  }).filter(Boolean);
+  return rules.length ? rules : [{ name: 'thinking', action: 'remove' }];
 }
 
 function cleanContextText(text) {
-  let value = String(text || '').replace(/<!--[\s\S]*?-->/g, '');
-  const tags = parseTagNames();
-  const extracted = [];
-
-  for (const tag of tags) {
-    const reg = new RegExp(`<${escapeRegExp(tag)}\\b[^>]*>([\\s\\S]*?)<\\/${escapeRegExp(tag)}>`, 'gi');
-    let match;
-    while ((match = reg.exec(value)) !== null) extracted.push(match[1].trim());
-  }
-
-  if (settings.contextOptions.extractTags && !settings.contextOptions.removeTags) {
-    value = extracted.join('\n\n');
-  } else {
-    if (settings.contextOptions.removeTags) {
-      for (const tag of tags) {
-        const reg = new RegExp(`<${escapeRegExp(tag)}\\b[^>]*>[\\s\\S]*?<\\/${escapeRegExp(tag)}>`, 'gi');
-        value = value.replace(reg, '');
-      }
+  let value = String(text || '');
+  value = value.replace(/<!--[\s\S]*?-->/g, '');
+  for (const rule of parseTagRules()) {
+    const reg = new RegExp(`<${escapeRegExp(rule.name)}\\b[^>]*>([\\s\\S]*?)<\\/${escapeRegExp(rule.name)}>`, 'gi');
+    if (rule.action === 'extract') {
+      value = value.replace(reg, (_, inner) => `\n${String(inner || '').trim()}\n`);
+    } else {
+      value = value.replace(reg, '');
     }
-    value = value.replace(/<script[\s\S]*?<\/script>/gi, '').replace(/<style[\s\S]*?<\/style>/gi, '');
-    if (settings.contextOptions.removeTags) value = value.replace(/<[^>]+>/g, '');
-    if (settings.contextOptions.extractTags && extracted.length) value = `${value.trim()}\n\n${extracted.join('\n\n')}`;
   }
-
+  value = value.replace(/<script[\s\S]*?<\/script>/gi, '').replace(/<style[\s\S]*?<\/style>/gi, '');
+  value = value.replace(/<[^>]+>/g, '');
   return value.replace(/\n{3,}/g, '\n\n').trim();
 }
 
@@ -376,118 +371,99 @@ function uniqueClean(list) {
   return [...new Set((list || []).map((x) => String(x || '').trim()).filter(Boolean))];
 }
 
-function normalizePresetEntries(data, source = '') {
-  const entries = [];
+
+function uniqueContextItems(list) {
   const seen = new Set();
-  const push = (title, content, meta = {}) => {
-    const text = String(content || '').trim();
-    if (!text) return;
-    const key = `${title}::${text.slice(0, 80)}`;
-    if (seen.has(key)) return;
-    seen.add(key);
-    entries.push({
-      uid: meta.uid ?? meta.id ?? `${source}-${entries.length + 1}`,
-      name: title || meta.name || `条目 ${entries.length + 1}`,
-      role: meta.role || meta.identifier || '',
-      content: text,
-      enabled: meta.enabled !== false && meta.disabled !== true,
-    });
-  };
-  const visitPrompt = (item, idx = 0) => {
-    if (!item) return;
-    if (typeof item === 'string') return push(`提示词 ${idx + 1}`, item, { uid: idx });
-    if (Array.isArray(item)) return item.forEach(visitPrompt);
-    if (typeof item !== 'object') return;
-    const title = item.name || item.identifier || item.title || item.role || `提示词 ${idx + 1}`;
-    push(title, item.content ?? item.message ?? item.prompt ?? item.text ?? item.value, { ...item, uid: item.identifier ?? item.id ?? item.uid ?? idx });
-  };
-
-  if (Array.isArray(data)) data.forEach(visitPrompt);
-  if (Array.isArray(data?.prompts)) data.prompts.forEach(visitPrompt);
-  if (data?.prompts && typeof data.prompts === 'object' && !Array.isArray(data.prompts)) Object.values(data.prompts).forEach(visitPrompt);
-
-  const fields = [
-    ['story_string', '故事模板'], ['system_prompt', '系统提示词'], ['main_prompt', '主提示词'], ['nsfw_prompt', '附加提示词'],
-    ['jailbreak_prompt', '越狱提示词'], ['impersonation_prompt', '代写提示词'], ['new_chat_prompt', '新聊天提示词'],
-    ['new_group_chat_prompt', '新群聊提示词'], ['new_example_chat_prompt', '示例聊天提示词'], ['continue_nudge_prompt', '继续提示词'],
-    ['bias_preset_selected', '偏置提示词'], ['prompt', '提示词'], ['content', '内容'], ['input_sequence', '用户序列'],
-    ['output_sequence', '角色序列'], ['system_sequence', '系统序列'], ['last_output_sequence', '末尾序列'],
-    ['prefix', '前缀'], ['suffix', '后缀'], ['separator', '分隔符'],
-  ];
-  for (const [key, label] of fields) {
-    if (typeof data?.[key] === 'string') push(label, data[key], { uid: key });
+  const output = [];
+  for (const item of list || []) {
+    const id = String(item.id ?? item.identifier ?? item.name ?? item.comment ?? item.content?.slice?.(0, 40) ?? JSON.stringify(item).slice(0, 40));
+    if (seen.has(id)) continue;
+    seen.add(id);
+    output.push(item);
   }
-  return entries;
+  return output;
 }
 
-function readPresetManager(apiId, label) {
-  const context = ctx();
+function getRequestHeaders() {
   try {
-    if (typeof context.getPresetManager !== 'function') return null;
-    const manager = apiId ? context.getPresetManager(apiId) : context.getPresetManager();
-    if (!manager) return null;
-    const name = manager.getSelectedPresetName?.() || manager.getSelectedPreset?.() || '';
-    let data = null;
-    try { data = manager.getPresetSettings?.(name); } catch (_) {}
-    if (!data && name) {
-      try { data = manager.getCompletionPresetByName?.(name); } catch (_) {}
-    }
-    const entries = normalizePresetEntries(data, `${label}-${name}`);
-    if (!name && !entries.length) return null;
-    return { key: `${label}：${name || '当前'}`, name: name || '当前', label, entries };
-  } catch (error) {
-    console.warn(`[${MODULE_NAME}] preset manager read failed`, label, error);
-    return null;
-  }
+    if (typeof ctx().getRequestHeaders === 'function') return ctx().getRequestHeaders();
+  } catch (_) {}
+  const token = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || globalThis.token || '';
+  const headers = { 'Content-Type': 'application/json' };
+  if (token) headers['X-CSRF-Token'] = token;
+  return headers;
 }
 
-function detectCurrentPresetGroups() {
-  const groups = [];
-  const seen = new Set();
-  const add = (group) => {
-    if (!group || !group.entries?.length) return;
-    const key = group.key;
-    if (seen.has(key)) return;
-    seen.add(key);
-    groups.push(group);
-  };
-
-  add(readPresetManager('', '当前预设'));
-  add(readPresetManager('openai', 'Chat Completion预设'));
-  add(readPresetManager('textgenerationwebui', 'Text Completion预设'));
-  add(readPresetManager('context', '上下文模板'));
-  add(readPresetManager('instruct', '指令模板'));
-  add(readPresetManager('sysprompt', '系统提示词'));
-  add(readPresetManager('reasoning', '推理模板'));
-
-  const fallbacks = [
-    ['OpenAI设置', globalThis.oai_settings],
-    ['文本补全设置', globalThis.textgenerationwebui_settings],
-    ['上下文设置', globalThis.power_user?.context],
-    ['指令设置', globalThis.power_user?.instruct],
-    ['系统提示词', globalThis.power_user?.sysprompt],
+function getPresetEntries() {
+  const context = ctx();
+  const sources = [
+    context.chatCompletionSettings?.prompts,
+    context.chatCompletionSettings?.promptManager?.prompts,
+    context.chatCompletionSettings?.prompt_manager?.prompts,
+    globalThis.chatCompletionSettings?.prompts,
+    globalThis.oai_settings?.prompts,
   ];
-  for (const [label, data] of fallbacks) {
-    const entries = normalizePresetEntries(data, label);
-    add({ key: label, name: label, label, entries });
+  try {
+    const manager = context.getPresetManager?.() || globalThis.getPresetManager?.();
+    sources.push(manager?.serviceSettings?.prompts, manager?.prompts, manager?.activePreset?.prompts);
+  } catch (_) {}
+
+  const entries = [];
+  for (const source of sources) {
+    const raw = Array.isArray(source) ? source : (source && typeof source === 'object' ? Object.values(source) : []);
+    for (const prompt of raw) {
+      const content = prompt?.content ?? prompt?.prompt ?? prompt?.message ?? prompt?.text ?? '';
+      if (!String(content || '').trim()) continue;
+      const title = prompt.name || prompt.identifier || prompt.role || prompt.marker || '未命名预设条目';
+      entries.push({
+        ...prompt,
+        id: prompt.identifier || prompt.name || prompt.id || `preset-${entries.length}`,
+        name: title,
+        content,
+        enabled: prompt.enabled !== false && prompt.disable !== true,
+      });
+    }
   }
-
-  return groups;
+  return uniqueContextItems(entries);
 }
 
-function detectCurrentPresetNames() {
-  return detectCurrentPresetGroups().map((x) => x.key);
+function getCharacterBookEntries() {
+  const context = ctx();
+  const ch = context.characters?.[context.characterId] || {};
+  const book = ch?.data?.character_book || ch?.character_book || null;
+  const raw = book?.entries ? (Array.isArray(book.entries) ? book.entries : Object.values(book.entries)) : [];
+  return raw.map((entry, idx) => normalizeWorldBookEntry(entry, idx, '角色卡内嵌世界书')).filter(Boolean);
 }
 
-function getPresetEntries(name) {
-  return detectCurrentPresetGroups().find((x) => x.key === name)?.entries || [];
+function normalizeWorldBookEntry(entry, idx = 0, bookName = '') {
+  if (!entry || typeof entry !== 'object') return null;
+  const content = entry.content ?? entry.text ?? '';
+  if (!String(content || '').trim()) return null;
+  const key = Array.isArray(entry.key) ? entry.key.join(', ') : (Array.isArray(entry.keys) ? entry.keys.join(', ') : (entry.key || entry.keys || ''));
+  const title = entry.comment || entry.name || key || `条目 ${idx + 1}`;
+  return {
+    ...entry,
+    id: entry.uid ?? entry.id ?? entry.identifier ?? entry.comment ?? entry.name ?? key ?? `${bookName}-${idx}`,
+    name: title,
+    content,
+    bookName,
+    enabled: entry.enabled !== false && entry.disable !== true,
+    constant: !!entry.constant,
+  };
+}
+
+function normalizeWorldBookEntries(wb, name = '') {
+  const raw = Array.isArray(wb) ? wb : (wb?.entries ? (Array.isArray(wb.entries) ? wb.entries : Object.values(wb.entries)) : []);
+  return raw.map((entry, idx) => normalizeWorldBookEntry(entry, idx, name)).filter(Boolean);
 }
 
 async function getWorldBookEntries(name) {
+  if (!name) return [];
   try {
     if (typeof globalThis.TavernHelper?.getWorldbook === 'function') {
       const wb = await globalThis.TavernHelper.getWorldbook(name);
-      if (wb) return normalizeWorldBookEntries(wb);
+      const entries = normalizeWorldBookEntries(wb, name);
+      if (entries.length) return entries;
     }
   } catch (error) {
     console.warn(`[${MODULE_NAME}] TavernHelper worldbook failed`, name, error);
@@ -495,34 +471,46 @@ async function getWorldBookEntries(name) {
   try {
     if (typeof globalThis.getWorldbook === 'function') {
       const wb = await globalThis.getWorldbook(name);
-      if (wb) return normalizeWorldBookEntries(wb);
+      const entries = normalizeWorldBookEntries(wb, name);
+      if (entries.length) return entries;
     }
   } catch (error) {
     console.warn(`[${MODULE_NAME}] global getWorldbook failed`, name, error);
   }
   try {
-    const token = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || globalThis.token || '';
     const res = await fetch('/api/worldinfo/get', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': token },
+      headers: getRequestHeaders(),
       body: JSON.stringify({ name }),
     });
-    if (res.ok) return normalizeWorldBookEntries(await res.json(), name);
+    if (res.ok) {
+      const data = await res.json();
+      if (globalThis.worldInfoCache?.set) globalThis.worldInfoCache.set(name, data);
+      return normalizeWorldBookEntries(data, name);
+    }
   } catch (error) {
     console.warn(`[${MODULE_NAME}] worldinfo endpoint failed`, name, error);
   }
+  try {
+    if (globalThis.worldInfoCache?.has?.(name)) return normalizeWorldBookEntries(globalThis.worldInfoCache.get(name), name);
+  } catch (_) {}
   return [];
 }
 
-function normalizeWorldBookEntries(wb, name = '') {
-  const attachWorld = (items) => (items || [])
-    .filter((x) => x && typeof x === 'object' && (x.content || x.text || x.key || x.comment || x.uid !== undefined))
-    .map((x) => ({ world: x.world || name, ...x }));
-  if (Array.isArray(wb)) return attachWorld(wb);
-  if (wb?.entries) return attachWorld(Object.values(wb.entries));
-  if (name && wb?.[name]?.entries) return attachWorld(Object.values(wb[name].entries));
-  if (wb && typeof wb === 'object') return attachWorld(Object.values(wb));
-  return [];
+function extractWorldNamesFromListData(data) {
+  const names = [];
+  if (Array.isArray(data)) names.push(...data.filter((x) => typeof x === 'string'));
+  if (Array.isArray(data?.world_names)) names.push(...data.world_names);
+  if (Array.isArray(data?.worldNames)) names.push(...data.worldNames);
+  if (Array.isArray(data?.names)) names.push(...data.names);
+  if (data && typeof data === 'object' && !Array.isArray(data)) {
+    for (const [key, value] of Object.entries(data)) {
+      if (typeof value === 'string') names.push(value);
+      else if (value?.name && typeof value.name === 'string') names.push(value.name);
+      else if (value?.entries && !['world_names', 'worldNames', 'settings'].includes(key)) names.push(key);
+    }
+  }
+  return uniqueClean(names).filter((x) => !['world_names', 'worldNames', 'settings'].includes(x));
 }
 
 async function listWorldBooks() {
@@ -533,92 +521,83 @@ async function listWorldBooks() {
     }
   } catch (_) {}
   try {
-    const token = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || globalThis.token || '';
-    const res = await fetch('/api/worldinfo/list', { headers: { 'X-CSRF-Token': token } });
-    if (res.ok) {
-      const data = await res.json();
-      if (Array.isArray(data)) names.push(...parseAnyString(data));
-      if (Array.isArray(data?.world_names)) names.push(...parseAnyString(data.world_names));
-      if (Array.isArray(data?.worldNames)) names.push(...parseAnyString(data.worldNames));
-      if (data && typeof data === 'object' && !Array.isArray(data)) {
-        for (const [key, value] of Object.entries(data)) {
-          if (Array.isArray(value)) continue;
-          if (value && typeof value === 'object' && value.entries) names.push(key);
-        }
-      }
-    }
+    const res = await fetch('/api/worldinfo/list', { headers: getRequestHeaders() });
+    if (res.ok) names.push(...extractWorldNamesFromListData(await res.json()));
   } catch (_) {}
   names.push(...parseAnyString(globalThis.world_names));
   names.push(...parseAnyString(globalThis.world_info_names));
-  return uniqueClean(names).filter((x) => !['world_names', 'worldNames', 'settings', 'globalSelect', 'charLore'].includes(x));
-}
-
-function detectCharacterKeys(ch, context) {
-  const keys = [];
-  keys.push(ch?.avatar, ch?.data?.avatar, ch?.name, ch?.data?.name, context.name2);
-  try {
-    if (typeof globalThis.getCharaFilename === 'function' && context.characterId !== undefined) keys.push(globalThis.getCharaFilename(context.characterId));
-  } catch (_) {}
-  return uniqueClean(keys).flatMap((x) => uniqueClean([x, x.replace(/\.[^.]+$/, '')]));
+  return uniqueClean(names).filter((x) => !['world_names', 'worldNames', 'settings'].includes(x));
 }
 
 function detectBoundWorldBookNames() {
   const context = ctx();
   const ch = context.characters?.[context.characterId] || {};
-  const power = globalThis.power_user || context.power_user || {};
+  const meta = context.chatMetadata || {};
   const candidates = [];
-
-  candidates.push(...parseAnyString(context.chatMetadata?.world_info));
-  candidates.push(...parseAnyString(globalThis.chat_metadata?.world_info));
-  candidates.push(...parseAnyString(power.persona_description_lorebook));
-  candidates.push(...parseAnyString(ch.world));
-  candidates.push(...parseAnyString(ch.data?.world));
   candidates.push(...parseAnyString(ch.data?.extensions?.world));
   candidates.push(...parseAnyString(ch.data?.extensions?.world_info));
-  candidates.push(...parseAnyString(ch.data?.character_book?.name));
-
-  if (context.groupId && Array.isArray(context.groups)) {
-    const group = context.groups.find((g) => g.id === context.groupId);
-    candidates.push(...parseAnyString(group?.world_info));
-    candidates.push(...parseAnyString(group?.world));
-    candidates.push(...parseAnyString(group?.chat_metadata?.world_info));
-  }
-
-  const charKeys = detectCharacterKeys(ch, context);
-  const charLore = globalThis.world_info?.charLore || context.world_info?.charLore || [];
-  for (const record of Array.isArray(charLore) ? charLore : []) {
-    const recordName = String(record?.name || '');
-    if (charKeys.some((key) => key && (recordName === key || recordName.replace(/\.[^.]+$/, '') === key))) {
-      candidates.push(...parseAnyString(record.extraBooks));
-    }
-  }
-
+  candidates.push(...parseAnyString(ch.data?.extensions?.worldInfo));
+  candidates.push(...parseAnyString(ch.extensions?.world));
+  candidates.push(...parseAnyString(ch.world));
+  candidates.push(...parseAnyString(ch.data?.world));
+  candidates.push(...parseAnyString(meta.world));
+  candidates.push(...parseAnyString(meta.world_info));
+  candidates.push(...parseAnyString(meta.worldNames));
+  candidates.push(...parseAnyString(meta.world_names));
+  candidates.push(...parseAnyString(context.selected_world_info));
+  candidates.push(...parseAnyString(globalThis.selected_world_info));
   return uniqueClean(candidates);
 }
 
+function entryIsDefaultSelected(item) {
+  return item?.enabled !== false && item?.disable !== true;
+}
+
+function ensureSelectionDefaults(groupStore, groupName, items) {
+  if (!groupStore[groupName]) groupStore[groupName] = {};
+  for (const item of items || []) {
+    const id = getContextItemId(item);
+    if (typeof groupStore[groupName][String(id)] === 'undefined') groupStore[groupName][String(id)] = entryIsDefaultSelected(item);
+  }
+}
+
 async function refreshContextSources(showToast = true) {
-  const presetGroups = detectCurrentPresetGroups();
-  const presetNames = presetGroups.map((x) => x.key);
+  const presetEntries = getPresetEntries();
   const boundNames = detectBoundWorldBookNames();
+  const embeddedEntries = getCharacterBookEntries();
   const allWorldNames = await listWorldBooks();
   const otherNames = allWorldNames.filter((n) => !boundNames.includes(n));
-  const cache = { presets: {}, boundWorldBooks: {}, otherWorldBooks: {}, presetNames, boundWorldBookNames: boundNames, otherWorldBookNames: otherNames, scannedAt: new Date().toISOString() };
+  const cache = {
+    presets: presetEntries.length ? { '当前预设': presetEntries } : {},
+    boundWorldBooks: {},
+    otherWorldBooks: {},
+    presetNames: presetEntries.length ? ['当前预设'] : [],
+    boundWorldBookNames: [...boundNames],
+    otherWorldBookNames: otherNames,
+    scannedAt: new Date().toISOString(),
+  };
 
-  for (const group of presetGroups) cache.presets[group.key] = group.entries;
-  for (const name of boundNames) cache.boundWorldBooks[name] = await getWorldBookEntries(name);
+  for (const name of boundNames) {
+    const entries = await getWorldBookEntries(name);
+    if (entries.length) cache.boundWorldBooks[name] = entries;
+  }
+  if (embeddedEntries.length) cache.boundWorldBooks['角色卡内嵌世界书'] = embeddedEntries;
+
+  const presetStore = settings.selectedPresetItems ||= {};
+  ensureSelectionDefaults(presetStore, '当前预设', presetEntries);
 
   const worldStore = getWorldSelectionStore();
-  for (const name of boundNames) {
-    if (!worldStore[name]) worldStore[name] = {};
-    for (const item of cache.boundWorldBooks[name] || []) {
-      const id = getContextItemId(item);
-      if (typeof worldStore[name][String(id)] === 'undefined') worldStore[name][String(id)] = true;
-    }
-  }
+  for (const [name, items] of Object.entries(cache.boundWorldBooks)) ensureSelectionDefaults(worldStore, name, items);
 
   const enabledStore = getEnabledWorldBookStore();
   for (const name of otherNames) {
-    if (enabledStore[name]) cache.otherWorldBooks[name] = await getWorldBookEntries(name);
+    if (enabledStore[name]) {
+      const entries = await getWorldBookEntries(name);
+      if (entries.length) {
+        cache.otherWorldBooks[name] = entries;
+        ensureSelectionDefaults(worldStore, name, entries);
+      }
+    }
   }
 
   contextScanCache = cache;
@@ -663,8 +642,9 @@ function setWorldItemSelected(wbName, itemId, selected) {
   saveSettings();
 }
 
+
 function getContextItemId(item) {
-  return item.uid ?? item.id ?? item.identifier ?? item.name ?? item.comment ?? JSON.stringify(item).slice(0, 24);
+  return item?.id ?? item?.uid ?? item?.identifier ?? item?.name ?? item?.comment ?? item?.key ?? item?.keys ?? JSON.stringify(item || {}).slice(0, 48);
 }
 
 async function buildExtraContextText() {
@@ -791,7 +771,7 @@ async function generateDirectorPlan(showSuccessToast = true, silentFailure = fal
   try {
     const userPrompt = await buildPrompt();
     messages = [{ role: 'system', content: settings.systemPrompt || DEFAULT_SYSTEM_PROMPT }, { role: 'user', content: userPrompt }];
-    settings.lastLog = { status: 'loading', time: new Date().toLocaleString(), duration: '', response: '', error: '' };
+    settings.lastLog = { status: 'loading', time: new Date().toLocaleString(), duration: '', request: '', response: '', error: '' };
     saveSettings();
 
     const raw = settings.providerMode === 'sillytavern' ? await callSillyTavernModel(messages) : await callExternalApi(messages);
@@ -830,6 +810,7 @@ async function generateDirectorPlan(showSuccessToast = true, silentFailure = fal
   }
 }
 
+
 async function fetchModels() {
   try {
     const base = normalizeUrl(settings.apiUrl);
@@ -837,13 +818,21 @@ async function fetchModels() {
     const res = await fetch(`${base}/v1/models`, { headers: { Authorization: `Bearer ${settings.apiKey}` } });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-    settings.availableModels = (data.data || []).map((x) => x.id).filter(Boolean);
+    const models = (data.data || data.models || [])
+      .map((x) => typeof x === 'string' ? x : (x.id || x.name || x.model))
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b));
+    settings.availableModels = uniqueClean(models);
     if (!settings.model && settings.availableModels.length) settings.model = settings.availableModels[0];
     saveSettings();
     toast(`已拉取 ${settings.availableModels.length} 个模型。`, 'success');
     renderModal();
-  } catch (_) {
+  } catch (error) {
+    settings.lastLog.status = 'error';
+    settings.lastLog.error = `模型列表拉取失败：${error?.message || error}`;
+    saveSettings();
     apiToast();
+    renderModal();
   }
 }
 
@@ -922,7 +911,7 @@ function renderSettingsPanel() {
         <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
       </div>
       <div class="inline-drawer-content">
-        <div class="sd-settings-copy">故事自成脉络&nbsp;&nbsp;命运早有伏笔</div>
+        <div class="sd-settings-copy">v${EXTENSION_VERSION}</div>
         <label class="checkbox_label sd-checkline"><input type="checkbox" class="sd-toggle-enabled" ${settings.enabled ? 'checked' : ''}> 启用剧情导演</label>
         <div class="sd-button-row">
           <button class="sd-btn sd-open-dashboard" ${settings.enabled ? '' : 'disabled'}>打开剧情导演</button>
@@ -949,10 +938,11 @@ function renderSettingsPanel() {
   });
 }
 
+
 function clampFloatPosition() {
   settings.floatPosition ||= { x: null, y: null };
   const size = window.matchMedia?.('(max-width: 760px)')?.matches ? 44 : 48;
-  const margin = 10;
+  const margin = 8;
   const maxX = Math.max(margin, window.innerWidth - size - margin);
   const maxY = Math.max(margin, window.innerHeight - size - margin);
   if (typeof settings.floatPosition.x !== 'number') settings.floatPosition.x = maxX;
@@ -978,20 +968,26 @@ function bindFloatDrag(btn) {
   let originX = 0;
   let originY = 0;
   let moved = false;
+  let openedFromPointer = false;
 
   btn.addEventListener('pointerdown', (event) => {
     if (event.button !== undefined && event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
     const pos = clampFloatPosition();
     startX = event.clientX;
     startY = event.clientY;
     originX = pos.x;
     originY = pos.y;
     moved = false;
+    openedFromPointer = false;
     btn.setPointerCapture?.(event.pointerId);
   });
 
   btn.addEventListener('pointermove', (event) => {
     if (!btn.hasPointerCapture?.(event.pointerId)) return;
+    event.preventDefault();
+    event.stopPropagation();
     const dx = event.clientX - startX;
     const dy = event.clientY - startY;
     if (Math.abs(dx) + Math.abs(dy) > 4) moved = true;
@@ -1003,27 +999,25 @@ function bindFloatDrag(btn) {
 
   const finish = (event) => {
     if (!btn.hasPointerCapture?.(event.pointerId)) return;
+    event.preventDefault();
+    event.stopPropagation();
     btn.releasePointerCapture?.(event.pointerId);
-    const pos = clampFloatPosition();
-    settings.floatPosition.x = pos.x + pos.size / 2 < window.innerWidth / 2 ? pos.margin : pos.maxX;
-    settings.floatPosition.y = pos.y;
+    clampFloatPosition();
     applyFloatPosition(btn);
     saveSettings();
-    if (moved) {
-      btn.dataset.justDragged = '1';
-      setTimeout(() => { delete btn.dataset.justDragged; }, 120);
+    if (!moved) {
+      openedFromPointer = true;
+      openModal('dashboard');
+      setTimeout(() => { openedFromPointer = false; }, 120);
     }
   };
   btn.addEventListener('pointerup', finish);
   btn.addEventListener('pointercancel', finish);
 
   btn.addEventListener('click', (event) => {
-    if (btn.dataset.justDragged === '1') {
-      event.preventDefault();
-      event.stopPropagation();
-      return;
-    }
-    openModal('dashboard');
+    event.preventDefault();
+    event.stopPropagation();
+    if (!openedFromPointer) openModal('dashboard');
   });
 }
 
@@ -1040,7 +1034,6 @@ function renderFloatButton() {
     btn.title = '浮生剧编';
     btn.textContent = '剧';
     document.body.appendChild(btn);
-    bindFloatDrag(btn);
   }
   btn.textContent = '剧';
   btn.title = '浮生剧编';
@@ -1054,6 +1047,7 @@ function renderBusyState() {
     el.textContent = busy ? '生成中…' : '刷新剧情';
   });
 }
+
 
 function renderModal() {
   const modal = document.getElementById(MODAL_ID);
@@ -1073,13 +1067,12 @@ function renderModal() {
     <section class="sd-window" role="dialog" aria-label="浮生剧编">
       <header class="sd-header">
         <div class="sd-titlebox">
-          <h2>浮生剧编</h2>
-          <p>故事自成脉络&nbsp;&nbsp;命运早有伏笔</p>
+          <h2>浮生剧编</h2><span class="sd-title-divider"></span><p>故事自成脉络&nbsp;&nbsp;命运早有伏笔</p>
         </div>
         <div class="sd-header-actions">
-          <button class="sd-plug-shortcut" type="button" title="API与日志" aria-label="API与日志">🔌</button>
-          <button class="sd-theme-toggle" type="button" title="切换外观" aria-label="切换外观"><span>☀</span><span>☾</span></button>
-          <button class="sd-close" type="button" title="关闭" aria-label="关闭">×</button>
+          <button class="sd-plug-shortcut" title="API与日志">🔌</button>
+          <button class="sd-theme-toggle" title="切换外观"><span>${settings.theme === 'dark' ? '夜' : '日'}</span></button>
+          <button class="sd-close" title="关闭">×</button>
         </div>
       </header>
       <nav class="sd-tabs">
@@ -1087,14 +1080,16 @@ function renderModal() {
       </nav>
       <main class="sd-body">${renderActiveTab()}</main>
     </section>`;
-  const windowEl = modal.querySelector('.sd-window');
-  ['click', 'mousedown', 'mouseup', 'pointerdown', 'pointerup', 'touchstart', 'touchend'].forEach((type) => {
-    windowEl?.addEventListener(type, (event) => event.stopPropagation());
-  });
+  const stopInside = (event) => event.stopPropagation();
+  modal.querySelector('.sd-window')?.addEventListener('pointerdown', stopInside);
+  modal.querySelector('.sd-window')?.addEventListener('mousedown', stopInside);
+  modal.querySelector('.sd-window')?.addEventListener('touchstart', stopInside, { passive: true });
+  modal.querySelector('.sd-window')?.addEventListener('click', stopInside);
   modal.querySelector('.sd-backdrop')?.addEventListener('click', closeModal);
-  modal.querySelector('.sd-close')?.addEventListener('click', closeModal);
-  modal.querySelector('.sd-plug-shortcut')?.addEventListener('click', () => { activeTab = 'plug'; renderModal(); });
-  modal.querySelector('.sd-theme-toggle')?.addEventListener('click', () => {
+  modal.querySelector('.sd-close')?.addEventListener('click', (event) => { event.stopPropagation(); closeModal(); });
+  modal.querySelector('.sd-plug-shortcut')?.addEventListener('click', (event) => { event.stopPropagation(); activeTab = 'plug'; renderModal(); });
+  modal.querySelector('.sd-theme-toggle')?.addEventListener('click', (event) => {
+    event.stopPropagation();
     settings.theme = settings.theme === 'dark' ? 'light' : 'dark';
     saveSettings();
     renderModal();
@@ -1131,7 +1126,7 @@ function metric(label, value) {
 function renderDashboardTab() {
   const p = currentPlan();
   if (!p) {
-    return `<section class="sd-card sd-plan-card"><h3>审片待生成</h3><div class="sd-empty">还没有当前故事的审片结果。</div><div class="sd-button-row sd-center"><button class="sd-btn sd-primary sd-generate-main">刷新剧情</button>${busy ? '<button class="sd-btn sd-stop">取消</button>' : ''}</div></section>`;
+    return `<section class="sd-card sd-plan-card"><h3>剧情规划</h3><div class="sd-empty">尚未生成剧情规划</div><div class="sd-button-row sd-center"><button class="sd-btn sd-primary sd-generate-main">刷新剧情</button>${busy ? '<button class="sd-btn sd-stop">取消</button>' : ''}</div></section>`;
   }
   const st = p.story_status || {};
   return `
@@ -1175,24 +1170,18 @@ function formatDateTime(date) {
 
 function renderTasksNodesTab() {
   const p = currentPlan();
-  if (!p) return renderNoPlan('tasksnodes');
+  if (!p) return renderNoPlan();
   return `<section class="sd-card"><h3>任务</h3>${renderItemList(p.quests || [], 'quest')}</section><section class="sd-card"><h3>节点</h3>${renderItemList(p.story_nodes || [], 'node')}</section>`;
 }
 
 function renderCastWorldTab() {
   const p = currentPlan();
-  if (!p) return renderNoPlan('castworld');
+  if (!p) return renderNoPlan();
   return `<section class="sd-card"><h3>角色动向</h3>${renderItemList(p.npc_updates || [], 'npc')}</section><section class="sd-card"><h3>世界回声</h3>${renderItemList(p.world_updates || [], 'world')}</section>`;
 }
 
-function renderNoPlan(kind = 'dashboard') {
-  const map = {
-    dashboard: ['审片待生成', '还没有当前故事的审片结果。'],
-    tasksnodes: ['任务节点待生成', '刷新后会在这里显示可推进任务和剧情触发节点。'],
-    castworld: ['角色世界待生成', '刷新后会在这里显示角色动向和世界变化。'],
-  };
-  const [title, desc] = map[kind] || map.dashboard;
-  return `<section class="sd-card sd-plan-card"><h3>${htmlEscape(title)}</h3><div class="sd-empty">${htmlEscape(desc)}</div><div class="sd-button-row sd-center"><button class="sd-btn sd-primary sd-generate-main">刷新剧情</button>${busy ? '<button class="sd-btn sd-stop">取消</button>' : ''}</div></section>`;
+function renderNoPlan() {
+  return `<section class="sd-card sd-plan-card"><div class="sd-empty">尚未生成剧情规划</div><div class="sd-button-row sd-center"><button class="sd-btn sd-primary sd-generate-main">刷新剧情</button>${busy ? '<button class="sd-btn sd-stop">取消</button>' : ''}</div></section>`;
 }
 
 function renderItemList(items, kind) {
@@ -1246,56 +1235,70 @@ function formatDate(date) {
   try { return new Date(date).toLocaleDateString(); } catch (_) { return String(date); }
 }
 
+
 function renderContextTab() {
   const opts = settings.contextOptions;
+  const rules = parseTagRules();
   return `
     <details class="sd-accordion" open>
       <summary><b>基础引用</b><span>勾选后将会作为剧情导演参考项</span></summary>
-      <div class="sd-option-list">
-        <label class="checkbox_label"><input type="checkbox" class="sd-opt" data-key="includeChatHistory" ${opts.includeChatHistory ? 'checked' : ''}> 引用近期对话</label>
-        <label class="sd-field-label">引用最近几条对话</label><input class="text_pole sd-context-depth" type="number" min="1" max="200" value="${htmlEscape(opts.contextDepth || 5)}">
-        <label class="checkbox_label"><input type="checkbox" class="sd-opt" data-key="includeCharDesc" ${opts.includeCharDesc ? 'checked' : ''}> 引用当前角色设定</label>
-        <label class="checkbox_label"><input type="checkbox" class="sd-opt" data-key="includeUserDesc" ${opts.includeUserDesc ? 'checked' : ''}> 引用用户人设</label>
+      <div class="sd-reference-grid">
+        <label class="checkbox_label sd-reference-toggle"><input type="checkbox" class="sd-opt" data-key="includeChatHistory" ${opts.includeChatHistory ? 'checked' : ''}> 上下文参考</label>
+        <label class="sd-depth-inline"><span>参考楼层数</span><input class="text_pole sd-context-depth" type="number" min="1" max="200" value="${htmlEscape(opts.contextDepth || 5)}"></label>
       </div>
+      <label class="checkbox_label"><input type="checkbox" class="sd-opt" data-key="includeCharDesc" ${opts.includeCharDesc ? 'checked' : ''}> 引用当前角色设定</label>
+      <label class="checkbox_label"><input type="checkbox" class="sd-opt" data-key="includeUserDesc" ${opts.includeUserDesc ? 'checked' : ''}> 引用用户人设</label>
     </details>
-    <details class="sd-accordion">
-      <summary><b>上下文处理</b><span>HTML与标签</span></summary>
-      <div class="sd-option-list">
-        <div class="sd-inline-options">
-          <label class="checkbox_label"><input type="checkbox" class="sd-tag-opt" data-key="removeTags" ${opts.removeTags ? 'checked' : ''}> 屏蔽HTML和标签</label>
-          <label class="checkbox_label"><input type="checkbox" class="sd-tag-opt" data-key="extractTags" ${opts.extractTags ? 'checked' : ''}> 提取标签</label>
-        </div>
-        <input class="text_pole sd-tag-names" placeholder="多个标签用逗号分隔 如：content,thinking…" value="${htmlEscape(opts.tagNames || '')}">
+    <details class="sd-accordion" open>
+      <summary><b>上下文处理</b><span>按标签设置处理方式</span></summary>
+      <div class="sd-tag-rule-list">
+        ${rules.map((rule, index) => renderTagRuleRow(rule, index)).join('')}
       </div>
+      <div class="sd-button-row"><button class="sd-btn sd-add-tag-rule">添加标签</button></div>
     </details>
     <details class="sd-accordion" open>
       <summary><b>预设&世界书</b><span>${contextScanCache.scannedAt ? '已刷新' : '待刷新'}</span></summary>
-      <div class="sd-button-row sd-option-list"><button class="sd-btn sd-refresh-context">刷新</button></div>
+      <div class="sd-button-row"><button class="sd-btn sd-refresh-context">刷新</button></div>
       ${renderScannedContext()}
     </details>`;
 }
 
-function getSelectedWorldBookNamesForDisplay() {
-  const enabledStore = getEnabledWorldBookStore();
-  const names = [...(contextScanCache.boundWorldBookNames || []), ...Object.entries(enabledStore).filter(([, enabled]) => enabled).map(([name]) => name)];
-  return uniqueClean(names);
+function renderTagRuleRow(rule, index) {
+  const action = rule.action === 'extract' ? 'extract' : 'remove';
+  return `<div class="sd-tag-rule-row" data-index="${index}"><input class="text_pole sd-tag-rule-name" placeholder="标签名，如 thinking" value="${htmlEscape(rule.name || '')}"><select class="text_pole sd-tag-rule-action"><option value="remove" ${action === 'remove' ? 'selected' : ''}>屏蔽</option><option value="extract" ${action === 'extract' ? 'selected' : ''}>提取</option></select><button class="sd-btn sd-remove-tag-rule" type="button">删除</button></div>`;
 }
 
-function renderSelectedWorldBookSummary() {
-  const names = getSelectedWorldBookNamesForDisplay();
-  if (!names.length) return '';
-  return `<div class="sd-selected-worldbooks"><b>已选择世界书</b><div>${names.map((name) => `<span class="sd-chip">${htmlEscape(name)}</span>`).join('')}</div></div>`;
+function collectTagRules(root) {
+  const rows = Array.from(root.querySelectorAll('.sd-tag-rule-row'));
+  const rules = rows.map((row) => {
+    const name = row.querySelector('.sd-tag-rule-name')?.value?.trim().replace(/^<|>$/g, '');
+    const action = row.querySelector('.sd-tag-rule-action')?.value === 'extract' ? 'extract' : 'remove';
+    return name ? { name, action } : null;
+  }).filter(Boolean);
+  settings.contextOptions.tagRules = rules.length ? rules : [{ name: 'thinking', action: 'remove' }];
+  saveSettings();
+}
+
+function getSelectedWorldBookLabels() {
+  const labels = [];
+  const groups = { ...(contextScanCache.boundWorldBooks || {}), ...(contextScanCache.otherWorldBooks || {}) };
+  for (const [name, items] of Object.entries(groups)) {
+    const count = (items || []).filter((item) => isWorldItemSelected(name, getContextItemId(item))).length;
+    if (count) labels.push({ name, count });
+  }
+  return labels;
 }
 
 function renderScannedContext() {
+  const selectedLabels = getSelectedWorldBookLabels();
+  const selectedHtml = selectedLabels.length ? `<div class="sd-selected-books"><span>已选择世界书</span>${selectedLabels.map((x) => `<b>${htmlEscape(x.name)} · ${x.count}</b>`).join('')}</div>` : '<p class="sd-muted sd-selected-books-empty">尚未选择世界书条目。</p>';
   const presetHtml = Object.entries(contextScanCache.presets || {}).map(([name, items]) => renderContextGroup('preset', name, items, '当前预设')).join('');
   const boundHtml = Object.entries(contextScanCache.boundWorldBooks || {}).map(([name, items]) => renderContextGroup('world', name, items, '绑定世界书')).join('');
   const otherLoadedHtml = Object.entries(contextScanCache.otherWorldBooks || {}).map(([name, items]) => renderContextGroup('world', name, items, '其他世界书')).join('');
   const otherNames = (contextScanCache.otherWorldBookNames || []).filter((n) => !contextScanCache.otherWorldBooks?.[n]);
-  const otherNameHtml = otherNames.length ? `<details class="sd-context-group"><summary><b>其他世界书</b><span>${otherNames.length} 本</span></summary><div class="sd-option-list">${otherNames.map((name) => `<label class="checkbox_label sd-worldbook-name"><input type="checkbox" class="sd-toggle-wb" data-name="${htmlEscape(name)}" ${getEnabledWorldBookStore()[name] ? 'checked' : ''}> ${htmlEscape(name)}</label>`).join('')}</div></details>` : '';
-  const selected = renderSelectedWorldBookSummary();
-  if (!presetHtml && !boundHtml && !otherLoadedHtml && !otherNameHtml) return '<p class="sd-muted sd-option-list">未读取到预设或世界书。</p>';
-  return `<div class="sd-scanned">${selected}${presetHtml}${boundHtml}${otherLoadedHtml}${otherNameHtml}</div>`;
+  const otherNameHtml = otherNames.length ? `<details class="sd-context-group"><summary><b>其他世界书</b><span>${otherNames.length} 本</span></summary>${otherNames.map((name) => `<label class="checkbox_label sd-worldbook-name"><input type="checkbox" class="sd-toggle-wb" data-name="${htmlEscape(name)}" ${getEnabledWorldBookStore()[name] ? 'checked' : ''}> ${htmlEscape(name)}</label>`).join('')}</details>` : '';
+  if (!presetHtml && !boundHtml && !otherLoadedHtml && !otherNameHtml) return `${selectedHtml}<p class="sd-muted">未读取到预设或世界书。</p>`;
+  return `<div class="sd-scanned">${selectedHtml}${presetHtml}${boundHtml}${otherLoadedHtml}${otherNameHtml}</div>`;
 }
 
 function renderContextGroup(kind, name, items, titlePrefix) {
@@ -1304,8 +1307,11 @@ function renderContextGroup(kind, name, items, titlePrefix) {
     const title = item.name || item.identifier || item.comment || item.role || (Array.isArray(item.key) ? item.key.join(', ') : item.key) || '未命名条目';
     const content = item.content || item.message || item.text || '';
     const checked = kind === 'preset' ? isPresetItemSelected(name, id) : isWorldItemSelected(name, id);
-    return `<details class="sd-context-item"><summary><label><input type="checkbox" class="sd-context-check" data-kind="${kind}" data-group="${htmlEscape(name)}" data-id="${htmlEscape(String(id))}" ${checked ? 'checked' : ''}> ${htmlEscape(title)}</label></summary><pre>${htmlEscape(cleanContextText(content).slice(0, 2000))}</pre></details>`;
-  }).join('') || '<p class="sd-muted sd-option-list">未读取到条目。</p>';
+    const badges = [];
+    if (item.constant) badges.push('<span class="sd-badge">常驻</span>');
+    if (item.enabled === false) badges.push('<span class="sd-badge sd-badge-off">禁用</span>');
+    return `<details class="sd-context-item"><summary><label><input type="checkbox" class="sd-context-check" data-kind="${kind}" data-group="${htmlEscape(name)}" data-id="${htmlEscape(String(id))}" ${checked ? 'checked' : ''}> <span>${htmlEscape(title)}</span></label>${badges.join('')}</summary><pre>${htmlEscape(cleanContextText(content).slice(0, 2000))}</pre></details>`;
+  }).join('') || '<p class="sd-muted">未读取到条目。</p>';
   return `<details class="sd-context-group" open><summary><b>${htmlEscape(titlePrefix)}：${htmlEscape(name)}</b><span>${items?.length || 0} 条</span></summary>${rows}</details>`;
 }
 
@@ -1324,9 +1330,11 @@ function renderDirectorSettingsTab() {
     </section>`;
 }
 
+
 function renderPlugTab() {
   const isExternal = settings.providerMode === 'external';
   const log = settings.lastLog || DEFAULT_SETTINGS.lastLog;
+  const modelList = settings.availableModels || [];
   return `
     <section class="sd-card">
       <h3>模型来源</h3>
@@ -1338,7 +1346,9 @@ function renderPlugTab() {
       <label>API URL</label><input class="text_pole sd-api-url" placeholder="https://api.example.com/v1" value="${htmlEscape(settings.apiUrl || '')}">
       <label>API Key</label><input class="text_pole sd-api-key" type="password" placeholder="sk-..." value="${htmlEscape(settings.apiKey || '')}">
       <label>模型</label>
-      <div class="sd-inline-field"><input class="text_pole sd-model-input" list="sd-model-list" placeholder="模型名称" value="${htmlEscape(settings.model || '')}"><datalist id="sd-model-list">${(settings.availableModels || []).map((m) => `<option value="${htmlEscape(m)}"></option>`).join('')}</datalist><button class="sd-btn sd-fetch-models">拉取模型</button></div>
+      <div class="sd-model-picker"><input class="text_pole sd-model-input" list="sd-model-options" placeholder="模型名称" value="${htmlEscape(settings.model || '')}"><button class="sd-btn sd-fetch-models">拉取模型</button></div>
+      <datalist id="sd-model-options">${modelList.map((m) => `<option value="${htmlEscape(m)}"></option>`).join('')}</datalist>
+      ${modelList.length ? `<div class="sd-model-results">${modelList.map((m) => `<button class="sd-model-pick ${m === settings.model ? 'active' : ''}" type="button" data-model="${htmlEscape(m)}">${htmlEscape(m)}</button>`).join('')}</div>` : '<p class="sd-muted">拉取后会在这里显示可点选模型。</p>'}
       <label>Temperature</label><input class="text_pole sd-temperature" type="number" min="0" max="2" step="0.05" value="${htmlEscape(settings.temperature)}">
       <div class="sd-button-row"><button class="sd-btn sd-save-api">保存API</button></div>
     </section>
@@ -1412,18 +1422,22 @@ function bindActiveTabEvents(root) {
     settings.contextOptions.contextDepth = Math.max(1, Math.min(200, Number(e.target.value || 5)));
     saveSettings();
   });
-  root.querySelectorAll('.sd-tag-opt').forEach((el) => el.addEventListener('change', () => {
-    settings.contextOptions[el.dataset.key] = el.checked;
-    saveSettings();
+  root.querySelectorAll('.sd-tag-rule-name, .sd-tag-rule-action').forEach((el) => el.addEventListener('change', () => collectTagRules(root)));
+  root.querySelectorAll('.sd-remove-tag-rule').forEach((el) => el.addEventListener('click', () => {
+    el.closest('.sd-tag-rule-row')?.remove();
+    collectTagRules(root);
+    renderModal();
   }));
-  root.querySelector('.sd-tag-names')?.addEventListener('change', (e) => {
-    settings.contextOptions.tagNames = e.target.value || '';
+  root.querySelector('.sd-add-tag-rule')?.addEventListener('click', () => {
+    settings.contextOptions.tagRules = [...parseTagRules(), { name: '', action: 'remove' }];
     saveSettings();
+    renderModal();
   });
   root.querySelector('.sd-refresh-context')?.addEventListener('click', () => refreshContextSources(true));
   root.querySelectorAll('.sd-context-check').forEach((el) => el.addEventListener('change', () => {
     if (el.dataset.kind === 'preset') setPresetItemSelected(el.dataset.group, el.dataset.id, el.checked);
     else setWorldItemSelected(el.dataset.group, el.dataset.id, el.checked);
+    renderModal();
   }));
   root.querySelectorAll('.sd-toggle-wb').forEach((el) => el.addEventListener('change', async () => {
     const store = getEnabledWorldBookStore();
@@ -1456,6 +1470,13 @@ function bindActiveTabEvents(root) {
     saveSettings();
     fetchModels();
   });
+  root.querySelectorAll('.sd-model-pick').forEach((el) => el.addEventListener('click', () => {
+    const input = root.querySelector('.sd-model-input');
+    if (input) input.value = el.dataset.model || '';
+    settings.model = el.dataset.model || settings.model;
+    saveSettings();
+    renderModal();
+  }));
   root.querySelector('.sd-save-api')?.addEventListener('click', () => {
     settings.apiUrl = root.querySelector('.sd-api-url')?.value || '';
     settings.apiKey = root.querySelector('.sd-api-key')?.value || '';
@@ -1533,7 +1554,7 @@ function renderInputMenuEntry() {
     entry.id = INPUT_ENTRY_ID;
     entry.className = 'list-group-item flex-container story-director-input-entry';
     entry.innerHTML = '<span class="sd-menu-glyph">剧</span><span>浮生剧编</span>';
-    entry.addEventListener('click', (event) => { event.preventDefault(); event.stopPropagation(); openModal('dashboard'); });
+    entry.addEventListener('click', () => openModal('dashboard'));
     menu.appendChild(entry);
     return;
   }
@@ -1547,7 +1568,7 @@ function renderInputMenuEntry() {
   button.type = 'button';
   button.title = '浮生剧编';
   button.textContent = '剧';
-  button.addEventListener('click', (event) => { event.preventDefault(); event.stopPropagation(); openModal('dashboard'); });
+  button.addEventListener('click', () => openModal('dashboard'));
   if (textarea && textarea.parentElement === parent) parent.insertBefore(button, textarea);
   else parent.insertBefore(button, parent.firstChild);
 }
@@ -1593,9 +1614,6 @@ function bindEvents() {
   source.on(types.CHAT_CHANGED || 'chat_changed', rerenderHandler);
   source.on(types.GROUP_UPDATED || 'group_updated', rerenderHandler);
   source.on(types.CHARACTER_SELECTED || 'character_selected', rerenderHandler);
-  source.on(types.PRESET_CHANGED || 'preset_changed', rerenderHandler);
-  source.on(types.MAIN_API_CHANGED || 'main_api_changed', rerenderHandler);
-  source.on(types.WORLDINFO_SETTINGS_UPDATED || 'worldinfo_settings_updated', rerenderHandler);
 }
 
 function init() {
