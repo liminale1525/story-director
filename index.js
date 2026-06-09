@@ -8,43 +8,51 @@ const FLOAT_ID = 'story-director-float';
 const INPUT_ENTRY_ID = 'story-director-input-entry';
 const INPUT_BUTTON_ID = 'story-director-input-button';
 
-const DEFAULT_BLUEPRINT = `【世界观】
-现代都市 / 校园 / 西幻 / 末日 / 无限流 / 其他
+const DEFAULT_BLUEPRINT = `【故事基底】
+时代、地域、社会秩序、超自然/科技/权力结构、日常生活质感。
 
-【剧情基调】
-例如：慢热恋爱、悬疑调查、群像成长、轻喜剧、黑暗奇幻
+【核心题材】
+例如：慢热恋爱、悬疑调查、群像成长、家族纠葛、黑暗奇幻、末日求生。
 
-【长期目标】
-{{user}} 和主要角色最终想完成什么？
+【当前主线】
+{{user}} 与主要角色正在面对什么局面？主线背后有哪些尚未揭开的矛盾？
+
+【长期走向】
+关系、真相、阵营、个人成长或世界变化最终可能通向哪些方向？
 
 【主要角色与关系】
-- {{user}}：
-- {{char}}：
-- 其他NPC：
+- {{user}}：身份、动机、能力边界、当前处境。
+- {{char}}：身份、欲望、弱点、与 {{user}} 的张力。
+- 重要NPC：姓名、立场、交际圈、可能带来的支线。
+
+【世界社交网】
+角色之间可以有各自的亲友、同事、敌人、旧识、组织关系和共同交际圈。世界变化可以先发生在 {{user}} 视野之外，再通过传闻、邀约、冲突或偶遇进入剧情。
+
+【变量与新角色】
+任务、节点、角色世界可以依据叙事需要自然引入新NPC、临时盟友、竞争者、目击者、线人或共同圈层角色，为剧情注入流动性。
 
 【剧情偏好】
-例如：多日常互动、少强制跳时间、NPC要有自主行动、支线可以自然出现
+节奏、情感浓度、悬疑密度、日常比例、冲突强度、支线开放度。
 
-【禁用内容】
-不希望出现的剧情、关系走向或题材。
+【避雷与边界】
+不希望出现的剧情、关系走向、题材或叙事处理方式。
 
-【给导演的额外叮嘱】
-例如：慢热、多日常、少强制跳时间、NPC保持自主行动。`;
+【导演特别说明】
+写下你希望导演参考的节奏、氛围、关系推进、支线灵感或本轮重点。`;
 
 const DEFAULT_SYSTEM_PROMPT = `你是一位顶尖剧作家导演，长期为沉浸式角色扮演故事设计暗线、节奏、冲突、人物动机与可选择的推进路径。
 
-你的任务是根据当前对话、角色设定、{{user}} 写入的剧本方案与勾选的参考项，整理当前故事的下一阶段规划。规划可以呈现为导演手记与任务看板的结合体：既能看清篇章方向、人物动机和世界变化，也能留下足够的即兴余地，让后续互动自然生长。
+你的任务是根据当前对话、角色设定、{{user}} 写入的剧本方案与勾选的参考项，整理当前故事的下一阶段规划。请以导演手记、任务看板和世界动态记录的形式呈现，让使用者能看见故事脉络、潜在变量与可推进方向。
 
 核心原则：
 1. 以篇章阶段、任务目标、触发节点、NPC自主行动和世界变化为主，让剧情可推进也可变动。
-2. 尊重已经发生的剧情事实、角色关系与人设，延续既有事件，并保留 {{user}} 的行动选择。
-3. 任务要可选择、可延后、可因 {{user}} 的行动改变结果，保留即兴空间。
+2. 尊重已经发生的剧情事实、角色关系与人设，维护既有事件和人物逻辑，保留 {{user}} 的选择空间。
+3. 任务可以选择、延后、转向，并能因 {{user}} 的行动改变结果，保留即兴空间。
 4. NPC拥有独立目标、情绪和下一步行动，即使 {{user}} 暂时不干预，世界也会自然流动。
-5. 任务、剧情节点、角色动向、世界回声应各有侧重：任务强调可选择目标；节点强调触发与后果；角色动向强调人物自主行动；世界回声强调环境、势力、传闻或日程变化。
-6. 默认给出 3-5 个任务、3-5 个剧情节点、2-4 个角色动向、2-4 个世界回声；若当前信息不足，可按已有素材保持精炼。
-7. 输出为纯 JSON 对象，直接以 { 开始并以 } 结束。
-8. 所有数组字段都可以为空数组，但字段名必须完整保留。
-9. 每个可写入输入框的项目都要给出 inject_prompt。inject_prompt 采用“第三人称叙事 + {{user}} 第一人称视角”的混合文本，包含行动、观察、心理和可供角色回应的情境，同时避免暴露插件或导演系统。`;
+5. 角色世界要体现社交网、组织、旧识、传闻、公共事件与视野之外的变化，使世界呈现多维流动感。
+6. 依据叙事发展概率自然引入新NPC、共同交际圈角色、临时线索人物或外部势力，为任务节点和角色世界增加变量。
+7. 输出为一个JSON对象，字段名完整保留，数组字段可以为空数组。
+8. 每个可写入输入框的项目都要给出 inject_prompt。inject_prompt 以 {{user}} 的第一人称视角描述行动、观察、心理和下一步安排，让场景自然推进。`;
 
 const JSON_SCHEMA_TEXT = `固定输出格式：
 {
@@ -74,19 +82,19 @@ const JSON_SCHEMA_TEXT = `固定输出格式：
       "deadline": "无/未来几轮/今夜/3天内/本周",
       "trigger": "触发或推进条件",
       "reward": "剧情收益、关系变化或线索",
-      "inject_prompt": "可直接写入输入框的推进文本：以 {{user}} 的第一人称视角描述行动、观察、心理和下一步安排，让场景自然推进"
+      "inject_prompt": "以 {{user}} 的第一人称视角描述行动、观察、心理和下一步安排，让任务自然推进"
     }
   ],
   "story_nodes": [
     {
       "id": "n1",
       "title": "剧情节点标题",
-      "trigger": "触发条件：地点/时间/对话/任务完成/{{user}} 无行动时",
+      "trigger": "触发条件：地点/时间/对话/任务完成/{{user}} 暂停行动时",
       "foreshadowing": "伏笔或前置信号",
       "event": "会发生什么",
-      "consequences": "可能后果，保留多种走向与互动余地",
+      "consequences": "可能后果，保留多条分支空间",
       "priority": "high/medium/low",
-      "inject_prompt": "可直接写入输入框的推进文本：让场景、行动、感受与可回应的变化同时出现"
+      "inject_prompt": "以 {{user}} 的第一人称视角描述行动、观察、心理和下一步安排，让节点自然进入场景"
     }
   ],
   "npc_updates": [
@@ -98,8 +106,8 @@ const JSON_SCHEMA_TEXT = `固定输出格式：
       "emotional_state": "情绪状态",
       "next_action": "NPC接下来会做什么",
       "hidden_agenda": "隐藏动机；若无则写无",
-      "relationship_to_user": "与 {{user}} 的关系变化",
-      "inject_prompt": "可直接写入输入框的互动文本：从 {{user}} 的视角观察NPC行动，并留下对方可回应的空间"
+      "relationship_to_user": "与 {{user}} 或其交际圈的关系变化",
+      "inject_prompt": "以 {{user}} 的第一人称视角描述可感知的社交变化、线索、邀约或互动安排"
     }
   ],
   "world_updates": [
@@ -107,9 +115,9 @@ const JSON_SCHEMA_TEXT = `固定输出格式：
       "type": "news/weather/faction/rumor/environment/calendar/other",
       "title": "世界变化标题",
       "content": "世界变化内容",
-      "impact": "对 {{user}}、NPC或主线的影响",
+      "impact": "对 {{user}}、NPC、交际圈或主线的影响",
       "timing": "现在/今晚/未来几轮/未来3天/本周",
-      "inject_prompt": "可直接写入输入框的推进文本：以叙事方式让世界变化自然进入当前场景"
+      "inject_prompt": "以 {{user}} 的第一人称视角描述自己如何得知、观察或回应这项世界变化"
     }
   ],
   "director_comment": "导演评语：分析节奏、冲突、情感线和下一步建议，80-160字",
@@ -123,12 +131,13 @@ const DEFAULT_SETTINGS = Object.freeze({
   apiKey: '',
   model: '',
   availableModels: [],
+  apiProfiles: [],
   temperature: 0.75,
   floatingButton: true,
   floatPosition: { x: null, y: null },
   theme: 'light',
   systemPrompt: DEFAULT_SYSTEM_PROMPT,
-  outputFormat: JSON_SCHEMA_TEXT,
+  outputSchemaText: JSON_SCHEMA_TEXT,
   autoRefresh: false,
   autoRefreshEvery: 10,
   templates: [
@@ -144,10 +153,11 @@ const DEFAULT_SETTINGS = Object.freeze({
     contextDepth: 5,
     includeCharDesc: true,
     includeUserDesc: false,
-    tagRules: [{ name: 'thinking', mode: 'remove' }],
+    tagRules: [{ name: 'thinking', action: 'remove' }],
   },
-  selectedPresetItems: {},
-  enabledPresetsByChat: {},
+  selectedPresetNamesByChat: {},
+  selectedPresetItemsByChat: {},
+  selectedWorldBookNamesByChat: {},
   selectedWorldBookItemsByChat: {},
   enabledWorldBooksByChat: {},
   lastLog: {
@@ -161,7 +171,7 @@ const DEFAULT_SETTINGS = Object.freeze({
 
 let settings = null;
 let activeTab = 'dashboard';
-let contextScanCache = { presets: {}, currentPresets: {}, otherPresets: {}, boundWorldBooks: {}, otherWorldBooks: {}, currentPresetName: '', presetNames: [], boundWorldBookNames: [], otherWorldBookNames: [], scannedAt: '' };
+let contextScanCache = { presets: {}, worldBooks: {}, presetNames: [], worldBookNames: [], currentPresetName: '', boundWorldBookNames: [], scannedAt: '' };
 let busy = false;
 let abortController = null;
 let cancelRequested = false;
@@ -202,39 +212,31 @@ function getSettings() {
 }
 
 function migrateSettings(s) {
-  s.contextOptions ||= {};
-  if (typeof s.maxContextMessages !== 'undefined' && typeof s.contextOptions.contextDepth === 'undefined') {
+  if (typeof s.maxContextMessages !== 'undefined' && typeof s.contextOptions?.contextDepth === 'undefined') {
     s.contextOptions.contextDepth = Number(s.maxContextMessages) || 5;
   }
   delete s.maxContextMessages;
-  if (!Array.isArray(s.contextOptions.tagRules)) {
-    const names = String(s.contextOptions.tagNames || 'thinking')
-      .split(/[,，\s\n]+/)
-      .map((x) => x.trim().replace(/^<|>$/g, ''))
-      .filter(Boolean);
-    const mode = s.contextOptions.tagMode === 'extract' ? 'extract' : 'remove';
-    s.contextOptions.tagRules = (names.length ? names : ['thinking']).map((name) => ({ name, mode }));
-  }
-  delete s.contextOptions.manualContext;
-  delete s.contextOptions.presetNames;
-  delete s.contextOptions.worldBookNames;
-  delete s.contextOptions.removeHtmlComments;
-  delete s.contextOptions.tagMode;
-  delete s.contextOptions.tagNames;
-  s.enabledPresetsByChat ||= {};
-  s.enabledWorldBooksByChat ||= {};
-  s.selectedPresetItems ||= {};
+  if (typeof s.outputSchemaText === 'undefined') s.outputSchemaText = JSON_SCHEMA_TEXT;
+  if (!Array.isArray(s.apiProfiles)) s.apiProfiles = [];
+  s.selectedPresetNamesByChat ||= {};
+  s.selectedPresetItemsByChat ||= {};
+  s.selectedWorldBookNamesByChat ||= {};
   s.selectedWorldBookItemsByChat ||= {};
-  if (typeof s.systemPrompt === 'string') s.systemPrompt = s.systemPrompt.replace(/\u73a9\u5bb6/g, '{{user}}');
-  if (typeof s.outputFormat === 'string') s.outputFormat = s.outputFormat.replace(/\u73a9\u5bb6/g, '{{user}}');
-  if (!s.outputFormat) s.outputFormat = JSON_SCHEMA_TEXT;
-  if (typeof s.systemPrompt === 'string' && (s.systemPrompt.includes('规划应像导演手记与任务看板，而不是精确到小时的日程表') || s.systemPrompt.includes('inject_prompt \u4e0d\u8981写成'))) s.systemPrompt = DEFAULT_SYSTEM_PROMPT;
-  if (typeof s.outputFormat === 'string' && (s.outputFormat.includes('\u4e0d\u8981只写一句对白') || s.outputFormat.includes('\u4e0d\u8981锁死唯一结果'))) s.outputFormat = JSON_SCHEMA_TEXT;
-  if (s.lastLog) delete s.lastLog.request;
-}
-
-function getOutputFormatText() {
-  return settings?.outputFormat || JSON_SCHEMA_TEXT;
+  if (s.contextOptions) {
+    if (!Array.isArray(s.contextOptions.tagRules)) {
+      const names = String(s.contextOptions.tagNames || '').split(/[,，\s\n]+/).map((x) => x.trim()).filter(Boolean);
+      const action = s.contextOptions.tagMode === 'extract' || s.contextOptions.extractTags ? 'extract' : 'remove';
+      s.contextOptions.tagRules = (names.length ? names : ['thinking']).map((name) => ({ name: name.replace(/^<|>$/g, ''), action }));
+    }
+    delete s.contextOptions.tagMode;
+    delete s.contextOptions.tagNames;
+    delete s.contextOptions.removeTags;
+    delete s.contextOptions.extractTags;
+    delete s.contextOptions.manualContext;
+    delete s.contextOptions.presetNames;
+    delete s.contextOptions.worldBookNames;
+    delete s.contextOptions.removeHtmlComments;
+  }
 }
 
 function saveSettings() {
@@ -312,37 +314,57 @@ function getPersonaDescription() {
   return power.persona_description || globalThis.name2_description || context.user?.description || '';
 }
 
-function getTagRules() {
-  settings.contextOptions ||= {};
-  if (!Array.isArray(settings.contextOptions.tagRules) || !settings.contextOptions.tagRules.length) {
-    settings.contextOptions.tagRules = [{ name: 'thinking', mode: 'remove' }];
+function getPersonaName() {
+  const context = ctx();
+  const power = globalThis.power_user || context.power_user || {};
+  if (power.personas && power.persona_index !== undefined) {
+    return power.personas?.[power.persona_index]?.name || context.name1 || '{{user}}';
   }
-  return settings.contextOptions.tagRules
-    .map((rule) => ({
-      name: String(rule?.name || '').trim().replace(/^<|>$/g, ''),
-      mode: rule?.mode === 'extract' ? 'extract' : 'remove',
-    }))
-    .filter((rule) => rule.name);
+  return context.name1 || globalThis.name1 || '{{user}}';
+}
+
+function estimateTokens(text) {
+  const value = String(text || '').trim();
+  if (!value) return 0;
+  const cjk = (value.match(/[\u4e00-\u9fff]/g) || []).length;
+  const latin = value.replace(/[\u4e00-\u9fff]/g, '').trim().split(/\s+/).filter(Boolean).length;
+  return Math.max(1, Math.ceil(cjk / 1.7 + latin * 1.25));
+}
+
+function infoTag(text) {
+  return `<span class="sd-info-tag">${htmlEscape(text)}</span>`;
+}
+
+function getTagRules() {
+  const rules = Array.isArray(settings.contextOptions.tagRules) ? settings.contextOptions.tagRules : [];
+  return rules.map((rule) => ({
+    name: String(rule.name || '').trim().replace(/^<|>$/g, ''),
+    action: rule.action === 'extract' ? 'extract' : 'remove',
+  })).filter((rule) => rule.name);
 }
 
 function cleanContextText(text) {
-  let value = String(text || '').replace(/<!--[\s\S]*?-->/g, '');
-  const extracted = [];
-  for (const rule of getTagRules()) {
-    const reg = new RegExp(`<${escapeRegExp(rule.name)}\\b[^>]*>([\\s\\S]*?)<\\/${escapeRegExp(rule.name)}>`, 'gi');
-    if (rule.mode === 'extract') {
+  let value = String(text || '');
+  value = value.replace(/<!--[\s\S]*?-->/g, '');
+  const rules = getTagRules();
+  const extractRules = rules.filter((rule) => rule.action === 'extract');
+  if (extractRules.length) {
+    const extracted = [];
+    for (const rule of extractRules) {
+      const reg = new RegExp(`<${escapeRegExp(rule.name)}\\b[^>]*>([\\s\\S]*?)<\\/${escapeRegExp(rule.name)}>`, 'gi');
       let match;
-      while ((match = reg.exec(value)) !== null) {
-        const content = String(match[1] || '').trim();
-        if (content) extracted.push(`【提取标签 ${rule.name}】\n${content}`);
-      }
+      while ((match = reg.exec(value)) !== null) extracted.push(match[1].trim());
     }
-    value = value.replace(reg, '');
+    value = extracted.join('\n\n');
+  } else {
+    for (const rule of rules) {
+      const reg = new RegExp(`<${escapeRegExp(rule.name)}\\b[^>]*>[\\s\\S]*?<\\/${escapeRegExp(rule.name)}>`, 'gi');
+      value = value.replace(reg, '');
+    }
+    value = value.replace(/<script[\s\S]*?<\/script>/gi, '').replace(/<style[\s\S]*?<\/style>/gi, '');
+    value = value.replace(/<[^>]+>/g, '');
   }
-  value = value.replace(/<script[\s\S]*?<\/script>/gi, '').replace(/<style[\s\S]*?<\/style>/gi, '');
-  value = value.replace(/<[^>]+>/g, '');
-  const base = value.replace(/\n{3,}/g, '\n\n').trim();
-  return [base, ...extracted].filter(Boolean).join('\n\n').trim();
+  return value.replace(/\n{3,}/g, '\n\n').trim();
 }
 
 function escapeRegExp(text) {
@@ -393,122 +415,108 @@ function uniqueClean(list) {
   return [...new Set((list || []).map((x) => String(x || '').trim()).filter(Boolean))];
 }
 
-function getRequestHeaders() {
-  const context = ctx();
-  try {
-    if (typeof context.getRequestHeaders === 'function') return context.getRequestHeaders();
-  } catch (_) {}
-  const token = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || globalThis.token || '';
-  return token ? { 'Content-Type': 'application/json', 'X-CSRF-Token': token } : { 'Content-Type': 'application/json' };
+function normalizeSourceName(name) {
+  return String(name || '').trim();
 }
 
-function getCurrentPresetEntries() {
-  const context = ctx();
-  const prompts = context.chatCompletionSettings?.prompts || globalThis.chatCompletionSettings?.prompts || [];
-  return normalizePresetEntries(prompts);
+function isNoisePresetName(name) {
+  const value = normalizeSourceName(name);
+  return !value || ['in_use', 'settings', 'prompts', 'prompt_order', 'preset_settings', '当前预设'].includes(value);
 }
 
-function detectCurrentPresetNames() {
+function getCurrentPresetName() {
   const context = ctx();
-  const candidates = [];
-  try {
-    const helperCurrent = globalThis.TavernHelper?.getCurrentPreset?.();
-    candidates.push(...parseAnyString(helperCurrent?.name || helperCurrent));
-  } catch (_) {}
-  const paths = [
-    context.chatCompletionSettings?.name,
-    context.chatCompletionSettings?.preset,
-    globalThis.chatCompletionSettings?.name,
-    globalThis.chatCompletionSettings?.preset,
+  const chatSettings = context.chatCompletionSettings || {};
+  const candidates = [
+    chatSettings.name,
+    chatSettings.preset,
+    chatSettings.presetName,
+    chatSettings.preset_name,
     globalThis.power_user?.preset_settings,
-    globalThis.power_user?.instruct?.preset,
-    globalThis.preset_settings,
     globalThis.oai_settings?.preset_settings,
     globalThis.textgenerationwebui_settings?.preset,
     globalThis.novelai_settings?.preset,
-    context.power_user?.preset_settings,
-    context.settings?.preset_settings,
     context.preset_settings,
-  ];
-  for (const p of paths) candidates.push(...parseAnyString(p));
-  return uniqueClean(candidates);
+    context.settings?.preset_settings,
+  ].flatMap(parseAnyString).filter((name) => !isNoisePresetName(name));
+  return uniqueClean(candidates)[0] || '当前使用预设';
 }
 
-async function listPresetNames() {
-  const names = [];
-  try {
-    if (typeof globalThis.TavernHelper?.getPresetNames === 'function') {
-      names.push(...parseAnyString(await globalThis.TavernHelper.getPresetNames()));
-    }
-  } catch (_) {}
-  try {
-    if (typeof globalThis.TavernHelper?.getPresets === 'function') {
-      const presets = await globalThis.TavernHelper.getPresets();
-      if (Array.isArray(presets)) names.push(...presets.map((x) => x?.name || x));
-      else if (presets && typeof presets === 'object') names.push(...Object.keys(presets));
-    }
-  } catch (_) {}
-  const possible = [globalThis.preset_names, globalThis.presetNames, globalThis.oai_settings?.preset_names, globalThis.oai_settings?.presets, globalThis.textgenerationwebui_settings?.preset_names, ctx().preset_names, ctx().presetNames];
-  for (const item of possible) {
-    if (Array.isArray(item)) names.push(...parseAnyString(item));
-    else if (item && typeof item === 'object') names.push(...Object.keys(item));
-    else names.push(...parseAnyString(item));
-  }
-  for (const endpoint of ['/api/presets/list', '/api/presets/get']) {
-    try {
-      const res = await fetch(endpoint, { method: 'POST', headers: getRequestHeaders(), body: JSON.stringify({}) });
-      if (!res.ok) continue;
-      const data = await res.json();
-      if (Array.isArray(data)) names.push(...parseAnyString(data));
-      if (Array.isArray(data?.presets)) names.push(...data.presets.map((x) => x?.name || x));
-      if (Array.isArray(data?.preset_names)) names.push(...parseAnyString(data.preset_names));
-      if (data && typeof data === 'object' && !Array.isArray(data)) names.push(...Object.keys(data));
-    } catch (_) {}
-  }
-  return uniqueClean(names).filter((x) => !['settings', 'presets', 'preset_names'].includes(x));
+function getCurrentPresetEntries() {
+  const prompts = ctx().chatCompletionSettings?.prompts;
+  if (!Array.isArray(prompts)) return [];
+  return normalizePresetEntries(prompts);
 }
 
-async function getPresetEntries(name) {
-  try {
-    const preset = globalThis.TavernHelper?.getPreset?.(name);
-    const value = preset instanceof Promise ? await preset : preset;
-    const normalized = normalizePresetEntries(value?.prompts || value?.prompt || value);
-    if (normalized.length) return normalized;
-  } catch (error) {
-    console.warn(`[${MODULE_NAME}] get preset failed`, name, error);
-  }
-  for (const endpoint of ['/api/presets/get', '/api/presets/read']) {
-    try {
-      const res = await fetch(endpoint, { method: 'POST', headers: getRequestHeaders(), body: JSON.stringify({ name }) });
-      if (!res.ok) continue;
-      const data = await res.json();
-      const normalized = normalizePresetEntries(data?.prompts || data?.preset?.prompts || data?.prompt || data);
-      if (normalized.length) return normalized;
-    } catch (_) {}
-  }
+function normalizePresetEntries(entries) {
+  return (Array.isArray(entries) ? entries : Object.values(entries || {}))
+    .filter((item) => item && typeof item === 'object')
+    .filter((item) => String(item.identifier || item.name || '').trim() !== 'in_use')
+    .filter((item) => item.content || item.prompt || item.message || item.text || item.name || item.identifier);
+}
+
+function parseNameSource(source) {
+  if (!source) return [];
+  if (typeof source === 'string') return [source];
+  if (Array.isArray(source)) return source.flatMap((item) => {
+    if (typeof item === 'string') return [item];
+    if (item && typeof item === 'object') return [item.name, item.id, item.filename].filter(Boolean);
+    return [];
+  });
+  if (typeof source === 'object') return Object.keys(source);
   return [];
 }
 
-function normalizePresetEntries(value) {
-  const raw = Array.isArray(value) ? value : (value?.prompts || value?.entries || []);
-  return (Array.isArray(raw) ? raw : Object.values(raw || {}))
-    .map((item, index) => ({
-      ...item,
-      name: item?.name || item?.identifier || item?.role || `预设条目 ${index + 1}`,
-      identifier: item?.identifier || item?.name || `prompt_${index}`,
-      content: item?.content || item?.prompt || item?.message || item?.text || '',
-      enabled: item?.enabled !== false && item?.disabled !== true,
-      role: item?.role,
-    }))
-    .filter((item) => item.content);
+function listPresetNames() {
+  const context = ctx();
+  const names = [getCurrentPresetName()];
+  const sources = [
+    globalThis.preset_names,
+    globalThis.presetNames,
+    globalThis.oai_settings?.presets,
+    globalThis.oai_settings?.preset_names,
+    globalThis.textgenerationwebui_presets,
+    globalThis.novelai_presets,
+    globalThis.power_user?.presets,
+    context.preset_names,
+    context.presetNames,
+    context.presets,
+  ];
+  for (const source of sources) names.push(...parseNameSource(source));
+  try {
+    const helperNames = globalThis.TavernHelper?.getPresetNames?.();
+    names.push(...parseNameSource(helperNames));
+  } catch (_) {}
+  return uniqueClean(names).filter((name) => !isNoisePresetName(name));
+}
+
+function getPresetEntries(name) {
+  const currentName = getCurrentPresetName();
+  if (name === currentName || name === '当前使用预设') {
+    const currentEntries = getCurrentPresetEntries();
+    if (currentEntries.length) return currentEntries;
+  }
+  try {
+    const preset = globalThis.TavernHelper?.getPreset?.(name);
+    if (preset?.prompts) return normalizePresetEntries(preset.prompts);
+    if (Array.isArray(preset)) return normalizePresetEntries(preset);
+  } catch (error) {
+    console.warn(`[${MODULE_NAME}] get preset failed`, name, error);
+  }
+  const pools = [globalThis.presets, globalThis.oai_settings?.presets, globalThis.power_user?.presets, ctx().presets];
+  for (const pool of pools) {
+    const preset = pool?.[name] || (Array.isArray(pool) ? pool.find((item) => item?.name === name) : null);
+    if (preset?.prompts) return normalizePresetEntries(preset.prompts);
+    if (Array.isArray(preset)) return normalizePresetEntries(preset);
+  }
+  return [];
 }
 
 async function getWorldBookEntries(name) {
   try {
     if (typeof globalThis.TavernHelper?.getWorldbook === 'function') {
       const wb = await globalThis.TavernHelper.getWorldbook(name);
-      const entries = normalizeWorldBookEntries(wb);
-      if (entries.length) return entries;
+      if (wb) return normalizeWorldBookEntries(wb);
     }
   } catch (error) {
     console.warn(`[${MODULE_NAME}] TavernHelper worldbook failed`, name, error);
@@ -516,47 +524,46 @@ async function getWorldBookEntries(name) {
   try {
     if (typeof globalThis.getWorldbook === 'function') {
       const wb = await globalThis.getWorldbook(name);
-      const entries = normalizeWorldBookEntries(wb);
-      if (entries.length) return entries;
+      if (wb) return normalizeWorldBookEntries(wb);
     }
   } catch (error) {
     console.warn(`[${MODULE_NAME}] global getWorldbook failed`, name, error);
   }
   try {
-    const res = await fetch('/api/worldinfo/get', { method: 'POST', headers: getRequestHeaders(), body: JSON.stringify({ name }) });
+    const headers = typeof ctx().getRequestHeaders === 'function'
+      ? ctx().getRequestHeaders()
+      : { 'Content-Type': 'application/json', 'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || globalThis.token || '' };
+    const res = await fetch('/api/worldinfo/get', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ name }),
+    });
     if (res.ok) return normalizeWorldBookEntries(await res.json(), name);
   } catch (error) {
     console.warn(`[${MODULE_NAME}] worldinfo endpoint failed`, name, error);
   }
-  try {
-    if (typeof globalThis.worldInfoCache !== 'undefined' && globalThis.worldInfoCache.has(name)) {
-      return normalizeWorldBookEntries(globalThis.worldInfoCache.get(name), name);
-    }
-  } catch (_) {}
   return [];
 }
 
 function normalizeWorldBookEntries(wb, name = '') {
-  const raw = Array.isArray(wb) ? wb : (wb?.entries ? Object.values(wb.entries) : (name && wb?.[name]?.entries ? Object.values(wb[name].entries) : []));
-  return (Array.isArray(raw) ? raw : Object.values(raw || {}))
-    .map((item, index) => ({
-      ...item,
-      name: item?.comment || item?.name || item?.key?.[0] || item?.keys?.[0] || `世界书条目 ${index + 1}`,
-      identifier: item?.uid ?? item?.id ?? item?.comment ?? item?.name ?? item?.key?.[0] ?? item?.keys?.[0] ?? `wi_${index}`,
-      content: item?.content || item?.text || '',
-      constant: !!item?.constant,
-      enabled: item?.enabled !== false && item?.disable !== true,
-    }))
-    .filter((item) => item.content);
+  if (Array.isArray(wb)) return wb;
+  if (wb?.entries) return Object.values(wb.entries);
+  if (name && wb?.[name]?.entries) return Object.values(wb[name].entries);
+  return [];
 }
 
 async function listWorldBooks() {
   const names = [];
   try {
-    if (typeof globalThis.TavernHelper?.getWorldbookNames === 'function') names.push(...parseAnyString(await globalThis.TavernHelper.getWorldbookNames()));
+    if (typeof globalThis.TavernHelper?.getWorldbookNames === 'function') {
+      names.push(...parseAnyString(await globalThis.TavernHelper.getWorldbookNames()));
+    }
   } catch (_) {}
   try {
-    const res = await fetch('/api/worldinfo/list', { headers: getRequestHeaders() });
+    const headers = typeof ctx().getRequestHeaders === 'function'
+      ? ctx().getRequestHeaders()
+      : { 'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || globalThis.token || '' };
+    const res = await fetch('/api/worldinfo/list', { headers });
     if (res.ok) {
       const data = await res.json();
       if (Array.isArray(data)) names.push(...parseAnyString(data));
@@ -567,15 +574,7 @@ async function listWorldBooks() {
   } catch (_) {}
   names.push(...parseAnyString(globalThis.world_names));
   names.push(...parseAnyString(globalThis.world_info_names));
-  names.push(...parseAnyString(ctx().world_names));
-  return uniqueClean(names).filter((x) => !['world_names', 'worldNames', 'settings'].includes(x));
-}
-
-function getEmbeddedCharacterBookEntries() {
-  const context = ctx();
-  const ch = context.characters?.[context.characterId] || {};
-  const book = ch?.data?.character_book || ch?.character_book || null;
-  return book?.entries ? normalizeWorldBookEntries(book) : [];
+  return uniqueClean(names).filter((x) => !['world_names', 'worldNames', 'settings', 'entries'].includes(x));
 }
 
 function detectBoundWorldBookNames() {
@@ -586,26 +585,54 @@ function detectBoundWorldBookNames() {
   candidates.push(...parseAnyString(ch.data?.extensions?.world_info));
   candidates.push(...parseAnyString(ch.world));
   candidates.push(...parseAnyString(ch.data?.world));
-  candidates.push(...parseAnyString(ch.data?.character_book?.name));
-  candidates.push(...parseAnyString(context.chatMetadata?.world_info));
-  candidates.push(...parseAnyString(context.chatMetadata?.world));
-  candidates.push(...parseAnyString(globalThis.selected_world_info));
   candidates.push(...parseAnyString(context.world_names));
   candidates.push(...parseAnyString(context.worldNames));
-  return uniqueClean(candidates);
+  candidates.push(...parseAnyString(globalThis.selected_world_info));
+  return uniqueClean(candidates).filter(Boolean);
+}
+
+async function refreshContextSources(showToast = true) {
+  const currentPresetName = getCurrentPresetName();
+  const presetNames = listPresetNames();
+  const boundNames = detectBoundWorldBookNames();
+  const allWorldNames = await listWorldBooks();
+  const selectedPresetNames = getSelectedPresetNames();
+  const selectedWorldNames = getSelectedWorldBookNames();
+  const cache = { presets: {}, worldBooks: {}, presetNames, worldBookNames: allWorldNames, currentPresetName, boundWorldBookNames: boundNames, scannedAt: new Date().toISOString() };
+
+  for (const name of presetNames) {
+    if (name === currentPresetName || selectedPresetNames.includes(name)) cache.presets[name] = getPresetEntries(name);
+  }
+  for (const name of selectedWorldNames) {
+    if (allWorldNames.includes(name) || boundNames.includes(name)) cache.worldBooks[name] = await getWorldBookEntries(name);
+  }
+
+  initializeSelectedContextState(cache);
+  contextScanCache = cache;
+  saveSettings();
+  if (showToast) toast('已刷新。', 'success');
+  if (document.getElementById(MODAL_ID)?.classList.contains('open')) renderModal();
 }
 
 function getPresetNameStore() {
   const chatKey = getChatKey();
-  settings.enabledPresetsByChat ||= {};
-  if (!settings.enabledPresetsByChat[chatKey]) settings.enabledPresetsByChat[chatKey] = {};
-  return settings.enabledPresetsByChat[chatKey];
+  settings.selectedPresetNamesByChat ||= {};
+  if (!settings.selectedPresetNamesByChat[chatKey]) settings.selectedPresetNamesByChat[chatKey] = {};
+  return settings.selectedPresetNamesByChat[chatKey];
 }
 
-function isPresetNameEnabled(name, isCurrent = false) {
-  const store = getPresetNameStore();
-  if (typeof store[name] === 'undefined') return !!isCurrent;
-  return !!store[name];
+function getPresetSelectionStore() {
+  const chatKey = getChatKey();
+  settings.selectedPresetItemsByChat ||= {};
+  if (!settings.selectedPresetItemsByChat[chatKey]) settings.selectedPresetItemsByChat[chatKey] = {};
+  return settings.selectedPresetItemsByChat[chatKey];
+}
+
+function getWorldNameStore() {
+  const chatKey = getChatKey();
+  settings.selectedWorldBookNamesByChat ||= {};
+  if (!settings.selectedWorldBookNamesByChat[chatKey]) settings.selectedWorldBookNamesByChat[chatKey] = {};
+  return settings.selectedWorldBookNamesByChat[chatKey];
 }
 
 function getWorldSelectionStore() {
@@ -616,35 +643,53 @@ function getWorldSelectionStore() {
 }
 
 function getEnabledWorldBookStore() {
-  const chatKey = getChatKey();
-  settings.enabledWorldBooksByChat ||= {};
-  if (!settings.enabledWorldBooksByChat[chatKey]) settings.enabledWorldBooksByChat[chatKey] = {};
-  return settings.enabledWorldBooksByChat[chatKey];
+  return getWorldNameStore();
 }
 
-function isWorldBookNameEnabled(name, isBound = false) {
-  const store = getEnabledWorldBookStore();
-  if (typeof store[name] === 'undefined') return !!isBound;
-  return !!store[name];
+function getSelectedPresetNames() {
+  const store = getPresetNameStore();
+  const currentName = getCurrentPresetName();
+  if (currentName && typeof store[currentName] === 'undefined') store[currentName] = true;
+  return Object.entries(store).filter(([, selected]) => selected).map(([name]) => name);
+}
+
+function setPresetNameSelected(name, selected) {
+  const store = getPresetNameStore();
+  store[name] = selected;
+  if (selected && !contextScanCache.presets?.[name]) contextScanCache.presets[name] = getPresetEntries(name);
+  initializeSelectedContextState(contextScanCache);
+  saveSettings();
+}
+
+function getSelectedWorldBookNames() {
+  const store = getWorldNameStore();
+  for (const name of detectBoundWorldBookNames()) {
+    if (typeof store[name] === 'undefined') store[name] = true;
+  }
+  return Object.entries(store).filter(([, selected]) => selected).map(([name]) => name);
+}
+
+async function setWorldBookNameSelected(name, selected) {
+  const store = getWorldNameStore();
+  store[name] = selected;
+  if (selected && !contextScanCache.worldBooks?.[name]) contextScanCache.worldBooks[name] = await getWorldBookEntries(name);
+  initializeSelectedContextState(contextScanCache);
+  saveSettings();
 }
 
 function isPresetItemSelected(presetName, itemId) {
-  const group = settings.selectedPresetItems?.[presetName] || {};
-  if (typeof group[String(itemId)] === 'undefined') return true;
-  return !!group[String(itemId)];
+  return !!getPresetSelectionStore()?.[presetName]?.[String(itemId)];
 }
 
 function setPresetItemSelected(presetName, itemId, selected) {
-  settings.selectedPresetItems ||= {};
-  if (!settings.selectedPresetItems[presetName]) settings.selectedPresetItems[presetName] = {};
-  settings.selectedPresetItems[presetName][String(itemId)] = selected;
+  const store = getPresetSelectionStore();
+  if (!store[presetName]) store[presetName] = {};
+  store[presetName][String(itemId)] = selected;
   saveSettings();
 }
 
 function isWorldItemSelected(wbName, itemId) {
-  const group = getWorldSelectionStore()?.[wbName] || {};
-  if (typeof group[String(itemId)] === 'undefined') return true;
-  return !!group[String(itemId)];
+  return !!getWorldSelectionStore()?.[wbName]?.[String(itemId)];
 }
 
 function setWorldItemSelected(wbName, itemId, selected) {
@@ -654,58 +699,27 @@ function setWorldItemSelected(wbName, itemId, selected) {
   saveSettings();
 }
 
-function getContextItemId(item) {
-  return item.identifier ?? item.uid ?? item.id ?? item.name ?? item.comment ?? JSON.stringify(item).slice(0, 24);
+function getContextItemId(item, index = 0) {
+  return item.uid ?? item.id ?? item.identifier ?? item.name ?? item.comment ?? item.key ?? `item_${index}`;
 }
 
-async function refreshContextSources(showToast = true) {
-  const currentNames = detectCurrentPresetNames();
-  const currentPresetName = currentNames[0] || '当前预设';
-  const currentPresetEntries = getCurrentPresetEntries();
-  const allPresetNames = await listPresetNames();
-  const presetStore = getPresetNameStore();
-  if (typeof presetStore[currentPresetName] === 'undefined') presetStore[currentPresetName] = true;
-
-  const boundNames = detectBoundWorldBookNames();
-  const embeddedEntries = getEmbeddedCharacterBookEntries();
-  const allWorldNames = await listWorldBooks();
-  const otherNames = allWorldNames.filter((n) => !boundNames.includes(n));
-  const cache = { presets: {}, currentPresets: {}, otherPresets: {}, boundWorldBooks: {}, otherWorldBooks: {}, currentPresetName, presetNames: allPresetNames, boundWorldBookNames: boundNames, otherWorldBookNames: otherNames, scannedAt: new Date().toISOString() };
-
-  if (isPresetNameEnabled(currentPresetName, true)) {
-    cache.currentPresets[currentPresetName] = currentPresetEntries;
-    cache.presets[currentPresetName] = currentPresetEntries;
+function initializeSelectedContextState(cache) {
+  const presetStore = getPresetSelectionStore();
+  for (const [name, entries] of Object.entries(cache.presets || {})) {
+    if (!presetStore[name]) presetStore[name] = {};
+    (entries || []).forEach((item, index) => {
+      const id = String(getContextItemId(item, index));
+      if (typeof presetStore[name][id] === 'undefined') presetStore[name][id] = item.enabled !== false;
+    });
   }
-  for (const name of allPresetNames.filter((n) => n !== currentPresetName)) {
-    if (!isPresetNameEnabled(name, false)) continue;
-    const entries = await getPresetEntries(name);
-    cache.otherPresets[name] = entries;
-    cache.presets[name] = entries;
+  const worldStore = getWorldSelectionStore();
+  for (const [name, entries] of Object.entries(cache.worldBooks || {})) {
+    if (!worldStore[name]) worldStore[name] = {};
+    (entries || []).forEach((item, index) => {
+      const id = String(getContextItemId(item, index));
+      if (typeof worldStore[name][id] === 'undefined') worldStore[name][id] = item.enabled !== false;
+    });
   }
-
-  const worldStore = getEnabledWorldBookStore();
-  for (const name of boundNames) {
-    if (typeof worldStore[name] === 'undefined') worldStore[name] = true;
-    if (!isWorldBookNameEnabled(name, true)) continue;
-    cache.boundWorldBooks[name] = await getWorldBookEntries(name);
-  }
-  if (embeddedEntries.length) {
-    const embeddedName = '角色内嵌世界书';
-    if (typeof worldStore[embeddedName] === 'undefined') worldStore[embeddedName] = true;
-    if (isWorldBookNameEnabled(embeddedName, true)) {
-      cache.boundWorldBooks[embeddedName] = embeddedEntries;
-      if (!cache.boundWorldBookNames.includes(embeddedName)) cache.boundWorldBookNames.push(embeddedName);
-    }
-  }
-  for (const name of otherNames) {
-    if (!isWorldBookNameEnabled(name, false)) continue;
-    cache.otherWorldBooks[name] = await getWorldBookEntries(name);
-  }
-
-  contextScanCache = cache;
-  saveSettings();
-  if (showToast) toast('已刷新取材。', 'success');
-  if (document.getElementById(MODAL_ID)?.classList.contains('open')) renderModal();
 }
 
 async function buildExtraContextText() {
@@ -717,26 +731,27 @@ async function buildExtraContextText() {
   }
   if (settings.contextOptions.includeUserDesc) {
     const desc = await resolveMacro(getPersonaDescription());
-    if (desc) output += `\n【{{user}} 人设】\n${cleanContextText(desc)}\n`;
+    if (desc) output += `\n【用户人设】\n${cleanContextText(desc)}\n`;
   }
 
-  for (const [presetName, entries] of Object.entries(contextScanCache.presets || {})) {
-    for (const item of entries || []) {
-      const itemId = getContextItemId(item);
+  for (const presetName of getSelectedPresetNames()) {
+    const entries = contextScanCache.presets?.[presetName] || getPresetEntries(presetName);
+    for (const [index, item] of (entries || []).entries()) {
+      const itemId = getContextItemId(item, index);
       if (!isPresetItemSelected(presetName, itemId)) continue;
-      const title = item.name || item.identifier || item.role || '未命名预设条目';
-      let content = await resolveMacro(item.content || item.message || item.text || '');
+      const title = item.name || item.identifier || item.role || `预设条目 ${index + 1}`;
+      let content = await resolveMacro(item.content || item.prompt || item.message || item.text || '');
       content = processRandomMacros(content);
       if (content) output += `\n【预设 - ${presetName}: ${title}】\n${cleanContextText(content)}\n`;
     }
   }
 
-  const allWorldGroups = { ...(contextScanCache.boundWorldBooks || {}), ...(contextScanCache.otherWorldBooks || {}) };
-  for (const [wbName, entries] of Object.entries(allWorldGroups)) {
-    for (const item of entries || []) {
-      const itemId = getContextItemId(item);
+  for (const wbName of getSelectedWorldBookNames()) {
+    const entries = contextScanCache.worldBooks?.[wbName] || [];
+    for (const [index, item] of (entries || []).entries()) {
+      const itemId = getContextItemId(item, index);
       if (!isWorldItemSelected(wbName, itemId)) continue;
-      const title = item.name || item.comment || (Array.isArray(item.key) ? item.key.join(', ') : item.key) || '未命名世界书条目';
+      const title = item.name || item.comment || (Array.isArray(item.key) ? item.key.join(', ') : item.key) || `世界书条目 ${index + 1}`;
       let content = await resolveMacro(item.content || item.text || '');
       content = processRandomMacros(content);
       if (content) output += `\n【世界书 - ${wbName}: ${title}】\n${cleanContextText(content)}\n`;
@@ -748,14 +763,14 @@ async function buildExtraContextText() {
 async function buildPrompt() {
   const store = getChatStore();
   const pieces = [];
-  pieces.push(`【当前对象】\n角色/群聊：${getCharacterName()}\n`);
+  pieces.push(`【当前对象】\n角色/群聊：${getCharacterName()}\n用户：{{user}}\n`);
   pieces.push(`【编剧】\n${store.blueprint || DEFAULT_BLUEPRINT}\n`);
   if (settings.contextOptions.includeChatHistory) pieces.push(`【近期对话】\n${getChatHistoryText() || '暂无对话记录'}\n`);
   const extra = await buildExtraContextText();
   if (extra) pieces.push(`【参考项】\n${extra}\n`);
   if (store.plan) pieces.push(`【上一次审片状态】\n${JSON.stringify(store.plan, null, 2)}\n`);
-  pieces.push(getOutputFormatText());
-  pieces.push('请输出纯 JSON 对象。所有百分比数值范围为0-100。任务、剧情节点、NPC动态和世界变化都要贴合当前故事，并保留 {{user}} 的选择自由。');
+  pieces.push(settings.outputSchemaText || JSON_SCHEMA_TEXT);
+  pieces.push('请只输出JSON对象。所有百分比数值范围为0-100。任务、剧情节点、NPC动态和世界变化都要贴合当前故事，保留 {{user}} 的选择自由，并依据叙事概率引入新NPC或共同交际圈变量。');
   return pieces.join('\n\n');
 }
 
@@ -832,7 +847,7 @@ async function generateDirectorPlan(showSuccessToast = true, silentFailure = fal
   try {
     const userPrompt = await buildPrompt();
     messages = [{ role: 'system', content: settings.systemPrompt || DEFAULT_SYSTEM_PROMPT }, { role: 'user', content: userPrompt }];
-    settings.lastLog = { status: 'loading', time: new Date().toLocaleString(), duration: '', response: '', error: '' };
+    settings.lastLog = { status: 'loading', time: new Date().toLocaleString(), duration: '', request: JSON.stringify(messages, null, 2), response: '', error: '' };
     saveSettings();
 
     const raw = settings.providerMode === 'sillytavern' ? await callSillyTavernModel(messages) : await callExternalApi(messages);
@@ -871,6 +886,16 @@ async function generateDirectorPlan(showSuccessToast = true, silentFailure = fal
   }
 }
 
+function parseModelList(data) {
+  const candidates = [];
+  if (Array.isArray(data?.data)) candidates.push(...data.data.map((x) => x?.id || x?.name || x));
+  if (Array.isArray(data?.models)) candidates.push(...data.models.map((x) => x?.id || x?.name || x));
+  if (Array.isArray(data)) candidates.push(...data.map((x) => x?.id || x?.name || x));
+  if (data?.data && typeof data.data === 'object' && !Array.isArray(data.data)) candidates.push(...Object.keys(data.data));
+  if (data?.models && typeof data.models === 'object' && !Array.isArray(data.models)) candidates.push(...Object.keys(data.models));
+  return uniqueClean(candidates).sort((a, b) => a.localeCompare(b));
+}
+
 async function fetchModels() {
   try {
     const base = normalizeUrl(settings.apiUrl);
@@ -878,7 +903,7 @@ async function fetchModels() {
     const res = await fetch(`${base}/v1/models`, { headers: { Authorization: `Bearer ${settings.apiKey}` } });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-    settings.availableModels = (data.data || []).map((x) => x.id).filter(Boolean);
+    settings.availableModels = parseModelList(data);
     if (!settings.model && settings.availableModels.length) settings.model = settings.availableModels[0];
     saveSettings();
     toast(`已拉取 ${settings.availableModels.length} 个模型。`, 'success');
@@ -974,48 +999,57 @@ function applyFloatPosition(btn) {
 function bindFloatDrag(btn) {
   if (btn.dataset.dragBound) return;
   btn.dataset.dragBound = '1';
-  const drag = { active: false, moved: false, startX: 0, startY: 0, originX: 0, originY: 0 };
+  let startX = 0;
+  let startY = 0;
+  let originX = 0;
+  let originY = 0;
+  let moved = false;
+
   btn.addEventListener('pointerdown', (event) => {
     if (event.button !== undefined && event.button !== 0) return;
-    event.preventDefault();
-    event.stopPropagation();
     const pos = clampFloatPosition();
-    drag.active = true;
-    drag.moved = false;
-    drag.startX = event.clientX;
-    drag.startY = event.clientY;
-    drag.originX = pos.x;
-    drag.originY = pos.y;
+    startX = event.clientX;
+    startY = event.clientY;
+    originX = pos.x;
+    originY = pos.y;
+    moved = false;
     btn.setPointerCapture?.(event.pointerId);
   });
+
   btn.addEventListener('pointermove', (event) => {
-    if (!drag.active) return;
-    event.preventDefault();
-    event.stopPropagation();
-    const dx = event.clientX - drag.startX;
-    const dy = event.clientY - drag.startY;
-    if (Math.abs(dx) + Math.abs(dy) > 5) drag.moved = true;
+    if (!btn.hasPointerCapture?.(event.pointerId)) return;
+    const dx = event.clientX - startX;
+    const dy = event.clientY - startY;
+    if (Math.abs(dx) + Math.abs(dy) > 4) moved = true;
     settings.floatPosition ||= { x: null, y: null };
-    settings.floatPosition.x = drag.originX + dx;
-    settings.floatPosition.y = drag.originY + dy;
+    settings.floatPosition.x = originX + dx;
+    settings.floatPosition.y = originY + dy;
     applyFloatPosition(btn);
   });
+
   const finish = (event) => {
-    if (!drag.active) return;
-    event.preventDefault();
-    event.stopPropagation();
-    drag.active = false;
+    if (!btn.hasPointerCapture?.(event.pointerId)) return;
     btn.releasePointerCapture?.(event.pointerId);
-    clampFloatPosition();
+    const pos = clampFloatPosition();
+    settings.floatPosition.x = pos.x;
+    settings.floatPosition.y = pos.y;
     applyFloatPosition(btn);
     saveSettings();
-    if (!drag.moved) openModal('dashboard');
+    if (moved) {
+      btn.dataset.justDragged = '1';
+      setTimeout(() => { delete btn.dataset.justDragged; }, 120);
+    }
   };
   btn.addEventListener('pointerup', finish);
   btn.addEventListener('pointercancel', finish);
+
   btn.addEventListener('click', (event) => {
-    event.preventDefault();
-    event.stopPropagation();
+    if (btn.dataset.justDragged === '1') {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+    openModal('dashboard');
   });
 }
 
@@ -1029,7 +1063,10 @@ function renderFloatButton() {
     btn = document.createElement('button');
     btn.id = FLOAT_ID;
     btn.type = 'button';
+    btn.title = '浮生剧编';
+    btn.textContent = '剧';
     document.body.appendChild(btn);
+    bindFloatDrag(btn);
   }
   btn.textContent = '剧';
   btn.title = '浮生剧编';
@@ -1054,6 +1091,7 @@ function renderModal() {
     ['castworld', '角色世界'],
     ['context', '扩展'],
     ['settings', '幕后'],
+    ['plug', '🔌'],
   ];
   const wasOpen = modal.classList.contains('open');
   modal.className = `sd-theme-${settings.theme === 'dark' ? 'dark' : 'light'}${wasOpen ? ' open' : ''}`;
@@ -1061,10 +1099,13 @@ function renderModal() {
     <div class="sd-backdrop"></div>
     <section class="sd-window" role="dialog" aria-label="浮生剧编">
       <header class="sd-header">
-        <div class="sd-titlebox"><h2>浮生剧编</h2><p>故事自成脉络&nbsp;&nbsp;命运早有伏笔</p></div>
+        <div class="sd-titlebox">
+          <h2>浮生剧编</h2>
+          <p>故事自成脉络&nbsp;&nbsp;命运早有伏笔</p>
+        </div>
         <div class="sd-header-actions">
-          <button class="sd-theme-toggle" title="切换外观">${settings.theme === 'dark' ? '☀ 日' : '☾ 夜'}</button>
           <button class="sd-plug-shortcut" title="API与日志">🔌</button>
+          <button class="sd-theme-toggle" title="切换外观" aria-label="切换外观"><span></span></button>
           <button class="sd-close" title="关闭">×</button>
         </div>
       </header>
@@ -1073,11 +1114,8 @@ function renderModal() {
       </nav>
       <main class="sd-body">${renderActiveTab()}</main>
     </section>`;
-  const windowEl = modal.querySelector('.sd-window');
-  ['pointerdown', 'mousedown', 'touchstart', 'click'].forEach((type) => {
-    windowEl?.addEventListener(type, (event) => event.stopPropagation());
-  });
   modal.querySelector('.sd-backdrop')?.addEventListener('click', closeModal);
+  modal.querySelector('.sd-window')?.addEventListener('click', (event) => event.stopPropagation());
   modal.querySelector('.sd-close')?.addEventListener('click', closeModal);
   modal.querySelector('.sd-plug-shortcut')?.addEventListener('click', () => { activeTab = 'plug'; renderModal(); });
   modal.querySelector('.sd-theme-toggle')?.addEventListener('click', () => {
@@ -1109,10 +1147,20 @@ function renderActiveTab() {
   }
 }
 
+function metricBar(label, value) {
+  const n = Math.max(0, Math.min(100, Number(value || 0)));
+  return `<div class="sd-metric sd-progress-metric"><div class="sd-metric-top"><span>${label}</span><b>${n}%</b></div><div class="sd-bar"><i style="width:${n}%"></i></div></div>`;
+}
+
+function metricCircle(label, value) {
+  const n = Math.max(0, Math.min(100, Number(value || 0)));
+  return `<div class="sd-circle-metric" style="--sd-value:${n}"><div class="sd-circle"><span>${n}%</span></div><b>${label}</b></div>`;
+}
+
 function renderDashboardTab() {
   const p = currentPlan();
   if (!p) {
-    return `<section class="sd-card sd-plan-card"><h3>剧情规划</h3><div class="sd-empty">还没有审片结果。刷新后这里会显示故事状态、导演手记和可写入的推进文本。</div><div class="sd-button-row sd-center"><button class="sd-btn sd-primary sd-generate-main">刷新剧情</button>${busy ? '<button class="sd-btn sd-stop">取消</button>' : ''}</div></section>`;
+    return `<section class="sd-card sd-plan-card"><h3>剧情规划</h3><div class="sd-empty">尚未生成剧情规划</div><div class="sd-button-row sd-center"><button class="sd-btn sd-primary sd-generate-main">刷新剧情</button>${busy ? '<button class="sd-btn sd-stop">取消</button>' : ''}</div></section>`;
   }
   const st = p.story_status || {};
   return `
@@ -1125,11 +1173,10 @@ function renderDashboardTab() {
       <div class="sd-two"><b>氛围：</b>${htmlEscape(st.mood || '-')}</div>
       <div class="sd-button-row"><button class="sd-btn sd-primary sd-generate-main">刷新剧情</button>${busy ? '<button class="sd-btn sd-stop">停止</button>' : ''}</div>
     </section>
-    <div class="sd-metrics-compact">
-      ${metric('进度', st.progress, 'wide')}
-      ${metric('张力', st.tension)}${metric('情感', st.romance)}
-      ${metric('悬疑', st.mystery)}${metric('危险', st.danger)}
-    </div>
+    <section class="sd-card sd-status-card">
+      ${metricBar('进度', st.progress)}
+      <div class="sd-circle-grid">${metricCircle('张力', st.tension)}${metricCircle('情感', st.romance)}${metricCircle('悬疑', st.mystery)}${metricCircle('危险', st.danger)}</div>
+    </section>
     <div class="sd-grid sd-grid-4">
       ${countCard('任务', p.quests?.length || 0, 'tasksnodes')}
       ${countCard('节点', p.story_nodes?.length || 0, 'tasksnodes')}
@@ -1138,11 +1185,6 @@ function renderDashboardTab() {
     </div>
     <section class="sd-card"><h3>导演手记</h3><p>${htmlEscape(p.director_comment || '暂无')}</p><p class="sd-muted">${htmlEscape(p.next_refresh_hint || '')}</p></section>
     ${renderHistorySection()}`;
-}
-
-function metric(label, value, variant = '') {
-  const n = Math.max(0, Math.min(100, Number(value || 0)));
-  return `<div class="sd-metric ${variant === 'wide' ? 'sd-metric-wide' : ''}"><div class="sd-metric-top"><span>${label}</span><b>${n}%</b></div><div class="sd-bar"><i style="width:${n}%"></i></div></div>`;
 }
 
 function countCard(label, count, jump) {
@@ -1165,23 +1207,22 @@ function formatDateTime(date) {
 
 function renderTasksNodesTab() {
   const p = currentPlan();
-  if (!p) return renderNoPlan('tasksnodes');
-  return `<section class="sd-card"><h3>任务</h3>${renderItemList(p.quests || [], 'quest')}</section><section class="sd-card"><h3>节点</h3>${renderItemList(p.story_nodes || [], 'node')}</section>`;
+  if (!p) return renderNoPlan('任务节点尚未生成');
+  return `${renderPlanSection('任务', p.quests || [], 'quest')}${renderPlanSection('节点', p.story_nodes || [], 'node')}`;
 }
 
 function renderCastWorldTab() {
   const p = currentPlan();
-  if (!p) return renderNoPlan('castworld');
-  return `<section class="sd-card"><h3>角色动向</h3>${renderItemList(p.npc_updates || [], 'npc')}</section><section class="sd-card"><h3>世界回声</h3>${renderItemList(p.world_updates || [], 'world')}</section>`;
+  if (!p) return renderNoPlan('角色世界尚未生成');
+  return `${renderPlanSection('角色动向', p.npc_updates || [], 'npc')}${renderPlanSection('世界回声', p.world_updates || [], 'world')}`;
 }
 
-function renderNoPlan(kind = 'general') {
-  const messages = {
-    tasksnodes: '任务节点还没有生成。刷新后这里会分开显示可选择任务与触发节点。',
-    castworld: '角色世界还没有生成。刷新后这里会分开显示角色动向与世界回声。',
-    general: '尚未生成剧情规划。',
-  };
-  return `<section class="sd-card sd-plan-card"><div class="sd-empty">${messages[kind] || messages.general}</div><div class="sd-button-row sd-center"><button class="sd-btn sd-primary sd-generate-main">刷新剧情</button>${busy ? '<button class="sd-btn sd-stop">取消</button>' : ''}</div></section>`;
+function renderPlanSection(title, items, kind) {
+  return `<details class="sd-card sd-plan-section"><summary><h3>${htmlEscape(title)}</h3><span>${items?.length || 0} 条</span></summary>${renderItemList(items || [], kind)}</details>`;
+}
+
+function renderNoPlan(text = '尚未生成剧情规划') {
+  return `<section class="sd-card sd-plan-card"><div class="sd-empty">${htmlEscape(text)}</div><div class="sd-button-row sd-center"><button class="sd-btn sd-primary sd-generate-main">刷新剧情</button>${busy ? '<button class="sd-btn sd-stop">取消</button>' : ''}</div></section>`;
 }
 
 function renderItemList(items, kind) {
@@ -1198,11 +1239,11 @@ function renderItemCard(item, kind, idx) {
   } else if (kind === 'node') {
     fields.push(['触发', item.trigger], ['伏笔', item.foreshadowing], ['事件', item.event], ['后果', item.consequences], ['优先级', item.priority]);
   } else if (kind === 'npc') {
-    fields.push(['定位', item.role], ['目标', item.current_goal], ['进度', item.progress !== undefined ? `${item.progress}%` : ''], ['情绪', item.emotional_state], ['行动', item.next_action], ['隐情', item.hidden_agenda], ['关系', item.relationship_to_user]);
+    fields.push(['定位', item.role], ['目标', item.current_goal], ['进度', item.progress !== undefined ? `${item.progress}%` : ''], ['情绪', item.emotional_state], ['行动', item.next_action], ['隐情', item.hidden_agenda], ['关系网', item.relationship_to_user]);
   } else {
     fields.push(['类型', item.type], ['内容', item.content], ['影响', item.impact], ['时机', item.timing]);
   }
-  return `<article class="sd-item-card"><div class="sd-card-title"><h4>${htmlEscape(title)}</h4>${badge(item.type || item.priority || item.status || '')}</div><dl>${fields.filter(([, v]) => v !== undefined && v !== '').map(([k, v]) => `<dt>${htmlEscape(k)}</dt><dd>${htmlEscape(v)}</dd>`).join('')}</dl>${prompt ? `<details class="sd-inject-preview"><summary>写入文本</summary><pre>${htmlEscape(prompt)}</pre></details><button class="sd-btn sd-inject" data-text="${htmlEscape(prompt)}">写入输入框</button>` : ''}</article>`;
+  return `<article class="sd-item-card"><div class="sd-card-title"><h4>${htmlEscape(title)}</h4>${badge(item.type || item.priority || item.status || '')}</div><dl>${fields.filter(([, v]) => v !== undefined && v !== '').map(([k, v]) => `<dt>${htmlEscape(k)}</dt><dd>${htmlEscape(v)}</dd>`).join('')}</dl>${prompt ? `<div class="sd-inject-preview"><pre>${htmlEscape(prompt)}</pre></div><button class="sd-btn sd-inject" data-text="${htmlEscape(prompt)}">写入输入框</button>` : ''}</article>`;
 }
 
 function badge(text) {
@@ -1216,7 +1257,7 @@ function renderBlueprintTab() {
     <section class="sd-card">
       <h3>当前聊天的剧本</h3>
       <textarea class="text_pole sd-textarea sd-blueprint" spellcheck="false">${htmlEscape(store.blueprint || DEFAULT_BLUEPRINT)}</textarea>
-      <div class="sd-button-row">
+      <div class="sd-button-row sd-blueprint-actions">
         <button class="sd-btn sd-save-blueprint">保存当前剧本</button>
         <button class="sd-btn sd-save-template">保存到剧本库</button>
         <button class="sd-btn sd-export-templates">导出剧本</button>
@@ -1237,83 +1278,82 @@ function formatDate(date) {
 
 function renderContextTab() {
   const opts = settings.contextOptions;
+  const charDesc = getCharacterDescription();
+  const userDesc = getPersonaDescription();
   return `
     <details class="sd-accordion" open>
-      <summary><b>基础引用</b><span>勾选后作为浮生剧编参考项</span></summary>
-      <div class="sd-form-grid">
-        <label class="checkbox_label"><input type="checkbox" class="sd-opt" data-key="includeChatHistory" ${opts.includeChatHistory ? 'checked' : ''}> 上下文参考</label>
-        <label class="sd-inline-number"><span>参考楼层数</span><input class="text_pole sd-context-depth" type="number" min="1" max="200" value="${htmlEscape(opts.contextDepth || 5)}"></label>
-        <label class="checkbox_label"><input type="checkbox" class="sd-opt" data-key="includeCharDesc" ${opts.includeCharDesc ? 'checked' : ''}> 引用当前角色设定</label>
-        <label class="checkbox_label"><input type="checkbox" class="sd-opt" data-key="includeUserDesc" ${opts.includeUserDesc ? 'checked' : ''}> 引用用户人设</label>
-      </div>
+      <summary><b>基础引用</b><span>勾选后将会作为浮生剧编参考项</span></summary>
+      <div class="sd-inline-setting"><label class="checkbox_label"><input type="checkbox" class="sd-opt" data-key="includeChatHistory" ${opts.includeChatHistory ? 'checked' : ''}> 上下文参考</label><label class="sd-depth-field"><span>参考楼层数</span><input class="text_pole sd-context-depth" type="number" min="1" max="200" value="${htmlEscape(opts.contextDepth || 5)}"></label></div>
+      <label class="checkbox_label"><input type="checkbox" class="sd-opt" data-key="includeCharDesc" ${opts.includeCharDesc ? 'checked' : ''}> 引用当前角色设定 ${infoTag(getCharacterName())}${infoTag(`${estimateTokens(charDesc)} token`)}</label>
+      <label class="checkbox_label"><input type="checkbox" class="sd-opt" data-key="includeUserDesc" ${opts.includeUserDesc ? 'checked' : ''}> 引用用户人设 ${infoTag(getPersonaName())}${infoTag(`${estimateTokens(userDesc)} token`)}</label>
     </details>
-    <details class="sd-accordion">
-      <summary><b>上下文处理</b><span>按标签逐行选择屏蔽或提取</span></summary>
-      <div class="sd-tag-rule-list">${renderTagRuleRows()}</div>
-      <div class="sd-button-row"><button class="sd-btn sd-add-tag-rule">添加标签</button></div>
+    <details class="sd-accordion" open>
+      <summary><b>上下文处理</b><span>标签规则</span></summary>
+      <div class="sd-tag-rule-list">${renderTagRules()}</div>
+      <div class="sd-button-row"><button type="button" class="sd-btn sd-add-tag-rule">添加标签</button></div>
     </details>
     <details class="sd-accordion">
       <summary><b>预设</b><span>${contextScanCache.scannedAt ? '已刷新' : '待刷新'}</span></summary>
-      <div class="sd-button-row"><button class="sd-btn sd-refresh-context">刷新取材</button></div>
-      ${renderPresetSources()}
+      <div class="sd-button-row"><button type="button" class="sd-btn sd-refresh-context">刷新</button></div>
+      ${renderPresetSourcePanel()}
     </details>
     <details class="sd-accordion">
       <summary><b>世界书</b><span>${contextScanCache.scannedAt ? '已刷新' : '待刷新'}</span></summary>
-      <div class="sd-button-row"><button class="sd-btn sd-refresh-context">拉取选中</button></div>
-      ${renderWorldBookSources()}
+      <div class="sd-button-row"><button type="button" class="sd-btn sd-refresh-context">拉取</button></div>
+      ${renderWorldBookSourcePanel()}
     </details>`;
 }
 
-function renderTagRuleRows() {
+function renderTagRules() {
   const rules = getTagRules();
-  return rules.map((rule, index) => `
-    <div class="sd-tag-rule" data-index="${index}">
-      <input class="text_pole sd-tag-rule-name" data-index="${index}" placeholder="标签名，如 thinking" value="${htmlEscape(rule.name)}">
-      <select class="text_pole sd-tag-rule-mode" data-index="${index}">
-        <option value="remove" ${rule.mode !== 'extract' ? 'selected' : ''}>屏蔽</option>
-        <option value="extract" ${rule.mode === 'extract' ? 'selected' : ''}>提取</option>
-      </select>
-      <button class="sd-btn sd-danger sd-remove-tag-rule" data-index="${index}">删除</button>
-    </div>`).join('');
+  const list = rules.length ? rules : [{ name: '', action: 'remove' }];
+  return list.map((rule, index) => `<div class="sd-tag-rule-row"><input class="text_pole sd-tag-rule-name" data-index="${index}" placeholder="标签名，如 thinking" value="${htmlEscape(rule.name)}"><select class="text_pole sd-tag-rule-action" data-index="${index}"><option value="remove" ${rule.action !== 'extract' ? 'selected' : ''}>屏蔽</option><option value="extract" ${rule.action === 'extract' ? 'selected' : ''}>提取</option></select><button type="button" class="sd-icon-btn sd-delete-tag-rule" data-index="${index}" title="删除">×</button></div>`).join('');
 }
 
-function renderPresetSources() {
-  const currentName = contextScanCache.currentPresetName || '当前预设';
-  const presetNames = uniqueClean([currentName, ...(contextScanCache.presetNames || [])]);
-  const selectedNames = presetNames.filter((name) => isPresetNameEnabled(name, name === currentName));
-  const chips = selectedNames.length ? selectedNames.map((name) => `<span class="sd-chip">${htmlEscape(name)}<button class="sd-chip-x sd-preset-name-off" data-name="${htmlEscape(name)}">×</button></span>`).join('') : '<span class="sd-muted">未选择预设。</span>';
-  const names = presetNames.length ? presetNames.map((name) => `<label class="checkbox_label sd-source-name"><input type="checkbox" class="sd-toggle-preset-name" data-name="${htmlEscape(name)}" ${isPresetNameEnabled(name, name === currentName) ? 'checked' : ''}> ${htmlEscape(name)}${name === currentName ? ' <span class="sd-muted">当前</span>' : ''}</label>`).join('') : '<p class="sd-muted">未读取到可选预设名称。</p>';
-  const current = Object.entries(contextScanCache.currentPresets || {}).map(([name, items]) => renderContextGroup('preset', name, items, '当前预设')).join('');
-  const other = Object.entries(contextScanCache.otherPresets || {}).map(([name, items]) => renderContextGroup('preset', name, items, '其他预设')).join('');
-  return `<div class="sd-selected-line"><b>已选择预设</b><div class="sd-chip-list">${chips}</div></div><details class="sd-context-group"><summary><b>选择预设来源</b><span>${selectedNames.length}/${presetNames.length}</span></summary>${names}</details><div class="sd-scanned">${current}${other || ''}</div>`;
+function renderPresetSourcePanel() {
+  const currentName = contextScanCache.currentPresetName || getCurrentPresetName();
+  const names = uniqueClean([currentName, ...(contextScanCache.presetNames || listPresetNames())]).filter((name) => !isNoisePresetName(name));
+  if (!names.length) return '<p class="sd-muted">未读取到预设。</p>';
+  const selected = getSelectedPresetNames();
+  const choiceRows = names.map((name) => `<label class="checkbox_label sd-source-row"><input type="checkbox" class="sd-toggle-preset" data-name="${htmlEscape(name)}" ${selected.includes(name) ? 'checked' : ''}> <span>${htmlEscape(name)}</span>${name === currentName ? badge('当前使用') : ''}</label>`).join('');
+  return `<div class="sd-context-block"><h3>选择预设</h3><div class="sd-chip-row">${selected.map((name) => `<button type="button" class="sd-chip sd-unselect-preset" data-name="${htmlEscape(name)}">${htmlEscape(name)} ×</button>`).join('') || '<span class="sd-muted">尚未选择预设。</span>'}</div><div class="sd-source-list">${choiceRows}</div></div>${renderSelectedPresetEntries(selected)}`;
 }
 
-function renderWorldBookSources() {
-  const bound = contextScanCache.boundWorldBookNames || [];
-  const otherNames = contextScanCache.otherWorldBookNames || [];
-  const allNames = uniqueClean([...bound, ...otherNames]);
-  const selectedNames = allNames.filter((name) => isWorldBookNameEnabled(name, bound.includes(name)));
-  const chips = selectedNames.length ? selectedNames.map((name) => `<span class="sd-chip">${htmlEscape(name)}<button class="sd-chip-x sd-world-name-off" data-name="${htmlEscape(name)}">×</button></span>`).join('') : '<span class="sd-muted">未选择世界书。</span>';
-  const boundList = bound.length ? bound.map((name) => `<label class="checkbox_label sd-source-name"><input type="checkbox" class="sd-toggle-world-name" data-name="${htmlEscape(name)}" data-bound="1" ${isWorldBookNameEnabled(name, true) ? 'checked' : ''}> ${htmlEscape(name)} <span class="sd-muted">绑定</span></label>`).join('') : '<p class="sd-muted">没有捕捉到当前聊天或角色绑定世界书。</p>';
-  const otherList = otherNames.length ? otherNames.map((name) => `<label class="checkbox_label sd-source-name"><input type="checkbox" class="sd-toggle-world-name" data-name="${htmlEscape(name)}" ${isWorldBookNameEnabled(name, false) ? 'checked' : ''}> ${htmlEscape(name)}</label>`).join('') : '<p class="sd-muted">未读取到其他世界书名称。</p>';
-  const boundHtml = Object.entries(contextScanCache.boundWorldBooks || {}).map(([name, items]) => renderContextGroup('world', name, items, '绑定世界书')).join('');
-  const otherHtml = Object.entries(contextScanCache.otherWorldBooks || {}).map(([name, items]) => renderContextGroup('world', name, items, '其他世界书')).join('');
-  return `<div class="sd-selected-line"><b>已选择世界书</b><div class="sd-chip-list">${chips}</div></div><details class="sd-context-group" open><summary><b>当前绑定</b><span>${bound.length} 本</span></summary>${boundList}</details><details class="sd-context-group"><summary><b>其他世界书</b><span>${otherNames.length} 本</span></summary>${otherList}</details><div class="sd-scanned">${boundHtml}${otherHtml || ''}</div>`;
+function renderSelectedPresetEntries(selectedNames) {
+  if (!selectedNames.length) return '';
+  const rows = [];
+  for (const name of selectedNames) {
+    const items = contextScanCache.presets?.[name] || getPresetEntries(name);
+    (items || []).forEach((item, index) => rows.push(renderContextEntry('preset', name, item, index, selectedNames.length > 1 ? name : '')));
+  }
+  return `<div class="sd-context-block"><h3>预设条目 <span class="sd-muted">${rows.length} 条</span></h3>${rows.join('') || '<p class="sd-muted">未读取到条目。</p>'}</div>`;
 }
 
-function renderContextGroup(kind, name, items, titlePrefix) {
-  const rows = (items || []).map((item) => {
-    const id = getContextItemId(item);
-    const title = item.name || item.identifier || item.comment || item.role || (Array.isArray(item.key) ? item.key.join(', ') : item.key) || '未命名条目';
-    const content = item.content || item.message || item.text || '';
-    const checked = kind === 'preset' ? isPresetItemSelected(name, id) : isWorldItemSelected(name, id);
-    const badges = [];
-    if (item.constant) badges.push('<span class="sd-badge">常驻</span>');
-    if (item.enabled === false) badges.push('<span class="sd-badge sd-badge-off">禁用</span>');
-    if (item.role) badges.push(`<span class="sd-badge">${htmlEscape(item.role)}</span>`);
-    return `<details class="sd-context-item"><summary><label><input type="checkbox" class="sd-context-check" data-kind="${kind}" data-group="${htmlEscape(name)}" data-id="${htmlEscape(String(id))}" ${checked ? 'checked' : ''}> ${htmlEscape(title)}</label>${badges.join('')}</summary><pre>${htmlEscape(cleanContextText(content).slice(0, 2000))}</pre></details>`;
-  }).join('') || '<p class="sd-muted">未读取到条目。</p>';
-  return `<details class="sd-context-group" open><summary><b>${htmlEscape(titlePrefix)}：${htmlEscape(name)}</b><span>${items?.length || 0} 条</span></summary>${rows}</details>`;
+function renderWorldBookSourcePanel() {
+  const boundNames = contextScanCache.boundWorldBookNames || detectBoundWorldBookNames();
+  const names = uniqueClean([...boundNames, ...(contextScanCache.worldBookNames || [])]);
+  if (!names.length) return '<p class="sd-muted">未读取到世界书。</p>';
+  const selected = getSelectedWorldBookNames();
+  const choiceRows = names.map((name) => `<label class="checkbox_label sd-source-row"><input type="checkbox" class="sd-toggle-worldbook" data-name="${htmlEscape(name)}" ${selected.includes(name) ? 'checked' : ''}> <span>${htmlEscape(name)}</span>${boundNames.includes(name) ? badge('当前绑定') : ''}</label>`).join('');
+  return `<div class="sd-context-block"><h3>选择世界书</h3><div class="sd-chip-row">${selected.map((name) => `<button type="button" class="sd-chip sd-unselect-worldbook" data-name="${htmlEscape(name)}">${htmlEscape(name)} ×</button>`).join('') || '<span class="sd-muted">尚未选择世界书。</span>'}</div><div class="sd-source-list">${choiceRows}</div></div>${renderSelectedWorldBookEntries(selected)}`;
+}
+
+function renderSelectedWorldBookEntries(selectedNames) {
+  if (!selectedNames.length) return '';
+  const rows = [];
+  for (const name of selectedNames) {
+    const items = contextScanCache.worldBooks?.[name] || [];
+    (items || []).forEach((item, index) => rows.push(renderContextEntry('world', name, item, index, selectedNames.length > 1 ? name : '')));
+  }
+  return `<div class="sd-context-block"><h3>世界书条目 <span class="sd-muted">${rows.length} 条</span></h3>${rows.join('') || '<p class="sd-muted">选择世界书后点击拉取。</p>'}</div>`;
+}
+
+function renderContextEntry(kind, groupName, item, index, sourceLabel = '') {
+  const id = getContextItemId(item, index);
+  const title = item.name || item.identifier || item.comment || item.role || (Array.isArray(item.key) ? item.key.join(', ') : item.key) || `条目 ${index + 1}`;
+  const content = item.content || item.prompt || item.message || item.text || '';
+  const checked = kind === 'preset' ? isPresetItemSelected(groupName, id) : isWorldItemSelected(groupName, id);
+  return `<details class="sd-context-item" ${checked ? 'open' : ''}><summary><label><input type="checkbox" class="sd-context-check" data-kind="${kind}" data-group="${htmlEscape(groupName)}" data-id="${htmlEscape(String(id))}" ${checked ? 'checked' : ''}> ${htmlEscape(title)} ${sourceLabel ? infoTag(sourceLabel) : ''}</label></summary><pre>${htmlEscape(cleanContextText(content).slice(0, 2000))}</pre></details>`;
 }
 
 function renderDirectorSettingsTab() {
@@ -1321,23 +1361,24 @@ function renderDirectorSettingsTab() {
     <section class="sd-card">
       <h3>刷新</h3>
       <label class="checkbox_label"><input type="checkbox" class="sd-auto-refresh" ${settings.autoRefresh ? 'checked' : ''}> 自动刷新剧情</label>
-      <div class="sd-inline-field sd-auto-row"><label>每多少楼层刷新</label><input class="text_pole sd-auto-every" type="number" min="2" max="50" value="${htmlEscape(settings.autoRefreshEvery || 10)}"></div>
+      <label>每多少楼层刷新</label>
+      <input class="text_pole sd-auto-every" type="number" min="2" max="50" value="${htmlEscape(settings.autoRefreshEvery || 10)}">
     </section>
     <section class="sd-card">
       <h3>幕后提示词</h3>
-      <p class="sd-muted">这里会影响生成审片、任务节点、角色世界和写入文本的风格。</p>
-      <label>系统提示词</label>
-      <textarea class="text_pole sd-textarea sd-system-prompt sd-prompt-editor" spellcheck="false">${htmlEscape(settings.systemPrompt || DEFAULT_SYSTEM_PROMPT)}</textarea>
-      <label>输出格式</label>
-      <textarea class="text_pole sd-textarea sd-output-format sd-prompt-editor" spellcheck="false">${htmlEscape(getOutputFormatText())}</textarea>
-      <div class="sd-button-row"><button class="sd-btn sd-primary sd-save-director-settings">保存幕后</button><button class="sd-btn sd-reset-behind">恢复默认</button></div>
+      <textarea class="text_pole sd-textarea sd-system-prompt" spellcheck="false">${htmlEscape(settings.systemPrompt || DEFAULT_SYSTEM_PROMPT)}</textarea>
+    </section>
+    <section class="sd-card">
+      <h3>输出格式</h3>
+      <textarea class="text_pole sd-textarea sd-output-schema" spellcheck="false">${htmlEscape(settings.outputSchemaText || JSON_SCHEMA_TEXT)}</textarea>
+      <div class="sd-button-row"><button class="sd-btn sd-save-director-settings">保存幕后</button><button class="sd-btn sd-reset-system">恢复默认</button></div>
     </section>`;
 }
 
 function renderPlugTab() {
   const isExternal = settings.providerMode === 'external';
   const log = settings.lastLog || DEFAULT_SETTINGS.lastLog;
-  const models = uniqueClean([settings.model, ...(settings.availableModels || [])]);
+  const models = uniqueClean(settings.availableModels || []);
   return `
     <section class="sd-card">
       <h3>模型来源</h3>
@@ -1349,12 +1390,23 @@ function renderPlugTab() {
       <label>API URL</label><input class="text_pole sd-api-url" placeholder="https://api.example.com/v1" value="${htmlEscape(settings.apiUrl || '')}">
       <label>API Key</label><input class="text_pole sd-api-key" type="password" placeholder="sk-..." value="${htmlEscape(settings.apiKey || '')}">
       <label>模型</label>
-      <div class="sd-inline-field"><input class="text_pole sd-model-input" list="sd-model-list" placeholder="模型名称" value="${htmlEscape(settings.model || '')}"><datalist id="sd-model-list">${models.map((m) => `<option value="${htmlEscape(m)}"></option>`).join('')}</datalist><button class="sd-btn sd-fetch-models">拉取模型</button></div>
+      <div class="sd-inline-field"><select class="text_pole sd-model-select"><option value="">选择模型</option>${models.map((m) => `<option value="${htmlEscape(m)}" ${m === settings.model ? 'selected' : ''}>${htmlEscape(m)}</option>`).join('')}</select><button class="sd-btn sd-fetch-models">拉取模型</button></div>
+      <input class="text_pole sd-model-input" placeholder="模型名称" value="${htmlEscape(settings.model || '')}">
       <label>Temperature</label><input class="text_pole sd-temperature" type="number" min="0" max="2" step="0.05" value="${htmlEscape(settings.temperature)}">
-      <div class="sd-button-row"><button class="sd-btn sd-save-api">保存API</button></div>
+      <div class="sd-button-row"><button class="sd-btn sd-save-api">保存API</button><button class="sd-btn sd-save-api-profile">保存为预设</button></div>
+    </section>
+    <section class="sd-card">
+      <h3>API预设</h3>
+      <div class="sd-template-list">${renderApiProfiles()}</div>
     </section>
     <section class="sd-card"><h3>日志</h3><p><b>${htmlEscape(log.status || 'none')}</b> · ${htmlEscape(log.time || '-')} · ${htmlEscape(log.duration || '-')}</p>${log.error ? `<p class="sd-error">${htmlEscape(log.error)}</p>` : ''}</section>
     <details class="sd-accordion"><summary><b>Response</b><span>最近一次返回</span></summary><pre>${htmlEscape(log.response || '暂无')}</pre></details>`;
+}
+
+function renderApiProfiles() {
+  const profiles = Array.isArray(settings.apiProfiles) ? settings.apiProfiles : [];
+  if (!profiles.length) return '<p class="sd-muted">暂无API预设。</p>';
+  return profiles.map((profile) => `<article class="sd-template-card"><div><h4>${htmlEscape(profile.name || profile.model || '未命名API')}</h4><p class="sd-muted">${htmlEscape(profile.apiUrl || '')} · ${htmlEscape(profile.model || '')}</p></div><div class="sd-button-row"><button class="sd-btn sd-load-api-profile" data-id="${htmlEscape(profile.id)}">载入</button><button class="sd-btn sd-danger sd-delete-api-profile" data-id="${htmlEscape(profile.id)}">删除</button></div></article>`).join('');
 }
 
 function bindActiveTabEvents(root) {
@@ -1423,65 +1475,62 @@ function bindActiveTabEvents(root) {
     settings.contextOptions.contextDepth = Math.max(1, Math.min(200, Number(e.target.value || 5)));
     saveSettings();
   });
-  root.querySelectorAll('.sd-tag-rule-name, .sd-tag-rule-mode').forEach((el) => el.addEventListener('change', () => {
-    const rules = getTagRules();
-    const index = Number(el.dataset.index || 0);
-    rules[index] ||= { name: '', mode: 'remove' };
-    const row = el.closest('.sd-tag-rule');
-    rules[index].name = row?.querySelector('.sd-tag-rule-name')?.value || '';
-    rules[index].mode = row?.querySelector('.sd-tag-rule-mode')?.value === 'extract' ? 'extract' : 'remove';
-    settings.contextOptions.tagRules = rules.filter((rule) => String(rule.name || '').trim());
+  root.querySelectorAll('.sd-tag-rule-name, .sd-tag-rule-action').forEach((el) => el.addEventListener('change', () => {
+    const rows = Array.from(root.querySelectorAll('.sd-tag-rule-row'));
+    settings.contextOptions.tagRules = rows.map((row) => ({
+      name: row.querySelector('.sd-tag-rule-name')?.value || '',
+      action: row.querySelector('.sd-tag-rule-action')?.value || 'remove',
+    })).filter((rule) => String(rule.name || '').trim());
     saveSettings();
-    renderModal();
   }));
-  root.querySelector('.sd-add-tag-rule')?.addEventListener('click', () => {
-    settings.contextOptions.tagRules = [...getTagRules(), { name: '', mode: 'remove' }];
+  root.querySelector('.sd-add-tag-rule')?.addEventListener('click', (event) => {
+    event.preventDefault();
+    settings.contextOptions.tagRules ||= [];
+    settings.contextOptions.tagRules.push({ name: '', action: 'remove' });
     saveSettings();
     renderModal();
   });
-  root.querySelectorAll('.sd-remove-tag-rule').forEach((el) => el.addEventListener('click', () => {
-    const index = Number(el.dataset.index || 0);
-    const rules = getTagRules();
-    rules.splice(index, 1);
-    settings.contextOptions.tagRules = rules.length ? rules : [{ name: 'thinking', mode: 'remove' }];
+  root.querySelectorAll('.sd-delete-tag-rule').forEach((el) => el.addEventListener('click', (event) => {
+    event.preventDefault();
+    const index = Number(el.dataset.index);
+    settings.contextOptions.tagRules = (settings.contextOptions.tagRules || []).filter((_, i) => i !== index);
+    if (!settings.contextOptions.tagRules.length) settings.contextOptions.tagRules = [{ name: 'thinking', action: 'remove' }];
     saveSettings();
     renderModal();
   }));
-  root.querySelector('.sd-refresh-context')?.addEventListener('click', () => refreshContextSources(true));
+  root.querySelectorAll('.sd-refresh-context').forEach((el) => el.addEventListener('click', () => refreshContextSources(true)));
+  root.querySelectorAll('.sd-toggle-preset').forEach((el) => el.addEventListener('change', async () => {
+    setPresetNameSelected(el.dataset.name, el.checked);
+    renderModal();
+  }));
+  root.querySelectorAll('.sd-unselect-preset').forEach((el) => el.addEventListener('click', () => {
+    setPresetNameSelected(el.dataset.name, false);
+    renderModal();
+  }));
+  root.querySelectorAll('.sd-toggle-worldbook').forEach((el) => el.addEventListener('change', async () => {
+    await setWorldBookNameSelected(el.dataset.name, el.checked);
+    renderModal();
+  }));
+  root.querySelectorAll('.sd-unselect-worldbook').forEach((el) => el.addEventListener('click', async () => {
+    await setWorldBookNameSelected(el.dataset.name, false);
+    renderModal();
+  }));
   root.querySelectorAll('.sd-context-check').forEach((el) => el.addEventListener('change', () => {
     if (el.dataset.kind === 'preset') setPresetItemSelected(el.dataset.group, el.dataset.id, el.checked);
     else setWorldItemSelected(el.dataset.group, el.dataset.id, el.checked);
-  }));
-  root.querySelectorAll('.sd-toggle-preset-name').forEach((el) => el.addEventListener('change', () => {
-    getPresetNameStore()[el.dataset.name] = el.checked;
-    saveSettings();
-  }));
-  root.querySelectorAll('.sd-preset-name-off').forEach((el) => el.addEventListener('click', () => {
-    getPresetNameStore()[el.dataset.name] = false;
-    saveSettings();
-    renderModal();
-  }));
-  root.querySelectorAll('.sd-toggle-world-name').forEach((el) => el.addEventListener('change', () => {
-    getEnabledWorldBookStore()[el.dataset.name] = el.checked;
-    saveSettings();
-  }));
-  root.querySelectorAll('.sd-world-name-off').forEach((el) => el.addEventListener('click', () => {
-    getEnabledWorldBookStore()[el.dataset.name] = false;
-    saveSettings();
-    renderModal();
   }));
 
   root.querySelector('.sd-save-director-settings')?.addEventListener('click', () => {
     settings.autoRefresh = !!root.querySelector('.sd-auto-refresh')?.checked;
     settings.autoRefreshEvery = Math.max(2, Math.min(50, Number(root.querySelector('.sd-auto-every')?.value || 10)));
     settings.systemPrompt = root.querySelector('.sd-system-prompt')?.value || DEFAULT_SYSTEM_PROMPT;
-    settings.outputFormat = root.querySelector('.sd-output-format')?.value || JSON_SCHEMA_TEXT;
+    settings.outputSchemaText = root.querySelector('.sd-output-schema')?.value || JSON_SCHEMA_TEXT;
     saveSettings();
-    toast('幕后已保存。', 'success');
+    toast('设置已保存。', 'success');
   });
-  root.querySelector('.sd-reset-behind')?.addEventListener('click', () => {
+  root.querySelector('.sd-reset-system')?.addEventListener('click', () => {
     settings.systemPrompt = DEFAULT_SYSTEM_PROMPT;
-    settings.outputFormat = JSON_SCHEMA_TEXT;
+    settings.outputSchemaText = JSON_SCHEMA_TEXT;
     saveSettings();
     renderModal();
   });
@@ -1497,6 +1546,9 @@ function bindActiveTabEvents(root) {
     saveSettings();
     fetchModels();
   });
+  root.querySelector('.sd-model-select')?.addEventListener('change', (e) => {
+    if (e.target.value) root.querySelector('.sd-model-input').value = e.target.value;
+  });
   root.querySelector('.sd-save-api')?.addEventListener('click', () => {
     settings.apiUrl = root.querySelector('.sd-api-url')?.value || '';
     settings.apiKey = root.querySelector('.sd-api-key')?.value || '';
@@ -1505,6 +1557,38 @@ function bindActiveTabEvents(root) {
     saveSettings();
     toast('API已保存。', 'success');
   });
+  root.querySelector('.sd-save-api-profile')?.addEventListener('click', async () => {
+    const apiUrl = root.querySelector('.sd-api-url')?.value || '';
+    const apiKey = root.querySelector('.sd-api-key')?.value || '';
+    const model = root.querySelector('.sd-model-input')?.value || '';
+    const temperature = Number(root.querySelector('.sd-temperature')?.value || 0.75);
+    const name = await promptInput('保存API预设', '预设名称：', model || 'API预设');
+    if (!name) return;
+    settings.apiProfiles ||= [];
+    settings.apiProfiles.push({ id: uid('api'), name, apiUrl, apiKey, model, temperature });
+    saveSettings();
+    toast('API预设已保存。', 'success');
+    renderModal();
+  });
+  root.querySelectorAll('.sd-load-api-profile').forEach((el) => el.addEventListener('click', () => {
+    const profile = (settings.apiProfiles || []).find((x) => x.id === el.dataset.id);
+    if (!profile) return;
+    settings.providerMode = 'external';
+    settings.apiUrl = profile.apiUrl || '';
+    settings.apiKey = profile.apiKey || '';
+    settings.model = profile.model || '';
+    settings.temperature = Number(profile.temperature || 0.75);
+    saveSettings();
+    toast('API预设已载入。', 'success');
+    renderModal();
+  }));
+  root.querySelectorAll('.sd-delete-api-profile').forEach((el) => el.addEventListener('click', async () => {
+    const yes = await confirmDialog('删除API预设', '确认删除这个API预设？');
+    if (!yes) return;
+    settings.apiProfiles = (settings.apiProfiles || []).filter((x) => x.id !== el.dataset.id);
+    saveSettings();
+    renderModal();
+  }));
 }
 
 async function promptInput(title, text, value = '') {
@@ -1574,7 +1658,7 @@ function renderInputMenuEntry() {
     entry.id = INPUT_ENTRY_ID;
     entry.className = 'list-group-item flex-container story-director-input-entry';
     entry.innerHTML = '<span class="sd-menu-glyph">剧</span><span>浮生剧编</span>';
-    entry.addEventListener('click', (event) => { event.preventDefault(); event.stopPropagation(); openModal('dashboard'); });
+    entry.addEventListener('click', () => openModal('dashboard'));
     menu.appendChild(entry);
     return;
   }
@@ -1588,7 +1672,7 @@ function renderInputMenuEntry() {
   button.type = 'button';
   button.title = '浮生剧编';
   button.textContent = '剧';
-  button.addEventListener('click', (event) => { event.preventDefault(); event.stopPropagation(); openModal('dashboard'); });
+  button.addEventListener('click', () => openModal('dashboard'));
   if (textarea && textarea.parentElement === parent) parent.insertBefore(button, textarea);
   else parent.insertBefore(button, parent.firstChild);
 }
@@ -1600,6 +1684,18 @@ function startInputMenuObserver() {
     renderInputMenuEntry();
   });
   inputMenuObserver.observe(document.body, { childList: true, subtree: true });
+}
+
+let resizeHandler = null;
+let eventBindings = [];
+
+function unbindEvents() {
+  const source = ctx().eventSource;
+  if (source?.off) {
+    for (const [type, handler] of eventBindings) source.off(type, handler);
+  }
+  eventBindings = [];
+  eventBound = false;
 }
 
 function bindEvents() {
@@ -1630,10 +1726,16 @@ function bindEvents() {
     renderInputMenuEntry();
     if (document.getElementById(MODAL_ID)?.classList.contains('open')) renderModal();
   };
-  source.on(types.MESSAGE_RECEIVED || 'message_received', refreshHandler);
-  source.on(types.CHAT_CHANGED || 'chat_changed', rerenderHandler);
-  source.on(types.GROUP_UPDATED || 'group_updated', rerenderHandler);
-  source.on(types.CHARACTER_SELECTED || 'character_selected', rerenderHandler);
+  const pairs = [
+    [types.MESSAGE_RECEIVED || 'message_received', refreshHandler],
+    [types.CHAT_CHANGED || 'chat_changed', rerenderHandler],
+    [types.GROUP_UPDATED || 'group_updated', rerenderHandler],
+    [types.CHARACTER_SELECTED || 'character_selected', rerenderHandler],
+  ];
+  for (const [type, handler] of pairs) {
+    source.on(type, handler);
+    eventBindings.push([type, handler]);
+  }
 }
 
 function init() {
@@ -1644,16 +1746,36 @@ function init() {
   renderFloatButton();
   renderInputMenuEntry();
   startInputMenuObserver();
-  window.addEventListener('resize', () => { const btn = document.getElementById(FLOAT_ID); if (btn) applyFloatPosition(btn); });
+  resizeHandler = () => { const btn = document.getElementById(FLOAT_ID); if (btn) applyFloatPosition(btn); };
+  window.addEventListener('resize', resizeHandler);
   bindEvents();
   console.log(`[${EXTENSION_NAME}] loaded`);
 }
 
 export async function onActivate() {
+  cleanupRuntime(false);
   init();
 }
 
-export async function onClean() {
+export async function onEnable() {
+  cleanupRuntime(false);
+  init();
+}
+
+export async function onDisable() {
+  cleanupRuntime(false);
+}
+
+export async function onUpdate() {
+  cleanupRuntime(false);
+  init();
+}
+
+export async function onDelete() {
+  cleanupRuntime(false);
+}
+
+function cleanupRuntime(resetSettings = false) {
   document.getElementById(SETTINGS_PANEL_ID)?.remove();
   document.getElementById(MODAL_ID)?.remove();
   document.getElementById(FLOAT_ID)?.remove();
@@ -1661,6 +1783,11 @@ export async function onClean() {
   document.getElementById(INPUT_BUTTON_ID)?.remove();
   inputMenuObserver?.disconnect?.();
   inputMenuObserver = null;
+  if (resizeHandler) window.removeEventListener('resize', resizeHandler);
+  resizeHandler = null;
+  unbindEvents();
+  initialized = false;
+  if (resetSettings && ctx().extensionSettings) delete ctx().extensionSettings[MODULE_NAME];
 }
 
 if (document.readyState === 'loading') {
