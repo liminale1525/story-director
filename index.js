@@ -5,6 +5,8 @@ const EXTENSION_NAME = '剧情导演';
 const SETTINGS_PANEL_ID = 'story-director-settings';
 const MODAL_ID = 'story-director-modal';
 const FLOAT_ID = 'story-director-float';
+const INPUT_ENTRY_ID = 'story-director-input-entry';
+const INPUT_BUTTON_ID = 'story-director-input-button';
 
 const DEFAULT_BLUEPRINT = `【世界观】
 现代都市 / 校园 / 西幻 / 末日 / 无限流 / 其他
@@ -121,6 +123,7 @@ const DEFAULT_SETTINGS = Object.freeze({
   availableModels: [],
   temperature: 0.75,
   floatingButton: true,
+  floatPosition: { x: null, y: null },
   theme: 'light',
   systemPrompt: DEFAULT_SYSTEM_PROMPT,
   autoRefresh: false,
@@ -159,8 +162,10 @@ let activeTab = 'dashboard';
 let contextScanCache = { presets: {}, boundWorldBooks: {}, otherWorldBooks: {}, presetNames: [], boundWorldBookNames: [], otherWorldBookNames: [], scannedAt: '' };
 let busy = false;
 let abortController = null;
+let cancelRequested = false;
 let initialized = false;
 let eventBound = false;
+let inputMenuObserver = null;
 
 function ctx() {
   return globalThis.SillyTavern?.getContext?.() || {};
@@ -224,9 +229,9 @@ function getChatStore() {
   const context = ctx();
   const meta = context.chatMetadata || (context.chatMetadata = {});
   if (!meta[MODULE_NAME]) {
-    meta[MODULE_NAME] = { blueprint: DEFAULT_BLUEPRINT, plan: null, messageCounter: 0, updatedAt: '' };
+    meta[MODULE_NAME] = { blueprint: DEFAULT_BLUEPRINT, plan: null, history: [], messageCounter: 0, updatedAt: '' };
   }
-  mergeDefaults(meta[MODULE_NAME], { blueprint: DEFAULT_BLUEPRINT, plan: null, messageCounter: 0, updatedAt: '' });
+  mergeDefaults(meta[MODULE_NAME], { blueprint: DEFAULT_BLUEPRINT, plan: null, history: [], messageCounter: 0, updatedAt: '' });
   return meta[MODULE_NAME];
 }
 
@@ -657,6 +662,7 @@ async function generateDirectorPlan(showSuccessToast = true, silentFailure = fal
     return;
   }
   busy = true;
+  cancelRequested = false;
   renderBusyState();
   const startedAt = Date.now();
   let messages = [];
@@ -667,11 +673,14 @@ async function generateDirectorPlan(showSuccessToast = true, silentFailure = fal
     saveSettings();
 
     const raw = settings.providerMode === 'sillytavern' ? await callSillyTavernModel(messages) : await callExternalApi(messages);
+    if (cancelRequested) throw new Error('USER_CANCELLED');
     settings.lastLog.response = raw;
     const newPlan = normalizePlan(extractJson(raw));
     const store = getChatStore();
+    const now = new Date().toISOString();
+    store.history = [{ id: uid('hist'), createdAt: now, plan: clone(newPlan) }, ...(Array.isArray(store.history) ? store.history : [])].slice(0, 5);
     store.plan = newPlan;
-    store.updatedAt = new Date().toISOString();
+    store.updatedAt = now;
     store.messageCounter = 0;
     await saveMetadata();
     settings.lastLog.status = 'success';
@@ -679,17 +688,19 @@ async function generateDirectorPlan(showSuccessToast = true, silentFailure = fal
     saveSettings();
     if (showSuccessToast) toast('剧情导演已更新。', 'success');
   } catch (error) {
-    const msg = error?.message || String(error);
-    settings.lastLog.status = 'error';
-    settings.lastLog.error = msg === 'INVALID_API_SETTINGS' ? '请检查API设置' : msg;
+    const msg = error?.name === 'AbortError' ? 'USER_CANCELLED' : (error?.message || String(error));
+    settings.lastLog.status = msg === 'USER_CANCELLED' ? 'cancelled' : 'error';
+    settings.lastLog.error = msg === 'INVALID_API_SETTINGS' ? '请检查API设置' : (msg === 'USER_CANCELLED' ? '已取消生成' : msg);
     settings.lastLog.duration = `${((Date.now() - startedAt) / 1000).toFixed(1)}s`;
     saveSettings();
     if (!silentFailure) {
-      if (msg === 'INVALID_API_SETTINGS' || settings.providerMode === 'external') apiToast();
+      if (msg === 'USER_CANCELLED') toast('已取消生成。', 'warning');
+      else if (msg === 'INVALID_API_SETTINGS' || settings.providerMode === 'external') apiToast();
       else toast(`生成失败：${settings.lastLog.error}`, 'error');
     }
   } finally {
     abortController = null;
+    cancelRequested = false;
     busy = false;
     renderModal();
     renderSettingsPanel();
@@ -715,10 +726,16 @@ async function fetchModels() {
 }
 
 function stopGeneration() {
+  cancelRequested = true;
   if (abortController) abortController.abort();
+  settings.lastLog.status = 'cancelled';
+  settings.lastLog.error = '已取消生成';
+  saveSettings();
   busy = false;
   renderBusyState();
-  toast('已尝试停止请求。', 'warning');
+  renderSettingsPanel();
+  if (document.getElementById(MODAL_ID)?.classList.contains('open')) renderModal();
+  toast('已取消生成。', 'warning');
 }
 
 function injectToInput(text) {
@@ -783,11 +800,11 @@ function renderSettingsPanel() {
         <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
       </div>
       <div class="inline-drawer-content">
-        <div class="sd-settings-copy">为当前故事整理暗线、任务、角色动向与世界回声。</div>
+        <div class="sd-settings-copy">故事自成脉络&nbsp;&nbsp;命运早有伏笔</div>
         <label class="checkbox_label sd-checkline"><input type="checkbox" class="sd-toggle-enabled" ${settings.enabled ? 'checked' : ''}> 启用剧情导演</label>
         <div class="sd-button-row">
           <button class="sd-btn sd-open-dashboard" ${settings.enabled ? '' : 'disabled'}>打开剧情导演</button>
-          <button class="sd-btn sd-generate-now" ${settings.enabled && !busy ? '' : 'disabled'}>${busy ? '生成中…' : '刷新剧情'}</button>
+          <button class="sd-btn sd-generate-now" ${settings.enabled && !busy ? '' : 'disabled'}>${busy ? '生成中…' : '刷新剧情'}</button>${busy ? '<button class="sd-btn sd-stop">取消</button>' : ''}
         </div>
         <label class="checkbox_label sd-checkline"><input type="checkbox" class="sd-toggle-float" ${settings.floatingButton ? 'checked' : ''} ${settings.enabled ? '' : 'disabled'}> 显示悬浮按钮</label>
         <div class="sd-mini-status">当前：${current}${store.updatedAt ? ` · ${new Date(store.updatedAt).toLocaleString()}` : ''}</div>
@@ -795,16 +812,96 @@ function renderSettingsPanel() {
     </div>`;
   panel.querySelector('.sd-open-dashboard')?.addEventListener('click', () => openModal('dashboard'));
   panel.querySelector('.sd-generate-now')?.addEventListener('click', () => generateDirectorPlan());
+  panel.querySelector('.sd-stop')?.addEventListener('click', stopGeneration);
   panel.querySelector('.sd-toggle-enabled')?.addEventListener('change', (e) => {
     settings.enabled = e.target.checked;
     saveSettings();
     renderSettingsPanel();
     renderFloatButton();
+    renderInputMenuEntry();
   });
   panel.querySelector('.sd-toggle-float')?.addEventListener('change', (e) => {
     settings.floatingButton = e.target.checked;
     saveSettings();
     renderFloatButton();
+  });
+}
+
+function clampFloatPosition() {
+  settings.floatPosition ||= { x: null, y: null };
+  const size = window.matchMedia?.('(max-width: 760px)')?.matches ? 44 : 48;
+  const margin = 10;
+  const maxX = Math.max(margin, window.innerWidth - size - margin);
+  const maxY = Math.max(margin, window.innerHeight - size - margin);
+  if (typeof settings.floatPosition.x !== 'number') settings.floatPosition.x = maxX;
+  if (typeof settings.floatPosition.y !== 'number') settings.floatPosition.y = Math.max(margin, window.innerHeight - size - 84);
+  settings.floatPosition.x = Math.min(maxX, Math.max(margin, Number(settings.floatPosition.x)));
+  settings.floatPosition.y = Math.min(maxY, Math.max(margin, Number(settings.floatPosition.y)));
+  return { x: settings.floatPosition.x, y: settings.floatPosition.y, size, margin, maxX, maxY };
+}
+
+function applyFloatPosition(btn) {
+  const pos = clampFloatPosition();
+  btn.style.left = `${pos.x}px`;
+  btn.style.top = `${pos.y}px`;
+  btn.style.right = 'auto';
+  btn.style.bottom = 'auto';
+}
+
+function bindFloatDrag(btn) {
+  if (btn.dataset.dragBound) return;
+  btn.dataset.dragBound = '1';
+  let startX = 0;
+  let startY = 0;
+  let originX = 0;
+  let originY = 0;
+  let moved = false;
+
+  btn.addEventListener('pointerdown', (event) => {
+    if (event.button !== undefined && event.button !== 0) return;
+    const pos = clampFloatPosition();
+    startX = event.clientX;
+    startY = event.clientY;
+    originX = pos.x;
+    originY = pos.y;
+    moved = false;
+    btn.setPointerCapture?.(event.pointerId);
+  });
+
+  btn.addEventListener('pointermove', (event) => {
+    if (!btn.hasPointerCapture?.(event.pointerId)) return;
+    const dx = event.clientX - startX;
+    const dy = event.clientY - startY;
+    if (Math.abs(dx) + Math.abs(dy) > 4) moved = true;
+    settings.floatPosition ||= { x: null, y: null };
+    settings.floatPosition.x = originX + dx;
+    settings.floatPosition.y = originY + dy;
+    applyFloatPosition(btn);
+  });
+
+  const finish = (event) => {
+    if (!btn.hasPointerCapture?.(event.pointerId)) return;
+    btn.releasePointerCapture?.(event.pointerId);
+    const pos = clampFloatPosition();
+    settings.floatPosition.x = pos.x + pos.size / 2 < window.innerWidth / 2 ? pos.margin : pos.maxX;
+    settings.floatPosition.y = pos.y;
+    applyFloatPosition(btn);
+    saveSettings();
+    if (moved) {
+      btn.dataset.justDragged = '1';
+      setTimeout(() => { delete btn.dataset.justDragged; }, 120);
+    }
+  };
+  btn.addEventListener('pointerup', finish);
+  btn.addEventListener('pointercancel', finish);
+
+  btn.addEventListener('click', (event) => {
+    if (btn.dataset.justDragged === '1') {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+    openModal('dashboard');
   });
 }
 
@@ -818,11 +915,15 @@ function renderFloatButton() {
     btn = document.createElement('button');
     btn.id = FLOAT_ID;
     btn.type = 'button';
-    btn.title = '剧情导演';
-    btn.textContent = '🎬';
+    btn.title = '浮生剧编';
+    btn.textContent = '剧';
     document.body.appendChild(btn);
-    btn.addEventListener('click', () => openModal('dashboard'));
+    bindFloatDrag(btn);
   }
+  btn.textContent = '剧';
+  btn.title = '浮生剧编';
+  bindFloatDrag(btn);
+  applyFloatPosition(btn);
 }
 
 function renderBusyState() {
@@ -844,17 +945,21 @@ function renderModal() {
     ['settings', '设置'],
     ['plug', '🔌'],
   ];
-  modal.className = `sd-theme-${settings.theme === 'dark' ? 'dark' : 'light'}`;
+  const wasOpen = modal.classList.contains('open');
+  modal.className = `sd-theme-${settings.theme === 'dark' ? 'dark' : 'light'}${wasOpen ? ' open' : ''}`;
   modal.innerHTML = `
     <div class="sd-backdrop"></div>
-    <section class="sd-window" role="dialog" aria-label="剧情导演">
+    <section class="sd-window" role="dialog" aria-label="浮生剧编">
       <header class="sd-header">
-        <button class="sd-theme-toggle" title="切换外观">🎨</button>
         <div class="sd-titlebox">
-          <h2>剧情导演</h2>
-          <p>让故事自己生长，也让命运留下线索。</p>
+          <h2>浮生剧编</h2>
+          <p>故事自成脉络&nbsp;&nbsp;命运早有伏笔</p>
         </div>
-        <button class="sd-close" title="关闭">×</button>
+        <div class="sd-header-actions">
+          <button class="sd-plug-shortcut" title="API与日志">🔌</button>
+          <button class="sd-theme-toggle" title="切换外观">🎨</button>
+          <button class="sd-close" title="关闭">×</button>
+        </div>
       </header>
       <nav class="sd-tabs">
         ${tabs.map(([id, label]) => `<button class="sd-tab ${activeTab === id ? 'active' : ''}" data-tab="${id}">${label}</button>`).join('')}
@@ -863,6 +968,7 @@ function renderModal() {
     </section>`;
   modal.querySelector('.sd-backdrop')?.addEventListener('click', closeModal);
   modal.querySelector('.sd-close')?.addEventListener('click', closeModal);
+  modal.querySelector('.sd-plug-shortcut')?.addEventListener('click', () => { activeTab = 'plug'; renderModal(); });
   modal.querySelector('.sd-theme-toggle')?.addEventListener('click', () => {
     settings.theme = settings.theme === 'dark' ? 'light' : 'dark';
     saveSettings();
@@ -900,7 +1006,7 @@ function metric(label, value) {
 function renderDashboardTab() {
   const p = currentPlan();
   if (!p) {
-    return `<section class="sd-card sd-plan-card"><h3>剧情规划</h3><div class="sd-empty">尚未生成剧情规划</div><div class="sd-button-row sd-center"><button class="sd-btn sd-primary sd-generate-main">刷新剧情</button></div></section>`;
+    return `<section class="sd-card sd-plan-card"><h3>剧情规划</h3><div class="sd-empty">尚未生成剧情规划</div><div class="sd-button-row sd-center"><button class="sd-btn sd-primary sd-generate-main">刷新剧情</button>${busy ? '<button class="sd-btn sd-stop">取消</button>' : ''}</div></section>`;
   }
   const st = p.story_status || {};
   return `
@@ -920,11 +1026,26 @@ function renderDashboardTab() {
       ${countCard('角色', p.npc_updates?.length || 0, 'castworld')}
       ${countCard('世界', p.world_updates?.length || 0, 'castworld')}
     </div>
-    <section class="sd-card"><h3>导演手记</h3><p>${htmlEscape(p.director_comment || '暂无')}</p><p class="sd-muted">${htmlEscape(p.next_refresh_hint || '')}</p></section>`;
+    <section class="sd-card"><h3>导演手记</h3><p>${htmlEscape(p.director_comment || '暂无')}</p><p class="sd-muted">${htmlEscape(p.next_refresh_hint || '')}</p></section>
+    ${renderHistorySection()}`;
 }
 
 function countCard(label, count, jump) {
   return `<button class="sd-count-card" data-jump="${jump}"><b>${count}</b><span>${label}</span></button>`;
+}
+
+function renderHistorySection() {
+  const history = Array.isArray(getChatStore().history) ? getChatStore().history : [];
+  const rows = history.slice(0, 5).map((record) => {
+    const st = record.plan?.story_status || {};
+    return `<article class="sd-history-card"><div><h4>${htmlEscape(st.title || st.current_arc || '未命名审片')}</h4><p class="sd-muted">${htmlEscape(formatDateTime(record.createdAt))}</p></div><div class="sd-button-row"><button class="sd-btn sd-load-history" data-id="${htmlEscape(record.id)}">载入</button><button class="sd-btn sd-danger sd-delete-history" data-id="${htmlEscape(record.id)}">删除</button></div></article>`;
+  }).join('');
+  return `<section class="sd-card"><h3>历史记录</h3><p class="sd-muted">最多保留5条审片记录。</p>${rows || '<p class="sd-muted">暂无历史记录。</p>'}</section>`;
+}
+
+function formatDateTime(date) {
+  if (!date) return '';
+  try { return new Date(date).toLocaleString(); } catch (_) { return String(date); }
 }
 
 function renderTasksNodesTab() {
@@ -940,7 +1061,7 @@ function renderCastWorldTab() {
 }
 
 function renderNoPlan() {
-  return `<section class="sd-card sd-plan-card"><div class="sd-empty">尚未生成剧情规划</div><div class="sd-button-row sd-center"><button class="sd-btn sd-primary sd-generate-main">刷新剧情</button></div></section>`;
+  return `<section class="sd-card sd-plan-card"><div class="sd-empty">尚未生成剧情规划</div><div class="sd-button-row sd-center"><button class="sd-btn sd-primary sd-generate-main">刷新剧情</button>${busy ? '<button class="sd-btn sd-stop">取消</button>' : ''}</div></section>`;
 }
 
 function renderItemList(items, kind) {
@@ -1082,6 +1203,22 @@ function bindActiveTabEvents(root) {
   root.querySelectorAll('.sd-generate-main').forEach((el) => el.addEventListener('click', () => generateDirectorPlan()));
   root.querySelectorAll('.sd-stop').forEach((el) => el.addEventListener('click', stopGeneration));
   root.querySelectorAll('.sd-count-card').forEach((el) => el.addEventListener('click', () => { activeTab = el.dataset.jump; renderModal(); }));
+  root.querySelectorAll('.sd-load-history').forEach((el) => el.addEventListener('click', async () => {
+    const record = (getChatStore().history || []).find((x) => x.id === el.dataset.id);
+    if (!record?.plan) return;
+    getChatStore().plan = clone(record.plan);
+    getChatStore().updatedAt = record.createdAt || new Date().toISOString();
+    await saveMetadata();
+    toast('已载入历史记录。', 'success');
+    renderModal();
+    renderSettingsPanel();
+  }));
+  root.querySelectorAll('.sd-delete-history').forEach((el) => el.addEventListener('click', async () => {
+    getChatStore().history = (getChatStore().history || []).filter((x) => x.id !== el.dataset.id);
+    await saveMetadata();
+    toast('历史记录已删除。', 'success');
+    renderModal();
+  }));
   root.querySelectorAll('.sd-inject').forEach((el) => el.addEventListener('click', () => {
     const ok = injectToInput(el.dataset.text || '');
     toast(ok ? '已写入输入框。' : '未找到输入框。', ok ? 'success' : 'error');
@@ -1240,6 +1377,46 @@ async function importTemplates(event) {
   }
 }
 
+
+function renderInputMenuEntry() {
+  document.getElementById(INPUT_ENTRY_ID)?.remove();
+  document.getElementById(INPUT_BUTTON_ID)?.remove();
+  if (!settings.enabled) return;
+
+  const menu = document.querySelector('#extensionsMenu, #extensions_menu, #input_extra_menu, #send_form_menu, .extensionsMenu');
+  if (menu) {
+    const entry = document.createElement('div');
+    entry.id = INPUT_ENTRY_ID;
+    entry.className = 'list-group-item flex-container story-director-input-entry';
+    entry.innerHTML = '<span class="sd-menu-glyph">剧</span><span>浮生剧编</span>';
+    entry.addEventListener('click', () => openModal('dashboard'));
+    menu.appendChild(entry);
+    return;
+  }
+
+  const sendForm = document.querySelector('#send_form, #form_sheld, #chat-input, .send_form');
+  const textarea = document.querySelector('#send_textarea, textarea#send_textarea');
+  const parent = sendForm || textarea?.parentElement;
+  if (!parent || parent.querySelector(`#${INPUT_BUTTON_ID}`)) return;
+  const button = document.createElement('button');
+  button.id = INPUT_BUTTON_ID;
+  button.type = 'button';
+  button.title = '浮生剧编';
+  button.textContent = '剧';
+  button.addEventListener('click', () => openModal('dashboard'));
+  if (textarea && textarea.parentElement === parent) parent.insertBefore(button, textarea);
+  else parent.insertBefore(button, parent.firstChild);
+}
+
+function startInputMenuObserver() {
+  if (inputMenuObserver) return;
+  inputMenuObserver = new MutationObserver(() => {
+    if (document.getElementById(INPUT_ENTRY_ID) || document.getElementById(INPUT_BUTTON_ID)) return;
+    renderInputMenuEntry();
+  });
+  inputMenuObserver.observe(document.body, { childList: true, subtree: true });
+}
+
 function bindEvents() {
   if (eventBound) return;
   eventBound = true;
@@ -1265,6 +1442,7 @@ function bindEvents() {
     settings = getSettings();
     renderSettingsPanel();
     renderFloatButton();
+    renderInputMenuEntry();
     if (document.getElementById(MODAL_ID)?.classList.contains('open')) renderModal();
   };
   source.on(types.MESSAGE_RECEIVED || 'message_received', refreshHandler);
@@ -1279,6 +1457,9 @@ function init() {
   settings = getSettings();
   renderSettingsPanel();
   renderFloatButton();
+  renderInputMenuEntry();
+  startInputMenuObserver();
+  window.addEventListener('resize', () => { const btn = document.getElementById(FLOAT_ID); if (btn) applyFloatPosition(btn); });
   bindEvents();
   console.log(`[${EXTENSION_NAME}] loaded`);
 }
@@ -1291,6 +1472,10 @@ export async function onClean() {
   document.getElementById(SETTINGS_PANEL_ID)?.remove();
   document.getElementById(MODAL_ID)?.remove();
   document.getElementById(FLOAT_ID)?.remove();
+  document.getElementById(INPUT_ENTRY_ID)?.remove();
+  document.getElementById(INPUT_BUTTON_ID)?.remove();
+  inputMenuObserver?.disconnect?.();
+  inputMenuObserver = null;
 }
 
 if (document.readyState === 'loading') {

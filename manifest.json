@@ -6,7 +6,7 @@
   "js": "index.js",
   "css": "style.css",
   "author": "Liminale & GPT-5.5 Thinking",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "homePage": "https://github.com/your-name/sillytavern-story-director",
   "auto_update": true,
   "minimum_client_version": "1.12.0",
