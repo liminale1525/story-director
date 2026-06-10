@@ -3,7 +3,7 @@
 
 const MODULE_NAME = 'story_director_liminale';
 const EXTENSION_NAME = '千幕';
-const VERSION = '0.5.3';
+const VERSION = '0.5.4';
 const SETTINGS_PANEL_ID = 'story-director-settings';
 const MODAL_ID = 'story-director-modal';
 const FLOAT_ID = 'story-director-float';
@@ -1030,14 +1030,87 @@ async function callSillyTavernModel(messages) {
   return await context.generateRaw({ prompt: messages, systemPrompt: settings.systemPrompt });
 }
 
+// v0.5.4：字符串感知的缺逗号补全（仅在字符串外操作，{{user}} 等内容不受影响）
+function insertMissingCommas(text) {
+  let result = '';
+  let inString = false;
+  let escape = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    result += ch;
+    if (inString) {
+      if (escape) { escape = false; continue; }
+      if (ch === '\\') { escape = true; continue; }
+      if (ch === '"') {
+        inString = false;
+        if (/^\s*[{$$"]/.test(text.slice(i + 1))) result += ',';
+      }
+      continue;
+    }
+    if (ch === '"') { inString = true; continue; }
+    if ((ch === '}' || ch === ']') && /^\s*[{\["]/.test(text.slice(i + 1))) result += ',';
+  }
+  return result;
+}
+
+// v0.5.4：截断自愈——裁剪到最后一个完整值，再按括号栈补齐闭合
+function repairTruncatedJson(text) {
+  const tryCut = (includeStrings) => {
+    let inString = false;
+    let escape = false;
+    let cutIndex = -1;
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      if (inString) {
+        if (escape) escape = false;
+        else if (ch === '\\') escape = true;
+        else if (ch === '"') { inString = false; if (includeStrings) cutIndex = i + 1; }
+        continue;
+      }
+      if (ch === '"') { inString = true; continue; }
+      if (ch === '}' || ch === ']') cutIndex = i + 1;
+    }
+    if (cutIndex <= 0) return null;
+    let candidate = text.slice(0, cutIndex).replace(/,\s*$/, '');
+    inString = false;
+    escape = false;
+    const stack = [];
+    for (const ch of candidate) {
+      if (inString) {
+        if (escape) escape = false;
+        else if (ch === '\\') escape = true;
+        else if (ch === '"') inString = false;
+        continue;
+      }
+      if (ch === '"') inString = true;
+      else if (ch === '{') stack.push('}');
+      else if (ch === '[') stack.push(']');
+      else if (ch === '}' || ch === ']') stack.pop();
+    }
+    candidate += stack.reverse().join('');
+    candidate = candidate.replace(/,\s*([}$$])/g, '\$1');
+    try { return JSON.parse(candidate); } catch (_) { return null; }
+  };
+  return tryCut(false) ?? tryCut(true);
+}
+
 function extractJson(text) {
   let content = String(text || '').trim();
   content = content.replace(/^```(?:json)?/i, '').replace(/```$/g, '').trim();
   const start = content.indexOf('{');
   const end = content.lastIndexOf('}');
   if (start !== -1 && end !== -1 && end > start) content = content.slice(start, end + 1);
-  content = content.replace(/,\s*([}\]])/g, '$1');
-  return JSON.parse(content);
+  const base = content.replace(/,\s*([}\]])/g, '\$1');
+  let lastError = null;
+  try { return JSON.parse(base); } catch (e) { lastError = e; }
+  const commaFixed = insertMissingCommas(base).replace(/,\s*([}\]])/g, '\$1');
+  try { return JSON.parse(commaFixed); } catch (e) { lastError = e; }
+  const repaired = repairTruncatedJson(commaFixed);
+  if (repaired !== null) {
+    console.warn(`[${MODULE_NAME}] JSON 已自动修复（若为截断，末尾少量条目可能缺失）`);
+    return repaired;
+  }
+  throw new Error(`JSON_PARSE_FAILED::${lastError?.message || 'unknown'}`);
 }
 
 function normalizePlan(plan) {
@@ -1099,12 +1172,17 @@ async function generateDirectorPlan(showSuccessToast = true, silentFailure = fal
     if (showSuccessToast) toast('推演完成，暗线已就位。', 'success');
   } catch (error) {
     const msg = error?.name === 'AbortError' ? 'USER_CANCELLED' : (error?.message || String(error));
+    const isJsonFail = msg.startsWith('JSON_PARSE_FAILED::');
     log.status = msg === 'USER_CANCELLED' ? 'cancelled' : 'error';
-    log.error = msg === 'INVALID_API_SETTINGS' ? '请检查API设置' : (msg === 'USER_CANCELLED' ? '已取消生成' : msg);
+    log.error = msg === 'INVALID_API_SETTINGS' ? '请检查API设置'
+      : msg === 'USER_CANCELLED' ? '已取消生成'
+      : isJsonFail ? `模型返回的JSON格式有误（多为输出中途被截断或缺少逗号），自动修复未成功，本次结果未写入。原始返回已完整保留在下方「返回」中，直接重试通常即可。\n原始错误：${msg.slice(19)}`
+      : msg;
     log.duration = `${((Date.now() - startedAt) / 1000).toFixed(1)}s`;
     saveSettings();
     if (!silentFailure) {
       if (msg === 'USER_CANCELLED') toast('已取消生成。', 'warning');
+      else if (isJsonFail) toast('生成失败：模型输出的JSON格式有误，原文已保留在日志，可直接重试。', 'error');
       else if (msg === 'INVALID_API_SETTINGS' || settings.providerMode === 'external') apiToast();
       else toast(`生成失败：${log.error}`, 'error');
     }
@@ -1439,6 +1517,13 @@ function renderInjectBadge() {
   return `<button type="button" class="sd-inject-badge ${on ? 'on' : ''}" title="点击${on ? '关闭' : '开启'}暗线注入"><i class="sd-dot"></i>${on ? '暗线注入中' : '暗线注入已关'}</button>`;
 }
 
+function renderHeroActions(hasPlan) {
+  const clearBtn = hasPlan
+    ? '<button type="button" class="sd-icon-btn sd-clear-plan" title="清空当前推演" aria-label="清空当前推演"><i class="fa-solid fa-broom"></i></button>'
+    : '';
+  return `<div class="sd-hero-actions">${renderInjectBadge()}${clearBtn}</div>`;
+}
+
 function renderGenerateRow() {
   return `<div class="sd-button-row">
     <button class="sd-btn sd-primary sd-generate-main"><i class="fa-solid fa-clapperboard"></i>推演下一幕</button>
@@ -1450,12 +1535,12 @@ function renderGenerateRow() {
 function renderDashboardTab() {
   const p = currentPlan();
   if (!p) {
-    return `<section class="sd-card sd-plan-card"><div class="sd-hero-top"><h3 style="margin:0">剧情推演</h3>${renderInjectBadge()}</div><div class="sd-empty">尚未推演剧情</div>${renderGenerateRow()}</section>`;
+    return `<section class="sd-card sd-plan-card"><div class="sd-hero-top"><h3 style="margin:0">剧情推演</h3>${renderHeroActions(false)}</div><div class="sd-empty">尚未推演剧情</div>${renderGenerateRow()}</section>`;
   }
   const st = p.story_status || {};
   return `
     <section class="sd-card sd-hero">
-      <div class="sd-hero-top"><div class="sd-kicker">${htmlEscape(st.cycle || '下一幕')}</div>${renderInjectBadge()}</div>
+      <div class="sd-hero-top"><div class="sd-kicker">${htmlEscape(st.cycle || '下一幕')}</div>${renderHeroActions(true)}</div>
       <h3>${htmlEscape(st.title || '当前故事')}</h3>
       <p>${htmlEscape(st.summary || '')}</p>
       <div class="sd-two"><b>主线：</b>${htmlEscape(st.current_arc || '-')}</div>
@@ -1807,6 +1892,18 @@ function bindActiveTabEvents(root) {
     renderModal();
     toast(settings.injectEnabled ? '暗线注入已开启。' : '暗线注入已关闭。', 'info');
   }));
+    root.querySelector('.sd-clear-plan')?.addEventListener('click', async () => {
+    const yes = await confirmDialog('清空当前推演', '将彻底清除当前推演结果与暗线注入：界面清空、不再注入、也不会并入下次推演提示词。历史记录不受影响，可随时从历史重新载入。确认清空？');
+    if (!yes) return;
+    const store = getChatStore();
+    store.plan = null;
+    store.updatedAt = '';
+    injectSelection.clear();
+    await saveMetadata();
+    await applyDirectorInjection();
+    toast('当前推演已清空。', 'success');
+    renderModal();
+  });
   root.querySelectorAll('.sd-count-card').forEach((el) => el.addEventListener('click', () => { activeTab = el.dataset.jump; renderModal(); }));
   root.querySelectorAll('.sd-load-history').forEach((el) => el.addEventListener('click', async () => {
     const record = (getChatStore().history || []).find((x) => x.id === el.dataset.id);
