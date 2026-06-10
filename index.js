@@ -3,7 +3,7 @@
 
 const MODULE_NAME = 'story_director_liminale';
 const EXTENSION_NAME = '千幕';
-const VERSION = '0.5.2';
+const VERSION = '0.5.3';
 const SETTINGS_PANEL_ID = 'story-director-settings';
 const MODAL_ID = 'story-director-modal';
 const FLOAT_ID = 'story-director-float';
@@ -1820,9 +1820,23 @@ function bindActiveTabEvents(root) {
     renderModal();
   }));
   root.querySelectorAll('.sd-delete-history').forEach((el) => el.addEventListener('click', async () => {
-    getChatStore().history = (getChatStore().history || []).filter((x) => x.id !== el.dataset.id);
+    const store = getChatStore();
+    const record = (store.history || []).find((x) => x.id === el.dataset.id);
+    store.history = (store.history || []).filter((x) => x.id !== el.dataset.id);
+    // v0.5.3：删除的记录若正是当前展示的推演，视为废弃——
+    // 界面完全清空、暗线注入清除、不再并入下次推演提示词
+    const isCurrentPlan = !!record && !!store.plan && (
+      (store.updatedAt && record.createdAt && store.updatedAt === record.createdAt)
+      || JSON.stringify(record.plan) === JSON.stringify(store.plan)
+    );
+    if (isCurrentPlan) {
+      store.plan = null;
+      store.updatedAt = '';
+      injectSelection.clear();
+    }
     await saveMetadata();
-    toast('历史记录已删除。', 'success');
+    await applyDirectorInjection();
+    toast(isCurrentPlan ? '已删除并废弃当前推演。' : '历史记录已删除。', 'success');
     renderModal();
   }));
   root.querySelectorAll('.sd-inject').forEach((el) => el.addEventListener('click', () => {
