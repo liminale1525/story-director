@@ -1708,7 +1708,7 @@ function renderDirectorSettingsTab() {
     </section>
     <section class="sd-card">
       <h3>暗线注入</h3>
-      <p class="sd-muted">开启后，每次推演的结果将被提炼为「暗线灵感池」注入后续对话上下文，供主模型在自然时机抽取任意一点发酵，不强制触发。</p>
+      <p class="sd-muted">开启后，每次推演的结果将被提炼为「暗线灵感池」注入后续对话上下文，在当前聊天随机抽取任意一点发酵</p>
       <div class="sd-refresh-row">
         <label class="checkbox_label"><input type="checkbox" class="sd-inject-enabled" ${settings.injectEnabled ? 'checked' : ''}> 启用暗线注入</label>
         <label class="sd-floor-refresh"><span>注入深度</span><input class="text_pole sd-inject-depth" type="number" min="0" max="20" value="${htmlEscape(settings.injectDepth ?? 2)}"><span>层</span></label>
