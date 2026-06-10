@@ -1,84 +1,97 @@
-// 浮生剧编 - SillyTavern third-party UI extension
+// 千幕 (Qianmu) - SillyTavern third-party UI extension
+// v0.5.0
 
 const MODULE_NAME = 'story_director_liminale';
-const EXTENSION_NAME = '浮生剧编';
+const EXTENSION_NAME = '千幕';
 const SETTINGS_PANEL_ID = 'story-director-settings';
 const MODAL_ID = 'story-director-modal';
 const FLOAT_ID = 'story-director-float';
 const INPUT_ENTRY_ID = 'story-director-input-entry';
 const INPUT_BUTTON_ID = 'story-director-input-button';
 
-const DEFAULT_BLUEPRINT = `【故事基底】
-时代、地域、社会秩序、生活方式、职业生态、资源流动、超自然/科技/权力结构，以及这些设定如何影响普通人的日常选择。
+const PROMPT_REVISION = 2;
+const FIXED_METRICS = ['张力', '情感', '悬念', '节奏'];
+
+const DEFAULT_BLUEPRINT = `【主要指令】
+你将依据以下维度自动分析当前聊天，为其创作最优秀的演绎剧本方案。各维度无需用户填写：留空时，从当前对话、角色设定、世界观与已发生事件中自行提炼；若某一维度已被用户写入具体内容，则视为优先级最高的覆盖指令。
+
+【故事基底】
+自行识别时代、地域、社会秩序、生活方式、职业生态、资源流动、超自然/科技/权力结构，并判断这些设定如何影响普通人的日常选择。
 
 【核心题材】
-例如：慢热恋爱、悬疑调查、群像成长、家族纠葛、黑暗奇幻、末日求生、权谋博弈、都市传闻、共同交际圈引发的支线。
+从对话气质中判定题材配比（如慢热恋爱、悬疑调查、群像成长、家族纠葛、黑暗奇幻、末日求生、权谋博弈、都市传闻等包括但不限于此），允许多题材混合并标出主次。
 
 【当前主线】
-{{user}} 与主要角色正在面对什么局面？表层事件是什么，背后尚未揭开的矛盾、秘密、利益冲突或情感牵引是什么？
+提炼正在发生的表层事件，以及背后尚未揭开的矛盾、秘密、利益冲突或情感牵引。
 
 【未来走向】
-关系、真相、阵营、个人成长或世界变化可能通向哪些方向？可以写多条可能路径，例如关系升温、误会扩散、旧案揭露、阵营分化、外部势力介入、日常支线转入主线。
+推演2-4条可能路径，例如关系升温、误会扩散、旧案揭露、阵营分化、外部势力介入、日常支线转入主线，保持开放不锁死。
 
 【主要角色与关系】
-- {{user}}：身份、动机、能力边界、当前处境、正在逃避或追求的事。
-- {{char}}：身份、欲望、弱点、与 {{user}} 的张力、可能隐瞒的信息。
-- 重要NPC：姓名、立场、交际圈、资源、矛盾点、可能带来的支线。
+- {{user}}：从对话中归纳身份、动机、能力边界、当前处境、正在逃避或追求的事。
+- {{char}}：归纳身份、欲望、弱点、与{{user}}的张力、可能隐瞒的信息。
+- 重要NPC：识别或合理引入姓名、立场、交际圈、资源、矛盾点与可能带来的支线。
 
 【世界社交网】
-角色之间可以有各自的亲友、同事、敌人、旧识、组织关系和共同交际圈。世界变化可以先发生在 {{user}} 视野之外，再通过传闻、邀约、冲突、委托、误会、新闻、偶遇或他人求助进入剧情。
+为角色们构建各自的亲友、同事、敌人、旧识、组织关系和共同交际圈。世界变化可以先发生在{{user}}视野之外，再通过传闻、邀约、冲突、委托、误会、新闻、偶遇或他人求助进入剧情。
 
 【变量与新角色】
-任务、节点、角色世界可以依据叙事需要自然引入新NPC、临时盟友、竞争者、目击者、线人、旧相识、共同圈层角色或外部势力。新变量依据当前剧情密度、场景节奏和人物关系概率出现，为故事注入活力。
+依据当前剧情密度、场景节奏和人物关系概率，自然引入新NPC、临时盟友、竞争者、目击者、线人、旧相识、共同圈层角色或外部势力，为故事注入活力。
 
 【任务与节点偏好】
-希望出现什么类型的任务？例如调查、试探、护送、谈判、潜入、日常约定、情感选择、阵营抉择、公共事件、支线插曲、来自共同交际圈的邀约或误会。
+依据题材自动调配任务类型，例如调查、试探、护送、谈判、潜入、日常约定、情感选择、阵营抉择、公共事件、支线插曲、来自共同交际圈的邀约或误会。
 
 【角色世界偏好】
-希望角色们如何自主行动？例如各自推进目标、交换情报、产生误会、寻找盟友、隐藏动机、被外部事件牵动、在 {{user}} 视野之外建立新的关系或冲突。
+让角色们自主行动：各自推进目标、交换情报、产生误会、寻找盟友、隐藏动机、被外部事件牵动、在任何人视野之外建立新的关系或冲突。
 
 【时间与节奏偏好】
-希望剧情以怎样的时间尺度推进？例如眼前片刻、次日清晨、数轮对话后、下一场景、节日/集会前后、长线伏笔逐步发酵。可以写你偏好的节奏感和时间跨度。
+从当前场景的真实节奏中提炼时间尺度：眼前片刻、次日清晨、数轮对话后、下一场景、节日/集会前后、长线伏笔逐步发酵，使每次推演呈现不同的时间颗粒度。
 
 【剧情偏好】
-节奏、情感浓度、悬疑密度、日常比例、冲突强度、支线开放度、叙事视角、篇章推进速度。
+自行评估并平衡节奏、情感浓度、悬疑密度、日常比例、冲突强度、支线开放度、叙事视角与篇章推进速度，使其最贴合当前聊天的气质。
 
 【避雷与边界】
-不希望出现的剧情、关系走向、题材或叙事处理方式。
+（用户可在此写明不希望出现的剧情、关系走向、题材或叙事处理方式；留空则遵循已有对话中体现的边界。）
 
 【导演特别说明】
-简短写下本轮重点：氛围、关系推进、线索方向、支线灵感、节奏偏好、需要暂时搁置的内容，或希望浮现的新变量。`;
+（用户可在此写下本轮重点：氛围、关系推进、线索方向、支线灵感、节奏偏好、需要暂时搁置的内容；留空则自行判断本轮最值得推进的重点。）`;
 
 function isLegacyBlueprint(text) {
   const value = String(text || '').trim();
+  if (value.includes('【主要指令】')) return false;
   return value.includes('现代都市 / 校园 / 西幻 / 末日 / 无限流 / 其他')
     || value.includes('例如：慢热恋爱、悬疑调查、群像成长、轻喜剧、黑暗奇幻')
     || value.includes('【给导演的额外叮嘱】')
+    || (value.includes('【故事基底】') && value.includes('时代、地域、社会秩序、生活方式'))
     || (value.includes('【故事基底】') && !value.includes('【任务与节点偏好】'))
-    || (value.includes('【故事基底】') && !value.includes('【时间与节奏偏好】'))
     || (value.includes('【世界观】') && value.includes('【剧情基调】') && value.includes('【长期目标】'));
 }
 
 const DEFAULT_SYSTEM_PROMPT = `你是一位顶尖剧作家导演，长期为沉浸式角色扮演故事设计暗线、节奏、冲突、人物动机与可选择的推进路径。
 
-你的任务是根据当前对话、角色设定、{{user}} 写入的剧本方案与勾选的参考项，整理当前故事的下一阶段规划。请以导演手记、任务看板和世界动态记录的形式呈现，让使用者能看见故事脉络、潜在变量、时间节奏与可推进方向。
+你的任务是根据当前对话、角色设定、剧本方案与勾选的参考项，推演当前故事的下一幕规划。请以导演手记、任务看板和世界动态记录的形式呈现，让使用者能看见故事脉络、潜在变量、时间节奏与可推进方向。
 
 核心原则：
-1. 以篇章阶段、任务目标、触发节点、NPC自主行动和世界变化为主，让剧情可推进也可变动。
-2. 尊重已经发生的剧情事实、角色关系与人设，维护既有事件和人物逻辑，保留 {{user}} 的选择空间。
-3. 任务可以选择、延后、转向，并能因 {{user}} 的行动改变结果，保留即兴空间。
-4. NPC拥有独立目标、情绪和下一步行动，即使 {{user}} 暂时不干预，世界也会自然流动。
-5. 角色世界要体现社交网、组织、旧识、传闻、公共事件与视野之外的变化，使世界呈现多维流动感。
-6. 依据叙事发展概率自然引入新NPC、共同交际圈角色、临时线索人物或外部势力，为任务节点和角色世界增加变量。
-7. 时间、周期、期限和提示语要从当前场景真实节奏中提炼，使用贴合剧情语境的自然表达，使每次规划都呈现不同的时间颗粒度与未来走向。
-8. 审片状态中的四个专业评价维度由当前剧情动态命名，使用两字词表达，例如恐怖、亲密、疏离、压迫、温情、迷雾、危机、松弛、暗涌等，并给出0-100数值。
-9. 任务、剧情节点、NPC动态和世界变化通常各给出3-5个条目，数量依据当前剧情密度自然调整。
-10. 输出为一个JSON对象，字段名完整保留，数组字段可以为空数组。
-11. 每个可写入输入框的项目都要给出 inject_prompt。inject_prompt 以 {{user}} 的第一人称视角描述行动、观察、心理和下一步安排，让场景自然推进。`;
+1. 世界不围绕任何单一角色运转：{{user}}是世界中的一个存在而非中心，NPC、组织与事件拥有独立进程，即使无人注视也会自然流动、发酵与转向。
+2. 同时保障 {{user}}的最大参与自由：{{user}}可以主动介入、间接卷入、远远旁观，或对某些事件毫不知情；每次推演须同时提供这几种不同距离的事件，供其自由选择。
+3. 尊重已经发生的剧情事实、角色关系与人设，维护既有事件和人物逻辑，保留{{user}}的选择空间。
+4. 任务可以选择、延后、转向，并能因任何人的行动改变结果，保留即兴空间。
+5. 蝴蝶效应：条目之间允许互相牵动——一个任务的发展可以改写某条世界事件的走向，一位NPC的小动作可以让另一条暗线提前或偏移；小事件允许引发连锁变化，让大千小世界自行运转。
+6. 角色世界要体现社交网、组织、旧识、传闻、公共事件与视野之外的变化，使世界呈现多维流动感。
+7. 依据叙事发展概率自然引入新NPC、共同交际圈角色、临时线索人物或外部势力，为任务节点和角色世界增加变量。
+8. 时间、周期、期限和提示语要从当前场景真实节奏中提炼，使用贴合剧情语境的自然表达，使每次推演呈现不同的时间颗粒度与未来走向。
+9. 审片状态的四个评价维度固定为专业影视评判标准：张力、情感、悬念、节奏，各给出0-100数值；progress为本幕进度，即当前叙事单元（当前幕）的完成度，0-100。
+10. 任务、剧情节点、NPC动态和世界变化通常各给出3-5个条目，数量依据当前剧情密度自然调整。
+11. 视角分工（书写 inject_prompt 与 impact 时严格遵守）：
+   - quests.inject_prompt：以{{user}}第一人称视角书写行动、观察、心理与下一步安排——任务是{{user}}主动伸手触碰世界的入口。
+   - story_nodes.inject_prompt：在第一人称与场景化全知视角之间自然切换；节点可与{{user}}直接相关、间接波及，或发生在其视野边缘。
+   - npc_updates 与 world_updates 的 inject_prompt：以全知导演镜头描述事件如何在世界中自行展开——谁在行动、什么在发酵、哪些线正在交汇；{{user}}可在场可不在场，事件不等待任何人。
+   - 各处 impact：描述对世界格局、人物关系网、各方暗线的涟漪影响与连锁反应，而非仅对{{user}}的影响。
+12. 输出为一个JSON对象，字段名完整保留，数组字段可以为空数组。`;
 
 const JSON_SCHEMA_TEXT = `固定输出格式：
 {
-  "schema_version": "1.1",
+  "schema_version": "1.2",
   "story_status": {
     "title": "当前故事标题，8-20字",
     "current_arc": "当前主线篇章",
@@ -86,10 +99,10 @@ const JSON_SCHEMA_TEXT = `固定输出格式：
     "cycle": "从剧情语境中自然提炼的时间跨度或节奏名，可写成明早、数轮后、下个场景、节日前、某条线索发酵时、长期伏笔回响等贴合当前故事的表达",
     "progress": 0,
     "metrics": [
-      { "label": "两字专业评价维度", "value": 0 },
-      { "label": "两字专业评价维度", "value": 0 },
-      { "label": "两字专业评价维度", "value": 0 },
-      { "label": "两字专业评价维度", "value": 0 }
+      { "label": "张力", "value": 0 },
+      { "label": "情感", "value": 0 },
+      { "label": "悬念", "value": 0 },
+      { "label": "节奏", "value": 0 }
     ],
     "mood": "一句话氛围",
     "summary": "80-160字概述当前剧情局势，并点出未来可能展开的方向"
@@ -99,26 +112,26 @@ const JSON_SCHEMA_TEXT = `固定输出格式：
       "id": "q1",
       "type": "main/side/hidden/relationship/world",
       "title": "任务标题",
-      "objective": "{{user}} 可选择追求的目标",
+      "objective": "{{user}}可选择追求的目标",
       "description": "任务说明，写明此刻适合出现的原因与可能带出的变量",
       "priority": "high/medium/low",
       "status": "open/optional/urgent/dormant",
       "deadline": "依据任务紧迫度自然填写时间条件，可是立即、稍后、隔日、数轮后、下个场景、等待触发、长期潜伏等",
       "trigger": "触发或推进条件",
       "reward": "剧情收益、关系变化、线索或新交际圈入口",
-      "inject_prompt": "以 {{user}} 的第一人称视角描述行动、观察、心理和下一步安排，让任务自然推进"
+      "inject_prompt": "以{{user}}的第一人称视角描述行动、观察、心理和下一步安排，让任务自然推进——这是{{user}}主动触碰世界的入口"
     }
   ],
   "story_nodes": [
     {
       "id": "n1",
       "title": "剧情节点标题",
-      "trigger": "触发条件：地点、时间、对话、任务完成、外部事件发酵或 {{user}} 暂停行动时",
+      "trigger": "触发条件：地点、时间、对话、任务完成、外部事件发酵或某条暗线成熟时",
       "foreshadowing": "伏笔或前置信号",
       "event": "会发生什么",
-      "consequences": "可能后果，保留多条分支空间",
+      "consequences": "可能后果，保留多条分支空间，可写明会牵动哪些其他条目",
       "priority": "high/medium/low",
-      "inject_prompt": "以 {{user}} 的第一人称视角描述行动、观察、心理和下一步安排，让节点自然进入场景"
+      "inject_prompt": "在{{user}}第一人称与场景化全知视角之间自然切换；节点可与{{user}}直接相关、间接波及，或发生在其视野边缘，由叙事自然决定距离"
     }
   ],
   "npc_updates": [
@@ -128,10 +141,10 @@ const JSON_SCHEMA_TEXT = `固定输出格式：
       "current_goal": "此NPC当前目标",
       "progress": 0,
       "emotional_state": "情绪状态",
-      "next_action": "NPC接下来会做什么",
+      "next_action": "NPC接下来会做什么——不依赖任何人的注视",
       "hidden_agenda": "隐藏动机；若无则写无",
-      "relationship_to_user": "与 {{user}} 或其交际圈的关系变化",
-      "inject_prompt": "以 {{user}} 的第一人称视角描述可感知的社交变化、线索、邀约或互动安排"
+      "relationship_to_user": "与{{user}}或其交际圈的关系变化；若暂无交集可写明暂无交集",
+      "inject_prompt": "以全知导演镜头描述这位NPC正在做什么、与谁交汇、什么在发酵；{{user}}可在场、耳闻、间接受影响或毫不知情，事件不等待任何人"
     }
   ],
   "world_updates": [
@@ -139,13 +152,13 @@ const JSON_SCHEMA_TEXT = `固定输出格式：
       "type": "news/weather/faction/rumor/environment/calendar/other",
       "title": "世界变化标题",
       "content": "世界变化内容",
-      "impact": "对 {{user}}、NPC、交际圈或主线的影响",
+      "impact": "对世界格局、人物关系网、各方暗线的涟漪影响与连锁反应（蝴蝶效应），{{user}} 只是其中可能被波及的一环",
       "timing": "从当前世界动态中自然提炼发生时机，可是正在发酵、清晨前后、某场聚会前、下一次公共事件、传闻扩散后、长线压力累积时等",
-      "inject_prompt": "以 {{user}} 的第一人称视角描述自己如何得知、观察或回应这项世界变化"
+      "inject_prompt": "以全知导演镜头描述这项变化如何在世界中展开：谁推动、谁受波及、哪些线开始交汇；可完全发生在{{user}}视野之外"
     }
   ],
   "director_comment": "导演评语：分析节奏、冲突、情感线、世界变量和下一步建议，80-160字",
-  "next_refresh_hint": "建议何时重新刷新，使用贴合剧情的触发条件，例如完成一次关键对话后、抵达新地点后、线索公开后、支线人物介入后"
+  "next_refresh_hint": "建议何时重新推演，使用贴合剧情的触发条件，例如完成一次关键对话后、抵达新地点后、线索公开后、支线人物介入后"
 }`;
 
 const DEFAULT_SETTINGS = Object.freeze({
@@ -164,6 +177,10 @@ const DEFAULT_SETTINGS = Object.freeze({
   outputSchemaText: JSON_SCHEMA_TEXT,
   autoRefresh: false,
   autoRefreshEvery: 10,
+  injectEnabled: true,
+  injectDepth: 2,
+  newcomerMode: false,
+  promptRevision: 0,
   templates: [
     {
       id: 'default-free-blueprint',
@@ -196,13 +213,15 @@ const DEFAULT_SETTINGS = Object.freeze({
 
 let settings = null;
 let activeTab = 'dashboard';
-let contextScanCache = { presets: {}, worldBooks: {}, presetNames: [], worldBookNames: [], currentPresetName: '', boundWorldBookNames: [], scannedAt: '' };
+let contextScanCache = { presets: {}, worldBooks: {}, presetNames: [], worldBookNames: [], currentPresetName: '', boundWorldBookNames: [], presetScannedAt: '', worldScannedAt: '' };
 let busy = false;
 let abortController = null;
 let cancelRequested = false;
 let initialized = false;
 let eventBound = false;
 let inputMenuObserver = null;
+let templateExportMode = false;
+let templateExportSelection = new Set();
 
 function ctx() {
   return globalThis.SillyTavern?.getContext?.() || {};
@@ -242,12 +261,20 @@ function migrateSettings(s) {
   }
   delete s.maxContextMessages;
   if (typeof s.outputSchemaText === 'undefined') s.outputSchemaText = JSON_SCHEMA_TEXT;
-  if (String(s.outputSchemaText || '').includes('今夜/未来3天/本周/下一阶段') || String(s.outputSchemaText || '').includes('现在/今晚/未来几轮/未来3天/本周') || !String(s.outputSchemaText || '').includes('\"metrics\"')) {
-    s.outputSchemaText = JSON_SCHEMA_TEXT;
+
+  // v0.5.0：提示词与输出格式修订（去中心化视角分工 / 固定四维度 / 本幕进度）
+  if (Number(s.promptRevision || 0) < PROMPT_REVISION) {
+    const sys = String(s.systemPrompt || '');
+    if (!sys.trim() || (sys.includes('顶尖剧作家导演') && !sys.includes('视角分工'))) {
+      s.systemPrompt = DEFAULT_SYSTEM_PROMPT;
+    }
+    const schema = String(s.outputSchemaText || '');
+    if (!schema.trim() || (schema.includes('schema_version') && !schema.includes('全知导演镜头'))) {
+      s.outputSchemaText = JSON_SCHEMA_TEXT;
+    }
+    s.promptRevision = PROMPT_REVISION;
   }
-  if ((String(s.systemPrompt || '').includes('故事脉络、潜在变量与可推进方向') && !String(s.systemPrompt || '').includes('时间节奏与可推进方向')) || !String(s.systemPrompt || '').includes('四个专业评价维度')) {
-    s.systemPrompt = DEFAULT_SYSTEM_PROMPT;
-  }
+
   if (!Array.isArray(s.apiProfiles)) s.apiProfiles = [];
   s.selectedPresetNamesByChat ||= {};
   s.selectedPresetItemsByChat ||= {};
@@ -292,9 +319,8 @@ function getChatStore() {
     meta[MODULE_NAME] = { blueprint: DEFAULT_BLUEPRINT, plan: null, history: [], messageCounter: 0, updatedAt: '' };
   }
   mergeDefaults(meta[MODULE_NAME], { blueprint: DEFAULT_BLUEPRINT, plan: null, history: [], messageCounter: 0, updatedAt: '' });
-  if (isLegacyBlueprint(meta[MODULE_NAME].blueprint)) {
+  if (isLegacyBlueprint(meta[MODULE_NAME].blueprint) && !meta[MODULE_NAME].blueprintEdited) {
     meta[MODULE_NAME].blueprint = DEFAULT_BLUEPRINT;
-    meta[MODULE_NAME].blueprintEdited = false;
   }
   return meta[MODULE_NAME];
 }
@@ -635,27 +661,53 @@ function detectBoundWorldBookNames() {
   return uniqueClean(candidates).filter(Boolean);
 }
 
-async function refreshContextSources(showToast = true) {
+function rerenderIfOpen() {
+  if (document.getElementById(MODAL_ID)?.classList.contains('open')) renderModal();
+}
+
+// v0.5.0：预设与世界书拉取彻底分离
+async function refreshPresets(showToast = true) {
   const currentPresetName = getCurrentPresetName();
   const presetNames = listPresetNames();
+  const selectedPresetNames = getSelectedPresetNames();
+  contextScanCache.currentPresetName = currentPresetName;
+  contextScanCache.presetNames = presetNames;
+  contextScanCache.presets = {};
+  for (const name of presetNames) {
+    if (name === currentPresetName || selectedPresetNames.includes(name)) {
+      contextScanCache.presets[name] = getPresetEntries(name);
+    }
+  }
+  contextScanCache.presetScannedAt = new Date().toISOString();
+  initializeSelectedContextState(contextScanCache);
+  saveSettings();
+  if (showToast) toast('预设已拉取。', 'success');
+  rerenderIfOpen();
+}
+
+async function refreshWorldBooks(showToast = true) {
   const boundNames = detectBoundWorldBookNames();
   const allWorldNames = await listWorldBooks();
-  const selectedPresetNames = getSelectedPresetNames();
   const selectedWorldNames = getSelectedWorldBookNames();
-  const cache = { presets: {}, worldBooks: {}, presetNames, worldBookNames: allWorldNames, currentPresetName, boundWorldBookNames: boundNames, scannedAt: new Date().toISOString() };
-
-  for (const name of presetNames) {
-    if (name === currentPresetName || selectedPresetNames.includes(name)) cache.presets[name] = getPresetEntries(name);
-  }
+  contextScanCache.boundWorldBookNames = boundNames;
+  contextScanCache.worldBookNames = allWorldNames;
+  contextScanCache.worldBooks = {};
   for (const name of selectedWorldNames) {
-    if (allWorldNames.includes(name) || boundNames.includes(name)) cache.worldBooks[name] = await getWorldBookEntries(name);
+    if (allWorldNames.includes(name) || boundNames.includes(name)) {
+      contextScanCache.worldBooks[name] = await getWorldBookEntries(name);
+    }
   }
-
-  initializeSelectedContextState(cache);
-  contextScanCache = cache;
+  contextScanCache.worldScannedAt = new Date().toISOString();
+  initializeSelectedContextState(contextScanCache);
   saveSettings();
+  if (showToast) toast('世界书已拉取。', 'success');
+  rerenderIfOpen();
+}
+
+async function refreshContextSources(showToast = false) {
+  await refreshPresets(false);
+  await refreshWorldBooks(false);
   if (showToast) toast('已刷新。', 'success');
-  if (document.getElementById(MODAL_ID)?.classList.contains('open')) renderModal();
 }
 
 function getPresetNameStore() {
@@ -684,10 +736,6 @@ function getWorldSelectionStore() {
   settings.selectedWorldBookItemsByChat ||= {};
   if (!settings.selectedWorldBookItemsByChat[chatKey]) settings.selectedWorldBookItemsByChat[chatKey] = {};
   return settings.selectedWorldBookItemsByChat[chatKey];
-}
-
-function getEnabledWorldBookStore() {
-  return getWorldNameStore();
 }
 
 function getSelectedPresetNames() {
@@ -767,7 +815,7 @@ function initializeSelectedContextState(cache) {
 }
 
 async function buildExtraContextText() {
-  if (!contextScanCache.scannedAt) await refreshContextSources(false);
+  if (!contextScanCache.presetScannedAt && !contextScanCache.worldScannedAt) await refreshContextSources(false);
   let output = '';
   if (settings.contextOptions.includeCharDesc) {
     const desc = await resolveMacro(getCharacterDescription());
@@ -804,6 +852,93 @@ async function buildExtraContextText() {
   return output.trim();
 }
 
+/* ============================================================
+   v0.5.0 暗线注入系统
+   主通道：setExtensionPrompt（官方扩展提示词接口，IN_CHAT + 深度）
+   兜底：generate_interceptor（manifest 注册的全局拦截器）
+   ============================================================ */
+
+function snip(text, n = 64) {
+  const value = String(text || '').replace(/\s+/g, ' ').trim();
+  return value.length > n ? `${value.slice(0, n)}…` : value;
+}
+
+function buildPlanDigest(plan) {
+  if (!plan) return '';
+  const st = plan.story_status || {};
+  const lines = [];
+  lines.push('【千幕·暗线灵感池】');
+  lines.push('以下是导演系统推演出的潜在暗线与世界动向，仅作叙事灵感参考：不强制发生、不要求全部触发、不围绕任何人运转。可在自然时机抽取其中任意一点令其浮现、发酵或彼此牵动（蝴蝶效应），也可让其继续沉睡。世界中的人与事拥有自己的进程；{{user}} 可以参与、旁观、间接受影响或毫不知情。');
+  const arcLine = [st.current_arc, st.current_stage].filter(Boolean).join(' · ');
+  if (arcLine) lines.push(`当前幕：${snip(arcLine, 90)}`);
+  if (st.mood) lines.push(`氛围：${snip(st.mood, 40)}`);
+  const quests = (plan.quests || []).map((q) => `- ${snip(q.title, 24)}：${snip(q.objective || q.description, 56)}${q.trigger ? `（触发：${snip(q.trigger, 28)}）` : ''}`).filter(Boolean);
+  if (quests.length) lines.push(`可选事件入口（{{user}} 可主动触碰，也可无视）：\n${quests.join('\n')}`);
+  const nodes = (plan.story_nodes || []).map((n) => `- ${snip(n.title, 24)}：${snip(n.event || n.foreshadowing, 56)}${n.trigger ? `（时机：${snip(n.trigger, 28)}）` : ''}`).filter(Boolean);
+  if (nodes.length) lines.push(`潜在节点（可直接相关、间接波及或发生在视野边缘）：\n${nodes.join('\n')}`);
+  const npcs = (plan.npc_updates || []).map((n) => `- ${snip(n.name, 16)}：${snip(n.next_action || n.current_goal, 56)}${n.hidden_agenda && String(n.hidden_agenda).trim() !== '无' ? `（暗流：${snip(n.hidden_agenda, 28)}）` : ''}`).filter(Boolean);
+  if (npcs.length) lines.push(`人物暗流（自行推进，不等待任何人）：\n${npcs.join('\n')}`);
+  const worlds = (plan.world_updates || []).map((w) => `- ${snip(w.title, 24)}：${snip(w.content, 56)}${w.timing ? `（${snip(w.timing, 20)}）` : ''}`).filter(Boolean);
+  if (worlds.length) lines.push(`世界涟漪（在背景中持续发酵）：\n${worlds.join('\n')}`);
+  return lines.join('\n\n');
+}
+
+function getInjectApi() {
+  const context = ctx();
+  const setter = typeof context.setExtensionPrompt === 'function'
+    ? context.setExtensionPrompt
+    : (typeof globalThis.setExtensionPrompt === 'function' ? globalThis.setExtensionPrompt : null);
+  const types = context.extension_prompt_types || globalThis.extension_prompt_types || {};
+  const roles = context.extension_prompt_roles || globalThis.extension_prompt_roles || {};
+  return {
+    setter,
+    position: typeof types.IN_CHAT === 'number' ? types.IN_CHAT : 1,
+    role: typeof roles.SYSTEM === 'number' ? roles.SYSTEM : 0,
+  };
+}
+
+async function applyDirectorInjection() {
+  const { setter, position, role } = getInjectApi();
+  if (!setter) return; // 无主通道时由拦截器兜底
+  try {
+    const store = getChatStore();
+    const active = settings?.enabled && settings.injectEnabled && store?.plan;
+    const text = active ? buildPlanDigest(store.plan) : '';
+    const depth = Math.max(0, Math.min(20, Number(settings?.injectDepth ?? 2)));
+    setter(MODULE_NAME, text, position, depth, false, role);
+  } catch (error) {
+    console.warn(`[${MODULE_NAME}] apply injection failed`, error);
+  }
+}
+
+function clearDirectorInjection() {
+  const { setter, position, role } = getInjectApi();
+  try { setter?.(MODULE_NAME, '', position, 0, false, role); } catch (_) {}
+}
+
+// manifest.json 中 generate_interceptor 指向的全局函数（兜底通道）
+globalThis.qianmuDirectorInterceptor = async function (chat) {
+  try {
+    if (!initialized || !settings?.enabled || !settings.injectEnabled) return;
+    if (getInjectApi().setter) return; // 主通道可用时不重复注入
+    const store = getChatStore();
+    if (!store?.plan || !Array.isArray(chat)) return;
+    const digest = buildPlanDigest(store.plan);
+    if (!digest) return;
+    const depth = Math.max(0, Math.min(chat.length, Number(settings.injectDepth ?? 2)));
+    chat.splice(chat.length - depth, 0, {
+      name: 'System',
+      is_user: false,
+      is_system: true,
+      send_date: Date.now(),
+      mes: digest,
+      extra: { type: 'narrator', qianmu_injected: true },
+    });
+  } catch (error) {
+    console.warn(`[${MODULE_NAME}] interceptor failed`, error);
+  }
+};
+
 async function buildPrompt() {
   const store = getChatStore();
   const pieces = [];
@@ -813,8 +948,11 @@ async function buildPrompt() {
   const extra = await buildExtraContextText();
   if (extra) pieces.push(`【参考项】\n${extra}\n`);
   if (store.plan) pieces.push(`【上一次审片状态】\n${JSON.stringify(store.plan, null, 2)}\n`);
+  if (settings.newcomerMode) {
+    pieces.push('【新角入场指令】\n本次推演必须为角色世界注入新鲜血液：npc_updates 中至少包含1-2位此前从未出现过的全新NPC（给出姓名、定位、动机，以及与现有关系网或交际圈的自然接驳点）；world_updates 中至少包含1-2件全新的世界事件或公共变化。新角与新事件需贴合当前世界观与剧情密度，像是世界自然生长出来的，而非凭空插入。');
+  }
   pieces.push(settings.outputSchemaText || JSON_SCHEMA_TEXT);
-  pieces.push('请只输出JSON对象。所有百分比数值范围为0-100。任务、剧情节点、NPC动态和世界变化都要贴合当前故事，通常各给出3-5个条目，保留 {{user}} 的选择自由，并依据叙事概率引入新NPC或共同交际圈变量。审片状态的四个圆形评价维度需根据本次剧情动态命名为两字专业词。');
+  pieces.push('请只输出JSON对象。所有百分比数值范围为0-100。任务、剧情节点、NPC动态和世界变化都要贴合当前故事，通常各给出3-5个条目，并严格遵守视角分工：任务以 {{user}} 第一人称书写，节点在双视角间过渡，角色与世界使用全知导演镜头。同时提供不同参与距离的事件（可介入、间接波及、视野之外），允许条目之间互相牵动。审片维度固定为张力、情感、悬念、节奏，progress 为本幕进度。');
   return pieces.join('\n\n');
 }
 
@@ -860,7 +998,7 @@ function extractJson(text) {
 
 function normalizePlan(plan) {
   const base = {
-    schema_version: '1.1',
+    schema_version: '1.2',
     story_status: { title: '当前故事', current_arc: '', current_stage: '', cycle: '', progress: 0, metrics: [], mood: '', summary: '' },
     quests: [], story_nodes: [], npc_updates: [], world_updates: [], director_comment: '', next_refresh_hint: '',
   };
@@ -871,15 +1009,16 @@ function normalizePlan(plan) {
   plan.npc_updates = Array.isArray(plan.npc_updates) ? plan.npc_updates : [];
   plan.world_updates = Array.isArray(plan.world_updates) ? plan.world_updates : [];
   const st = plan.story_status || {};
-  st.metrics = Array.isArray(st.metrics) ? st.metrics.slice(0, 4).map((item, index) => ({
-    label: String(item?.label || ['张力', '情感', '悬疑', '危险'][index] || '维度').slice(0, 2),
-    value: Math.max(0, Math.min(100, Number(item?.value ?? item?.score ?? 0))),
-  })) : [];
+  const raw = Array.isArray(st.metrics) ? st.metrics : [];
+  st.metrics = FIXED_METRICS.map((label, index) => {
+    const found = raw.find((m) => String(m?.label || '').trim() === label) || raw[index];
+    return { label, value: Math.max(0, Math.min(100, Number(found?.value ?? found?.score ?? 0))) };
+  });
   return plan;
 }
 
 async function generateDirectorPlan(showSuccessToast = true, silentFailure = false) {
-  if (!settings.enabled) return toast('浮生剧编已关闭。', 'warning');
+  if (!settings.enabled) return toast('千幕已关闭。', 'warning');
   if (busy) return;
   if (!validateApiSettings()) {
     settings.lastLog.status = 'error';
@@ -910,10 +1049,11 @@ async function generateDirectorPlan(showSuccessToast = true, silentFailure = fal
     store.updatedAt = now;
     store.messageCounter = 0;
     await saveMetadata();
+    await applyDirectorInjection();
     settings.lastLog.status = 'success';
     settings.lastLog.duration = `${((Date.now() - startedAt) / 1000).toFixed(1)}s`;
     saveSettings();
-    if (showSuccessToast) toast('浮生剧编已更新。', 'success');
+    if (showSuccessToast) toast('推演完成，暗线已就位。', 'success');
   } catch (error) {
     const msg = error?.name === 'AbortError' ? 'USER_CANCELLED' : (error?.message || String(error));
     settings.lastLog.status = msg === 'USER_CANCELLED' ? 'cancelled' : 'error';
@@ -971,7 +1111,7 @@ function stopGeneration() {
   busy = false;
   renderBusyState();
   renderSettingsPanel();
-  if (document.getElementById(MODAL_ID)?.classList.contains('open')) renderModal();
+  rerenderIfOpen();
   toast('已取消生成。', 'warning');
 }
 
@@ -1002,9 +1142,8 @@ function injectToInput(text) {
   input.dispatchEvent(new Event('change', { bubbles: true }));
   return true;
 }
-
 function openModal(tab = activeTab) {
-  if (!settings.enabled) return toast('浮生剧编已关闭。', 'warning');
+  if (!settings.enabled) return toast('千幕已关闭。', 'warning');
   activeTab = tab;
   let modal = document.getElementById(MODAL_ID);
   if (!modal) {
@@ -1112,27 +1251,30 @@ function renderFloatButton() {
     btn = document.createElement('button');
     btn.id = FLOAT_ID;
     btn.type = 'button';
-    btn.title = '浮生剧编';
-    btn.textContent = '剧';
     document.body.appendChild(btn);
     bindFloatDrag(btn);
   }
-  btn.textContent = '剧';
-  btn.title = '浮生剧编';
+  btn.textContent = '幕';
+  btn.title = EXTENSION_NAME;
   bindFloatDrag(btn);
   applyFloatPosition(btn);
 }
 
 function renderBusyState() {
-  document.querySelectorAll('.sd-generate-now, .sd-generate-main').forEach((el) => {
+  document.querySelectorAll('.sd-generate-main').forEach((el) => {
     el.disabled = busy || !settings.enabled;
-    el.textContent = busy ? '生成中…' : '刷新剧情';
+    el.classList.toggle('sd-busy', busy);
+    el.innerHTML = busy
+      ? '推演中<span class="sd-dots"><i>·</i><i>·</i><i>·</i></span>'
+      : '推演下一幕';
   });
 }
 
 function renderModal() {
   const modal = document.getElementById(MODAL_ID);
   if (!modal) return;
+  // 滚动位置防跳：重渲染前记录、渲染后恢复
+  const prevScroll = modal.querySelector('.sd-body')?.scrollTop ?? 0;
   const tabs = [
     ['dashboard', '审片'],
     ['blueprint', '编剧'],
@@ -1145,11 +1287,11 @@ function renderModal() {
   modal.className = `sd-theme-${settings.theme === 'dark' ? 'dark' : 'light'}${wasOpen ? ' open' : ''}`;
   modal.innerHTML = `
     <div class="sd-backdrop"></div>
-    <section class="sd-window" role="dialog" aria-label="浮生剧编">
+    <section class="sd-window" role="dialog" aria-label="${EXTENSION_NAME}">
       <header class="sd-header">
         <div class="sd-titlebox">
-          <h2>浮生剧编</h2>
-          <p>故事自成脉络&nbsp;&nbsp;命运早有伏笔</p>
+          <h2>${EXTENSION_NAME}</h2>
+          <p>一蝶振翅&nbsp;&nbsp;万象入幕</p>
         </div>
         <div class="sd-header-actions">
           <button class="sd-plug-shortcut" title="API与日志">⚙</button>
@@ -1178,6 +1320,8 @@ function renderModal() {
   }));
   bindActiveTabEvents(modal);
   renderBusyState();
+  const body = modal.querySelector('.sd-body');
+  if (body) body.scrollTop = prevScroll;
 }
 
 function currentPlan() {
@@ -1198,12 +1342,12 @@ function renderActiveTab() {
 
 function renderInjectDock() {
   if (!['tasksnodes', 'castworld'].includes(activeTab) || !currentPlan()) return '';
-  return '<div class="sd-inject-dock"><button class="sd-btn sd-primary sd-inject-selected" type="button" disabled>写入已选 <span>0</span></button></div>';
+  return '<div class="sd-inject-dock"><button class="sd-btn sd-primary sd-inject-selected" type="button" disabled>写入已选 (<span>0</span>)</button></div>';
 }
 
 function metricBar(label, value) {
   const n = Math.max(0, Math.min(100, Number(value || 0)));
-  return `<div class="sd-metric sd-progress-metric"><div class="sd-metric-top"><span>${label}</span><b>${n}%</b></div><div class="sd-bar"><i style="width:${n}%"></i></div></div>`;
+  return `<div class="sd-metric sd-progress-metric"><div class="sd-metric-top"><span>${htmlEscape(label)}</span><b>${n}%</b></div><div class="sd-bar"><i style="width:${n}%"></i></div></div>`;
 }
 
 function metricCircle(label, value) {
@@ -1212,38 +1356,44 @@ function metricCircle(label, value) {
 }
 
 function getStoryMetrics(st) {
-  const dynamic = Array.isArray(st?.metrics) ? st.metrics : [];
-  const cleaned = dynamic.map((item, index) => ({
-    label: String(item?.label || ['张力', '情感', '悬疑', '危险'][index] || '维度').trim().slice(0, 2),
-    value: Math.max(0, Math.min(100, Number(item?.value ?? item?.score ?? 0))),
-  })).filter((item) => item.label);
-  if (cleaned.length >= 4) return cleaned.slice(0, 4);
-  return [
-    { label: '张力', value: st?.tension },
-    { label: '情感', value: st?.romance },
-    { label: '悬疑', value: st?.mystery },
-    { label: '危险', value: st?.danger },
-  ].map((item) => ({ label: item.label, value: Math.max(0, Math.min(100, Number(item.value || 0))) }));
+  const raw = Array.isArray(st?.metrics) ? st.metrics : [];
+  return FIXED_METRICS.map((label, index) => {
+    const found = raw.find((m) => String(m?.label || '').trim() === label) || raw[index];
+    return { label, value: Math.max(0, Math.min(100, Number(found?.value ?? found?.score ?? 0))) };
+  });
+}
+
+function renderInjectBadge() {
+  const on = !!settings.injectEnabled;
+  return `<button type="button" class="sd-inject-badge ${on ? 'on' : ''}" title="点击${on ? '关闭' : '开启'}暗线注入"><i></i>${on ? '暗线注入中' : '暗线注入已关'}</button>`;
+}
+
+function renderGenerateRow() {
+  return `<div class="sd-button-row">
+    <button class="sd-btn sd-primary sd-generate-main">推演下一幕</button>
+    <button class="sd-btn sd-newcomer-toggle ${settings.newcomerMode ? 'active' : ''}" type="button" title="选中后，本次推演将引入全新角色与世界事件">新角入场</button>
+    ${busy ? '<button class="sd-btn sd-stop">停止</button>' : ''}
+  </div>`;
 }
 
 function renderDashboardTab() {
   const p = currentPlan();
   if (!p) {
-    return `<section class="sd-card sd-plan-card"><h3>剧情规划</h3><div class="sd-empty">尚未生成剧情规划</div><div class="sd-button-row sd-center"><button class="sd-btn sd-primary sd-generate-main">刷新剧情</button>${busy ? '<button class="sd-btn sd-stop">取消</button>' : ''}</div></section>`;
+    return `<section class="sd-card sd-plan-card"><div class="sd-hero-top"><h3 style="margin:0">剧情推演</h3>${renderInjectBadge()}</div><div class="sd-empty">尚未推演剧情</div>${renderGenerateRow()}</section>`;
   }
   const st = p.story_status || {};
   return `
     <section class="sd-card sd-hero">
-      <div class="sd-kicker">${htmlEscape(st.cycle || '下一阶段')}</div>
+      <div class="sd-hero-top"><div class="sd-kicker">${htmlEscape(st.cycle || '下一幕')}</div>${renderInjectBadge()}</div>
       <h3>${htmlEscape(st.title || '当前故事')}</h3>
       <p>${htmlEscape(st.summary || '')}</p>
       <div class="sd-two"><b>主线：</b>${htmlEscape(st.current_arc || '-')}</div>
       <div class="sd-two"><b>阶段：</b>${htmlEscape(st.current_stage || '-')}</div>
       <div class="sd-two"><b>氛围：</b>${htmlEscape(st.mood || '-')}</div>
-      <div class="sd-button-row"><button class="sd-btn sd-primary sd-generate-main">刷新剧情</button>${busy ? '<button class="sd-btn sd-stop">停止</button>' : ''}</div>
+      ${renderGenerateRow()}
     </section>
     <section class="sd-card sd-status-card">
-      ${metricBar('进度', st.progress)}
+      ${metricBar('本幕进度', st.progress)}
       <div class="sd-circle-grid">${getStoryMetrics(st).map((m) => metricCircle(m.label, m.value)).join('')}</div>
     </section>
     <div class="sd-grid sd-grid-4 sd-dashboard-counts">
@@ -1290,8 +1440,8 @@ function renderPlanSection(title, items, kind) {
   return `<section class="sd-card sd-plan-section"><div class="sd-section-title"><h3>${htmlEscape(title)}</h3><span>${items?.length || 0} 条</span></div>${renderItemList(items || [], kind)}</section>`;
 }
 
-function renderNoPlan(text = '尚未生成剧情规划') {
-  return `<section class="sd-card sd-plan-card"><div class="sd-empty">${htmlEscape(text)}</div><div class="sd-button-row sd-center"><button class="sd-btn sd-primary sd-generate-main">刷新剧情</button>${busy ? '<button class="sd-btn sd-stop">取消</button>' : ''}</div></section>`;
+function renderNoPlan(text = '尚未推演剧情') {
+  return `<section class="sd-card sd-plan-card"><div class="sd-empty">${htmlEscape(text)}</div>${renderGenerateRow()}</section>`;
 }
 
 function renderItemList(items, kind) {
@@ -1317,7 +1467,7 @@ function renderItemCard(item, kind, idx) {
   return `<details class="sd-item-card sd-item-fold">
     <summary>
       <div class="sd-item-summary-main"><h4>${htmlEscape(title)}</h4>${chips ? `<div class="sd-mini-chip-row">${chips}</div>` : ''}</div>
-      ${prompt ? `<label class="sd-inject-select-label" title="加入多选写入"><input type="checkbox" class="sd-select-inject" data-text="${htmlEscape(prompt)}" data-id="${htmlEscape(injectId)}"> 多选</label>` : ''}
+      ${prompt ? `<label class="sd-inject-select-label" title="加入写入队列"><input type="checkbox" class="sd-select-inject" data-text="${htmlEscape(prompt)}" data-id="${htmlEscape(injectId)}"></label>` : ''}
     </summary>
     <div class="sd-item-detail">
       <dl>${fields.filter(([, v]) => v !== undefined && v !== '').map(([k, v]) => `<dt>${htmlEscape(k)}</dt><dd>${htmlEscape(v)}</dd>`).join('')}</dl>
@@ -1356,25 +1506,29 @@ function badge(text) {
 function renderBlueprintTab() {
   const store = getChatStore();
   const templates = settings.templates || [];
+  const exportBar = templateExportMode
+    ? `<div class="sd-export-bar"><span class="sd-export-hint">勾选要导出的剧本</span><button type="button" class="sd-btn sd-mini-btn sd-confirm-export">导出 (<span>${templateExportSelection.size}</span>)</button><button type="button" class="sd-btn sd-mini-btn sd-cancel-export">取消</button></div>`
+    : '';
   return `
     <section class="sd-card">
       <h3>当前聊天的剧本</h3>
       <textarea class="text_pole sd-textarea sd-blueprint" spellcheck="false">${htmlEscape(store.blueprint || DEFAULT_BLUEPRINT)}</textarea>
-      <div class="sd-button-row sd-blueprint-actions sd-current-blueprint-actions">
+      <div class="sd-button-row sd-current-blueprint-actions">
         <button type="button" class="sd-btn sd-save-blueprint">保存当前剧本</button>
         <button type="button" class="sd-btn sd-save-template">保存到剧本库</button>
+        <button type="button" class="sd-btn sd-reset-blueprint">恢复默认剧本</button>
       </div>
     </section>
     <section class="sd-card">
-      <div class="sd-section-title"><h3>剧本库</h3><span>${templates.length} 个</span></div>
-      <details class="sd-context-block sd-template-io" open>
-        <summary><b>导入导出</b><span>多选导出</span></summary>
-        <div class="sd-template-io-row">
-          <label class="checkbox_label sd-template-select-all"><input type="checkbox" class="sd-select-all-templates"> 全选</label>
-          <button type="button" class="sd-btn sd-export-selected-templates">导出选中 <span>0</span></button>
-          <label class="sd-btn sd-file-label">导入剧本<input type="file" accept="application/json" class="sd-import-templates"></label>
+      <div class="sd-template-head">
+        <div class="sd-template-io-buttons">
+          <label class="sd-icon-btn sd-file-label" title="导入剧本" aria-label="导入剧本">↧<input type="file" accept="application/json" class="sd-import-templates"></label>
+          <button type="button" class="sd-icon-btn sd-export-mode-toggle ${templateExportMode ? 'active' : ''}" title="导出剧本" aria-label="导出剧本">↥</button>
         </div>
-      </details>
+        <h3>剧本库</h3>
+        <span>${templates.length} 个</span>
+      </div>
+      ${exportBar}
       <div class="sd-template-list">${templates.length ? templates.map(renderTemplateCard).join('') : '<p class="sd-muted">暂无剧本</p>'}</div>
     </section>`;
 }
@@ -1382,14 +1536,12 @@ function renderBlueprintTab() {
 function renderTemplateCard(t) {
   const tags = sanitizeTemplateTags(t.tags);
   const tagHtml = tags.length
-    ? `<div class="sd-template-tags">${tags.map((tag) => `<span class="sd-template-tag">${htmlEscape(tag)}<button type="button" class="sd-template-remove-tag sd-mini-icon" data-id="${htmlEscape(t.id)}" data-tag="${htmlEscape(tag)}" title="删除标签" aria-label="删除标签">×</button></span>`).join('')}</div>`
+    ? `<div class="sd-template-tags">${tags.map((tag) => `<span class="sd-template-tag">${htmlEscape(tag)}<button type="button" class="sd-template-remove-tag" data-id="${htmlEscape(t.id)}" data-tag="${htmlEscape(tag)}" title="删除标签" aria-label="删除标签">×</button></span>`).join('')}</div>`
     : '<div class="sd-template-tags"><span class="sd-muted">暂无标签</span></div>';
-  return `<article class="sd-template-card"><label class="sd-template-pick" title="选择导出"><input type="checkbox" class="sd-template-select" data-id="${htmlEscape(t.id)}"></label><div class="sd-template-main"><h4>${htmlEscape(t.name || '未命名剧本')}</h4>${tagHtml}</div><div class="sd-button-row sd-template-actions"><button type="button" class="sd-btn sd-load-template" data-id="${htmlEscape(t.id)}">载入</button><button type="button" class="sd-icon-btn sd-add-template-tag" data-id="${htmlEscape(t.id)}" title="添加标签" aria-label="添加标签">＋</button><button type="button" class="sd-icon-btn sd-danger sd-delete-template" data-id="${htmlEscape(t.id)}" title="删除剧本" aria-label="删除剧本">🗑</button></div></article>`;
-}
-
-function formatDate(date) {
-  if (!date) return '';
-  try { return new Date(date).toLocaleDateString(); } catch (_) { return String(date); }
+  const pick = templateExportMode
+    ? `<label class="sd-template-pick" title="选择导出"><input type="checkbox" class="sd-template-select" data-id="${htmlEscape(t.id)}" ${templateExportSelection.has(t.id) ? 'checked' : ''}></label>`
+    : '';
+  return `<article class="sd-template-card ${templateExportMode ? 'sd-export-mode' : ''}">${pick}<div class="sd-template-main"><h4>${htmlEscape(t.name || '未命名剧本')}</h4>${tagHtml}</div><div class="sd-button-row sd-template-actions"><button type="button" class="sd-btn sd-load-template" data-id="${htmlEscape(t.id)}">载入</button><button type="button" class="sd-icon-btn sd-add-template-tag" data-id="${htmlEscape(t.id)}" title="添加标签" aria-label="添加标签">＋</button><button type="button" class="sd-icon-btn sd-danger sd-delete-template" data-id="${htmlEscape(t.id)}" title="删除剧本" aria-label="删除剧本">🗑</button></div></article>`;
 }
 
 function renderContextTab() {
@@ -1398,10 +1550,13 @@ function renderContextTab() {
   const userDesc = getPersonaDescription();
   return `
     <details class="sd-accordion" open>
-      <summary><b>基础引用</b><span>勾选后将会作为浮生剧编参考项</span></summary>
-      <div class="sd-inline-setting"><label class="checkbox_label"><input type="checkbox" class="sd-opt" data-key="includeChatHistory" ${opts.includeChatHistory ? 'checked' : ''}> 上下文参考</label><label class="sd-depth-field"><span>参考楼层数</span><input class="text_pole sd-context-depth" type="number" min="1" max="200" value="${htmlEscape(opts.contextDepth || 5)}"></label></div>
-      <label class="checkbox_label"><input type="checkbox" class="sd-opt" data-key="includeCharDesc" ${opts.includeCharDesc ? 'checked' : ''}> 引用当前角色设定 ${infoTag(getCharacterName())}${infoTag(`${estimateTokens(charDesc)} token`)}</label>
-      <label class="checkbox_label"><input type="checkbox" class="sd-opt" data-key="includeUserDesc" ${opts.includeUserDesc ? 'checked' : ''}> 引用用户人设 ${infoTag(getPersonaName())}${infoTag(`${estimateTokens(userDesc)} token`)}</label>
+      <summary><b>基础引用</b><span>勾选后将会作为千幕参考项</span></summary>
+      <div class="sd-base-grid">
+        <label class="checkbox_label"><input type="checkbox" class="sd-opt" data-key="includeChatHistory" ${opts.includeChatHistory ? 'checked' : ''}> 上下文参考</label>
+        <label class="sd-depth-field"><span>参考楼层数</span><input class="text_pole sd-context-depth" type="number" min="1" max="200" value="${htmlEscape(opts.contextDepth || 5)}"></label>
+        <label class="checkbox_label sd-span-2"><input type="checkbox" class="sd-opt" data-key="includeCharDesc" ${opts.includeCharDesc ? 'checked' : ''}> 引用当前角色设定 ${infoTag(getCharacterName())}${infoTag(`${estimateTokens(charDesc)} token`)}</label>
+        <label class="checkbox_label sd-span-2"><input type="checkbox" class="sd-opt" data-key="includeUserDesc" ${opts.includeUserDesc ? 'checked' : ''}> 引用用户人设 ${infoTag(getPersonaName())}${infoTag(`${estimateTokens(userDesc)} token`)}</label>
+      </div>
     </details>
     <details class="sd-accordion" open>
       <summary><b>上下文处理</b><span>标签规则</span></summary>
@@ -1409,13 +1564,13 @@ function renderContextTab() {
       <div class="sd-button-row"><button type="button" class="sd-btn sd-add-tag-rule">添加标签</button></div>
     </details>
     <details class="sd-accordion" open>
-      <summary><b>预设</b><span>${contextScanCache.scannedAt ? '已刷新' : '待刷新'}</span></summary>
-      <div class="sd-button-row"><button type="button" class="sd-btn sd-refresh-context">刷新</button></div>
+      <summary><b>预设</b><span>${contextScanCache.presetScannedAt ? '已拉取' : '待拉取'}</span></summary>
+      <div class="sd-button-row"><button type="button" class="sd-btn sd-refresh-presets">拉取预设</button></div>
       ${renderPresetSourcePanel()}
     </details>
     <details class="sd-accordion" open>
-      <summary><b>世界书</b><span>${contextScanCache.scannedAt ? '已刷新' : '待刷新'}</span></summary>
-      <div class="sd-button-row"><button type="button" class="sd-btn sd-refresh-context">拉取</button></div>
+      <summary><b>世界书</b><span>${contextScanCache.worldScannedAt ? '已拉取' : '待拉取'}</span></summary>
+      <div class="sd-button-row"><button type="button" class="sd-btn sd-refresh-worldbooks">拉取世界书</button></div>
       ${renderWorldBookSourcePanel()}
     </details>`;
 }
@@ -1441,7 +1596,7 @@ function renderSelectedPresetEntries(selectedNames) {
     const items = contextScanCache.presets?.[name] || getPresetEntries(name);
     (items || []).forEach((item, index) => rows.push(renderContextEntry('preset', name, item, index, selectedNames.length > 1 ? name : '')));
   }
-  return `<details class="sd-context-block" open><summary><b>预设条目</b><span>${rows.length} 条</span></summary>${rows.join('') || '<p class="sd-muted">选择预设后点击刷新。</p>'}</details>`;
+  return `<details class="sd-context-block" open><summary><b>预设条目</b><span>${rows.length} 条</span></summary>${rows.join('') || '<p class="sd-muted">选择预设后点击拉取预设。</p>'}</details>`;
 }
 
 function renderWorldBookSourcePanel() {
@@ -1459,7 +1614,7 @@ function renderSelectedWorldBookEntries(selectedNames) {
     const items = contextScanCache.worldBooks?.[name] || [];
     (items || []).forEach((item, index) => rows.push(renderContextEntry('world', name, item, index, selectedNames.length > 1 ? name : '')));
   }
-  return `<details class="sd-context-block" open><summary><b>世界书条目</b><span>${rows.length} 条</span></summary>${rows.join('') || '<p class="sd-muted">选择世界书后点击拉取。</p>'}</details>`;
+  return `<details class="sd-context-block" open><summary><b>世界书条目</b><span>${rows.length} 条</span></summary>${rows.join('') || '<p class="sd-muted">选择世界书后点击拉取世界书。</p>'}</details>`;
 }
 
 function renderContextEntry(kind, groupName, item, index, sourceLabel = '') {
@@ -1471,15 +1626,21 @@ function renderContextEntry(kind, groupName, item, index, sourceLabel = '') {
 }
 
 function renderDirectorSettingsTab() {
-  const store = getChatStore();
   return `
     <section class="sd-card">
       <h3>刷新</h3>
       <div class="sd-refresh-row">
-        <label class="checkbox_label"><input type="checkbox" class="sd-auto-refresh" ${settings.autoRefresh ? 'checked' : ''}> 自动刷新剧情</label>
-        <label class="sd-floor-refresh"><span>每</span><input class="text_pole sd-auto-every" type="number" min="2" max="50" value="${htmlEscape(settings.autoRefreshEvery || 10)}"><span>层刷新</span></label>
+        <label class="checkbox_label"><input type="checkbox" class="sd-auto-refresh" ${settings.autoRefresh ? 'checked' : ''}> 自动推演剧情</label>
+        <label class="sd-floor-refresh"><span>每</span><input class="text_pole sd-auto-every" type="number" min="2" max="50" value="${htmlEscape(settings.autoRefreshEvery || 10)}"><span>层推演</span></label>
       </div>
-      <p class="sd-muted sd-floor-status">当前已累计 ${htmlEscape(store.messageCounter || 0)} 层 AI 回复</p>
+    </section>
+    <section class="sd-card">
+      <h3>暗线注入</h3>
+      <p class="sd-muted">开启后，每次推演的结果将被提炼为「暗线灵感池」注入后续对话上下文，供主模型在自然时机抽取任意一点发酵，不强制触发。</p>
+      <div class="sd-refresh-row">
+        <label class="checkbox_label"><input type="checkbox" class="sd-inject-enabled" ${settings.injectEnabled ? 'checked' : ''}> 启用暗线注入</label>
+        <label class="sd-floor-refresh"><span>注入深度</span><input class="text_pole sd-inject-depth" type="number" min="0" max="20" value="${htmlEscape(settings.injectDepth ?? 2)}"><span>层</span></label>
+      </div>
     </section>
     <section class="sd-card">
       <h3>幕后提示词</h3>
@@ -1528,24 +1689,22 @@ function updateInjectDock(root = document) {
   dockButton.disabled = count === 0;
 }
 
-
-function updateTemplateExportState(root = document) {
-  const checks = Array.from(root.querySelectorAll('.sd-template-select'));
-  const selected = checks.filter((el) => el.checked);
-  const button = root.querySelector('.sd-export-selected-templates');
-  const span = button?.querySelector('span');
-  if (span) span.textContent = String(selected.length);
-  if (button) button.disabled = selected.length === 0;
-  const all = root.querySelector('.sd-select-all-templates');
-  if (all) {
-    all.checked = checks.length > 0 && selected.length === checks.length;
-    all.indeterminate = selected.length > 0 && selected.length < checks.length;
-  }
-}
-
 function bindActiveTabEvents(root) {
   root.querySelectorAll('.sd-generate-main').forEach((el) => el.addEventListener('click', () => generateDirectorPlan()));
   root.querySelectorAll('.sd-stop').forEach((el) => el.addEventListener('click', stopGeneration));
+  root.querySelectorAll('.sd-newcomer-toggle').forEach((el) => el.addEventListener('click', () => {
+    settings.newcomerMode = !settings.newcomerMode;
+    saveSettings();
+    root.querySelectorAll('.sd-newcomer-toggle').forEach((btn) => btn.classList.toggle('active', settings.newcomerMode));
+    toast(settings.newcomerMode ? '新角入场已开启：下次推演将引入全新角色与世界事件。' : '新角入场已关闭。', 'info');
+  }));
+  root.querySelectorAll('.sd-inject-badge').forEach((el) => el.addEventListener('click', async () => {
+    settings.injectEnabled = !settings.injectEnabled;
+    saveSettings();
+    await applyDirectorInjection();
+    renderModal();
+    toast(settings.injectEnabled ? '暗线注入已开启。' : '暗线注入已关闭。', 'info');
+  }));
   root.querySelectorAll('.sd-count-card').forEach((el) => el.addEventListener('click', () => { activeTab = el.dataset.jump; renderModal(); }));
   root.querySelectorAll('.sd-load-history').forEach((el) => el.addEventListener('click', async () => {
     const record = (getChatStore().history || []).find((x) => x.id === el.dataset.id);
@@ -1553,9 +1712,9 @@ function bindActiveTabEvents(root) {
     getChatStore().plan = clone(record.plan);
     getChatStore().updatedAt = record.createdAt || new Date().toISOString();
     await saveMetadata();
+    await applyDirectorInjection();
     toast('已载入历史记录。', 'success');
     renderModal();
-    renderSettingsPanel();
   }));
   root.querySelectorAll('.sd-delete-history').forEach((el) => el.addEventListener('click', async () => {
     getChatStore().history = (getChatStore().history || []).filter((x) => x.id !== el.dataset.id);
@@ -1587,6 +1746,15 @@ function bindActiveTabEvents(root) {
     await saveMetadata();
     toast('当前剧本已保存。', 'success');
   });
+  root.querySelector('.sd-reset-blueprint')?.addEventListener('click', async () => {
+    const yes = await confirmDialog('恢复默认剧本', '将当前剧本恢复为默认的自分析通用剧本？当前内容会被覆盖。');
+    if (!yes) return;
+    getChatStore().blueprint = DEFAULT_BLUEPRINT;
+    getChatStore().blueprintEdited = false;
+    await saveMetadata();
+    toast('已恢复默认剧本。', 'success');
+    renderModal();
+  });
   root.querySelector('.sd-save-template')?.addEventListener('click', async () => {
     const name = await promptInput('保存到剧本库', '剧本名称：', '我的剧本');
     if (!name) return;
@@ -1598,6 +1766,7 @@ function bindActiveTabEvents(root) {
     const t = settings.templates.find((x) => x.id === el.dataset.id);
     if (!t) return;
     getChatStore().blueprint = t.content;
+    getChatStore().blueprintEdited = true;
     await saveMetadata();
     toast('已载入剧本。', 'success');
     renderModal();
@@ -1607,6 +1776,7 @@ function bindActiveTabEvents(root) {
     if (!yes) return;
     settings.templates = (settings.templates || []).filter((x) => x.id !== el.dataset.id);
     ctx().extensionSettings[MODULE_NAME].templates = settings.templates;
+    templateExportSelection.delete(el.dataset.id);
     saveSettings();
     toast('已删除。', 'success');
     renderModal();
@@ -1627,17 +1797,32 @@ function bindActiveTabEvents(root) {
     saveSettings();
     renderModal();
   }));
-  root.querySelectorAll('.sd-template-select').forEach((el) => el.addEventListener('change', () => updateTemplateExportState(root)));
-  root.querySelector('.sd-select-all-templates')?.addEventListener('change', (event) => {
-    root.querySelectorAll('.sd-template-select').forEach((el) => { el.checked = event.target.checked; });
-    updateTemplateExportState(root);
+
+  // 剧本库导出选择模式
+  root.querySelector('.sd-export-mode-toggle')?.addEventListener('click', () => {
+    templateExportMode = !templateExportMode;
+    if (!templateExportMode) templateExportSelection.clear();
+    renderModal();
   });
-  root.querySelector('.sd-export-selected-templates')?.addEventListener('click', () => {
-    const ids = Array.from(root.querySelectorAll('.sd-template-select:checked')).map((el) => el.dataset.id);
-    exportTemplates(ids);
+  root.querySelector('.sd-cancel-export')?.addEventListener('click', () => {
+    templateExportMode = false;
+    templateExportSelection.clear();
+    renderModal();
+  });
+  root.querySelectorAll('.sd-template-select').forEach((el) => el.addEventListener('change', () => {
+    if (el.checked) templateExportSelection.add(el.dataset.id);
+    else templateExportSelection.delete(el.dataset.id);
+    const span = root.querySelector('.sd-confirm-export span');
+    if (span) span.textContent = String(templateExportSelection.size);
+  }));
+  root.querySelector('.sd-confirm-export')?.addEventListener('click', () => {
+    if (!templateExportSelection.size) return toast('请先勾选要导出的剧本。', 'warning');
+    exportTemplates([...templateExportSelection]);
+    templateExportMode = false;
+    templateExportSelection.clear();
+    renderModal();
   });
   root.querySelector('.sd-import-templates')?.addEventListener('change', importTemplates);
-  updateTemplateExportState(root);
 
   root.querySelectorAll('.sd-opt').forEach((el) => el.addEventListener('change', () => {
     settings.contextOptions[el.dataset.key] = el.checked;
@@ -1670,21 +1855,14 @@ function bindActiveTabEvents(root) {
     saveSettings();
     renderModal();
   }));
-  root.querySelectorAll('.sd-refresh-context').forEach((el) => el.addEventListener('click', () => refreshContextSources(true)));
-  root.querySelectorAll('.sd-toggle-preset').forEach((el) => el.addEventListener('change', async () => {
+  root.querySelectorAll('.sd-refresh-presets').forEach((el) => el.addEventListener('click', () => refreshPresets(true)));
+  root.querySelectorAll('.sd-refresh-worldbooks').forEach((el) => el.addEventListener('click', () => refreshWorldBooks(true)));
+  root.querySelectorAll('.sd-toggle-preset').forEach((el) => el.addEventListener('change', () => {
     setPresetNameSelected(el.dataset.name, el.checked);
-    renderModal();
-  }));
-  root.querySelectorAll('.sd-unselect-preset').forEach((el) => el.addEventListener('click', () => {
-    setPresetNameSelected(el.dataset.name, false);
     renderModal();
   }));
   root.querySelectorAll('.sd-toggle-worldbook').forEach((el) => el.addEventListener('change', async () => {
     await setWorldBookNameSelected(el.dataset.name, el.checked);
-    renderModal();
-  }));
-  root.querySelectorAll('.sd-unselect-worldbook').forEach((el) => el.addEventListener('click', async () => {
-    await setWorldBookNameSelected(el.dataset.name, false);
     renderModal();
   }));
   root.querySelectorAll('.sd-context-check').forEach((el) => {
@@ -1695,17 +1873,32 @@ function bindActiveTabEvents(root) {
     });
   });
 
-  root.querySelector('.sd-save-director-settings')?.addEventListener('click', () => {
+  root.querySelector('.sd-inject-enabled')?.addEventListener('change', async (e) => {
+    settings.injectEnabled = !!e.target.checked;
+    saveSettings();
+    await applyDirectorInjection();
+    toast(settings.injectEnabled ? '暗线注入已开启。' : '暗线注入已关闭。', 'info');
+  });
+  root.querySelector('.sd-inject-depth')?.addEventListener('change', async (e) => {
+    settings.injectDepth = Math.max(0, Math.min(20, Number(e.target.value ?? 2)));
+    saveSettings();
+    await applyDirectorInjection();
+  });
+  root.querySelector('.sd-save-director-settings')?.addEventListener('click', async () => {
     settings.autoRefresh = !!root.querySelector('.sd-auto-refresh')?.checked;
     settings.autoRefreshEvery = Math.max(2, Math.min(50, Number(root.querySelector('.sd-auto-every')?.value || 10)));
+    settings.injectEnabled = !!root.querySelector('.sd-inject-enabled')?.checked;
+    settings.injectDepth = Math.max(0, Math.min(20, Number(root.querySelector('.sd-inject-depth')?.value ?? 2)));
     settings.systemPrompt = root.querySelector('.sd-system-prompt')?.value || DEFAULT_SYSTEM_PROMPT;
     settings.outputSchemaText = root.querySelector('.sd-output-schema')?.value || JSON_SCHEMA_TEXT;
     saveSettings();
+    await applyDirectorInjection();
     toast('设置已保存。', 'success');
   });
   root.querySelector('.sd-reset-system')?.addEventListener('click', () => {
     settings.systemPrompt = DEFAULT_SYSTEM_PROMPT;
     settings.outputSchemaText = JSON_SCHEMA_TEXT;
+    settings.promptRevision = PROMPT_REVISION;
     saveSettings();
     renderModal();
   });
@@ -1799,11 +1992,12 @@ function exportTemplates(ids = null) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `story-director-blueprints-${new Date().toISOString().slice(0, 10)}.json`;
+  a.download = `qianmu-blueprints-${new Date().toISOString().slice(0, 10)}.json`;
   document.body.appendChild(a);
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
+  toast(`已导出 ${templates.length} 个剧本。`, 'success');
 }
 
 async function importTemplates(event) {
@@ -1829,7 +2023,6 @@ async function importTemplates(event) {
   }
 }
 
-
 function renderInputMenuEntry() {
   document.getElementById(INPUT_ENTRY_ID)?.remove();
   document.getElementById(INPUT_BUTTON_ID)?.remove();
@@ -1840,7 +2033,7 @@ function renderInputMenuEntry() {
     const entry = document.createElement('div');
     entry.id = INPUT_ENTRY_ID;
     entry.className = 'list-group-item flex-container story-director-input-entry';
-    entry.innerHTML = '<span class="sd-menu-glyph">剧</span><span>浮生剧编</span>';
+    entry.innerHTML = `<span class="sd-menu-glyph">幕</span><span>${EXTENSION_NAME}</span>`;
     entry.addEventListener('click', () => openModal('dashboard'));
     menu.appendChild(entry);
     return;
@@ -1853,8 +2046,8 @@ function renderInputMenuEntry() {
   const button = document.createElement('button');
   button.id = INPUT_BUTTON_ID;
   button.type = 'button';
-  button.title = '浮生剧编';
-  button.textContent = '剧';
+  button.title = EXTENSION_NAME;
+  button.textContent = '幕';
   button.addEventListener('click', () => openModal('dashboard'));
   if (textarea && textarea.parentElement === parent) parent.insertBefore(button, textarea);
   else parent.insertBefore(button, parent.firstChild);
@@ -1897,17 +2090,16 @@ function bindEvents() {
       if (settings.autoRefresh && settings.autoRefreshEvery > 0 && store.messageCounter >= settings.autoRefreshEvery && !busy) {
         await generateDirectorPlan(false, true);
       }
-      renderSettingsPanel();
     } catch (error) {
       console.warn(`[${MODULE_NAME}] auto refresh handler failed`, error);
     }
   };
-  const rerenderHandler = () => {
+  const rerenderHandler = async () => {
     settings = getSettings();
-    renderSettingsPanel();
     renderFloatButton();
     renderInputMenuEntry();
-    if (document.getElementById(MODAL_ID)?.classList.contains('open')) renderModal();
+    await applyDirectorInjection(); // 切换聊天时重应用/清除暗线，防止串线
+    rerenderIfOpen();
   };
   const pairs = [
     [types.MESSAGE_RECEIVED || 'message_received', refreshHandler],
@@ -1932,6 +2124,7 @@ function init() {
   resizeHandler = () => { const btn = document.getElementById(FLOAT_ID); if (btn) applyFloatPosition(btn); };
   window.addEventListener('resize', resizeHandler);
   bindEvents();
+  applyDirectorInjection();
   console.log(`[${EXTENSION_NAME}] loaded`);
 }
 
@@ -1959,6 +2152,7 @@ export async function onDelete() {
 }
 
 function cleanupRuntime(resetSettings = false) {
+  clearDirectorInjection();
   document.getElementById(SETTINGS_PANEL_ID)?.remove();
   document.getElementById(MODAL_ID)?.remove();
   document.getElementById(FLOAT_ID)?.remove();
