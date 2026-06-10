@@ -1,9 +1,9 @@
 // 千幕 (Qianmu) - SillyTavern third-party UI extension
-// v0.5.1
+// v0.5.2
 
 const MODULE_NAME = 'story_director_liminale';
 const EXTENSION_NAME = '千幕';
-const VERSION = '0.5.1';
+const VERSION = '0.5.2';
 const SETTINGS_PANEL_ID = 'story-director-settings';
 const MODAL_ID = 'story-director-modal';
 const FLOAT_ID = 'story-director-float';
@@ -219,6 +219,8 @@ let eventBound = false;
 let inputMenuObserver = null;
 let templateExportMode = false;
 let templateExportSelection = new Set();
+let injectSelection = new Set();   // v0.5.2：写入勾选持久化（跨重渲染/切主题保留）
+let accState = {};                 // v0.5.2：折叠面板开合状态记忆
 
 function ctx() {
   return globalThis.SillyTavern?.getContext?.() || {};
@@ -259,7 +261,6 @@ function migrateSettings(s) {
   delete s.maxContextMessages;
   if (typeof s.outputSchemaText === 'undefined') s.outputSchemaText = JSON_SCHEMA_TEXT;
 
-  // v0.5.0：提示词与输出格式修订（去中心化视角分工 / 固定四维度 / 本幕进度）
   if (Number(s.promptRevision || 0) < PROMPT_REVISION) {
     const sys = String(s.systemPrompt || '');
     if (!sys.trim() || (sys.includes('顶尖剧作家导演') && !sys.includes('视角分工'))) {
@@ -272,7 +273,6 @@ function migrateSettings(s) {
     s.promptRevision = PROMPT_REVISION;
   }
 
-  // v0.5.1：单条日志迁移为最近5条
   if (!Array.isArray(s.logHistory)) s.logHistory = [];
   if (s.lastLog && typeof s.lastLog === 'object') {
     if (s.lastLog.status && s.lastLog.status !== 'none') {
@@ -841,7 +841,6 @@ function initializeSelectedContextState(cache) {
   }
 }
 
-// v0.5.1：参考材料拆分为「预设」与「世界设定」两段，供固定顺序组装
 async function buildPresetContextText() {
   let output = '';
   for (const presetName of getSelectedPresetNames()) {
@@ -883,7 +882,7 @@ async function buildWorldContextText() {
 }
 
 /* ============================================================
-   暗线注入系统（v0.5.0 引入，本版无逻辑变化）
+   暗线注入系统
    ============================================================ */
 
 function snip(text, n = 64) {
@@ -967,7 +966,7 @@ globalThis.qianmuDirectorInterceptor = async function (chat) {
 };
 
 /* ============================================================
-   v0.5.1 推演提示词：六段固定顺序
+   推演提示词：六段固定顺序（后台写死）
    ============================================================ */
 async function buildPrompt() {
   if (!contextScanCache.presetScannedAt && !contextScanCache.worldScannedAt) await refreshContextSources(false);
@@ -1091,6 +1090,7 @@ async function generateDirectorPlan(showSuccessToast = true, silentFailure = fal
     store.plan = newPlan;
     store.updatedAt = now;
     store.messageCounter = 0;
+    injectSelection.clear();   // v0.5.2：新推演结果生成，旧写入勾选失效
     await saveMetadata();
     await applyDirectorInjection();
     log.status = 'success';
@@ -1314,10 +1314,34 @@ function renderBusyState() {
   });
 }
 
+// v0.5.2：折叠面板开合状态记忆（修复"点选预设时世界书也跟着展开"）
+function snapshotAccState(modal) {
+  modal.querySelectorAll('details[data-acc]').forEach((el) => {
+    accState[el.dataset.acc] = el.open;
+  });
+}
+
+function applyAccState(modal) {
+  modal.querySelectorAll('details[data-acc]').forEach((el) => {
+    if (typeof accState[el.dataset.acc] === 'boolean') el.open = accState[el.dataset.acc];
+  });
+}
+
+// v0.5.2：读取 ST 当前正文字体，写入 --sd-font（视觉隔离保留，仅字体跟随）
+function syncFontWithST() {
+  try {
+    const modal = document.getElementById(MODAL_ID);
+    if (!modal) return;
+    const bodyFont = getComputedStyle(document.body).fontFamily;
+    if (bodyFont) modal.style.setProperty('--sd-font', bodyFont);
+  } catch (_) {}
+}
+
 function renderModal() {
   const modal = document.getElementById(MODAL_ID);
   if (!modal) return;
   const prevScroll = modal.querySelector('.sd-body')?.scrollTop ?? 0;
+  snapshotAccState(modal);
   const tabs = [
     ['dashboard', '审片'],
     ['blueprint', '编剧'],
@@ -1363,7 +1387,9 @@ function renderModal() {
     renderModal();
   }));
   bindActiveTabEvents(modal);
+  applyAccState(modal);
   renderBusyState();
+  syncFontWithST();
   const body = modal.querySelector('.sd-body');
   if (body) body.scrollTop = prevScroll;
 }
@@ -1394,9 +1420,10 @@ function metricBar(label, value) {
   return `<div class="sd-metric sd-progress-metric"><div class="sd-metric-top"><span>${htmlEscape(label)}</span><b>${n}%</b></div><div class="sd-bar"><i style="width:${n}%"></i></div></div>`;
 }
 
+// v0.5.2：环形进度指标，中心显示 N%
 function metricCircle(label, value) {
   const n = Math.max(0, Math.min(100, Number(value || 0)));
-  return `<div class="sd-circle-metric"><div class="sd-circle"><span>${n}</span></div><b>${htmlEscape(label)}</b></div>`;
+  return `<div class="sd-circle-metric" style="--sd-value:${n}"><div class="sd-circle"><span>${n}%</span></div><b>${htmlEscape(label)}</b></div>`;
 }
 
 function getStoryMetrics(st) {
@@ -1484,7 +1511,6 @@ function renderPlanSection(title, items, kind) {
   return `<section class="sd-card sd-plan-section"><div class="sd-section-title"><h3>${htmlEscape(title)}</h3><span>${items?.length || 0} 条</span></div>${renderItemList(items || [], kind)}</section>`;
 }
 
-// v0.5.1：推演入口仅保留在审片页，此处只作指引
 function renderNoPlan(text = '尚未推演剧情') {
   return `<section class="sd-card sd-plan-card"><div class="sd-empty">${htmlEscape(text)}<p class="sd-muted">前往「审片」页点击推演下一幕</p></div></section>`;
 }
@@ -1509,10 +1535,11 @@ function renderItemCard(item, kind, idx) {
   } else {
     fields.push(['内容', item.content], ['影响', item.impact]);
   }
-  return `<details class="sd-item-card sd-item-fold">
+  const checked = injectSelection.has(injectId) ? 'checked' : '';
+  return `<details class="sd-item-card sd-item-fold" data-acc="item-${htmlEscape(injectId)}">
     <summary>
       <div class="sd-item-summary-main"><h4>${htmlEscape(title)}</h4>${chips ? `<div class="sd-mini-chip-row">${chips}</div>` : ''}</div>
-      ${prompt ? `<label class="sd-inject-select-label" title="加入写入队列"><input type="checkbox" class="sd-select-inject" data-text="${htmlEscape(prompt)}" data-id="${htmlEscape(injectId)}"></label>` : ''}
+      ${prompt ? `<label class="sd-inject-select-label" title="加入写入队列"><input type="checkbox" class="sd-select-inject" data-text="${htmlEscape(prompt)}" data-id="${htmlEscape(injectId)}" ${checked}></label>` : ''}
     </summary>
     <div class="sd-item-detail">
       <dl>${fields.filter(([, v]) => v !== undefined && v !== '').map(([k, v]) => `<dt>${htmlEscape(k)}</dt><dd>${htmlEscape(v)}</dd>`).join('')}</dl>
@@ -1594,7 +1621,7 @@ function renderContextTab() {
   const charDesc = getCharacterDescription();
   const userDesc = getPersonaDescription();
   return `
-    <details class="sd-accordion" open>
+    <details class="sd-accordion" data-acc="acc-base" open>
       <summary><b>基础引用</b><span>勾选后将会作为千幕参考项</span></summary>
       <div class="sd-base-grid">
         <label class="checkbox_label"><input type="checkbox" class="sd-opt" data-key="includeChatHistory" ${opts.includeChatHistory ? 'checked' : ''}> 上下文参考</label>
@@ -1603,17 +1630,17 @@ function renderContextTab() {
         <label class="checkbox_label sd-span-2"><input type="checkbox" class="sd-opt" data-key="includeUserDesc" ${opts.includeUserDesc ? 'checked' : ''}> 引用用户人设 ${infoTag(getPersonaName())}${infoTag(`${estimateTokens(userDesc)} token`)}</label>
       </div>
     </details>
-    <details class="sd-accordion" open>
+    <details class="sd-accordion" data-acc="acc-tags" open>
       <summary><b>上下文处理</b><span>标签规则</span></summary>
       <div class="sd-tag-rule-list">${renderTagRules()}</div>
       <div class="sd-button-row"><button type="button" class="sd-btn sd-add-tag-rule"><i class="fa-solid fa-plus"></i>添加标签</button></div>
     </details>
-    <details class="sd-accordion" open>
+    <details class="sd-accordion" data-acc="acc-presets" open>
       <summary><b>预设</b><span>${contextScanCache.presetScannedAt ? '已读取' : '待读取'}</span></summary>
       <div class="sd-button-row"><button type="button" class="sd-btn sd-refresh-presets"><i class="fa-solid fa-rotate"></i>读取预设</button></div>
       ${renderPresetSourcePanel()}
     </details>
-    <details class="sd-accordion" open>
+    <details class="sd-accordion" data-acc="acc-worlds" open>
       <summary><b>世界书</b><span>${contextScanCache.worldScannedAt ? '已读取' : '待读取'}</span></summary>
       <div class="sd-button-row"><button type="button" class="sd-btn sd-refresh-worldbooks"><i class="fa-solid fa-rotate"></i>读取世界书</button></div>
       ${renderWorldBookSourcePanel()}
@@ -1632,7 +1659,7 @@ function renderPresetSourcePanel() {
   if (!names.length) return '<p class="sd-muted">未读取到预设。</p>';
   const selected = getSelectedPresetNames().filter((name) => names.includes(name));
   const choiceRows = names.map((name) => `<label class="checkbox_label sd-source-row"><input type="checkbox" class="sd-toggle-preset" data-name="${htmlEscape(name)}" ${selected.includes(name) ? 'checked' : ''}><span>${htmlEscape(name)}</span>${currentName && name === currentName ? badge('当前使用') : ''}</label>`).join('');
-  return `<details class="sd-context-block" open><summary><b>选择预设</b><span>${selected.length}/${names.length}</span></summary><div class="sd-source-list">${choiceRows}</div></details>${renderSelectedPresetEntries(selected)}`;
+  return `<details class="sd-context-block" data-acc="blk-preset-pick" open><summary><b>选择预设</b><span>${selected.length}/${names.length}</span></summary><div class="sd-source-list">${choiceRows}</div></details>${renderSelectedPresetEntries(selected)}`;
 }
 
 function renderSelectedPresetEntries(selectedNames) {
@@ -1641,7 +1668,7 @@ function renderSelectedPresetEntries(selectedNames) {
     const items = contextScanCache.presets?.[name] || getPresetEntries(name);
     (items || []).forEach((item, index) => rows.push(renderContextEntry('preset', name, item, index, selectedNames.length > 1 ? name : '')));
   }
-  return `<details class="sd-context-block" open><summary><b>预设条目</b><span class="sd-summary-note">${rows.length} 条 · 建议只开所需条目，避免冲突导致模型左右脑互搏</span></summary>${rows.join('') || '<p class="sd-muted">暂无条目</p>'}</details>`;
+  return `<details class="sd-context-block" data-acc="blk-preset-entries" open><summary><b>预设条目</b><span class="sd-summary-note">建议只开所需条目，避免冲突导致模型左右脑互搏</span></summary>${rows.join('') || '<p class="sd-muted">暂无条目</p>'}</details>`;
 }
 
 function renderWorldBookSourcePanel() {
@@ -1650,7 +1677,7 @@ function renderWorldBookSourcePanel() {
   if (!names.length) return '<p class="sd-muted">未读取到世界书。</p>';
   const selected = getSelectedWorldBookNames().filter((name) => names.includes(name));
   const choiceRows = names.map((name) => `<label class="checkbox_label sd-source-row"><input type="checkbox" class="sd-toggle-worldbook" data-name="${htmlEscape(name)}" ${selected.includes(name) ? 'checked' : ''}><span>${htmlEscape(name)}</span>${boundNames.includes(name) ? badge('当前绑定') : ''}</label>`).join('');
-  return `<details class="sd-context-block" open><summary><b>选择世界书</b><span>${selected.length}/${names.length}</span></summary><div class="sd-source-list">${choiceRows}</div></details>${renderSelectedWorldBookEntries(selected)}`;
+  return `<details class="sd-context-block" data-acc="blk-world-pick" open><summary><b>选择世界书</b><span>${selected.length}/${names.length}</span></summary><div class="sd-source-list">${choiceRows}</div></details>${renderSelectedWorldBookEntries(selected)}`;
 }
 
 function renderSelectedWorldBookEntries(selectedNames) {
@@ -1659,7 +1686,7 @@ function renderSelectedWorldBookEntries(selectedNames) {
     const items = contextScanCache.worldBooks?.[name] || [];
     (items || []).forEach((item, index) => rows.push(renderContextEntry('world', name, item, index, selectedNames.length > 1 ? name : '')));
   }
-  return `<details class="sd-context-block" open><summary><b>世界书条目</b><span>${rows.length} 条</span></summary>${rows.join('') || '<p class="sd-muted">暂无条目</p>'}</details>`;
+  return `<details class="sd-context-block" data-acc="blk-world-entries" open><summary><b>世界书条目</b></summary>${rows.join('') || '<p class="sd-muted">暂无条目</p>'}</details>`;
 }
 
 function renderContextEntry(kind, groupName, item, index, sourceLabel = '') {
@@ -1667,7 +1694,7 @@ function renderContextEntry(kind, groupName, item, index, sourceLabel = '') {
   const title = item.name || item.identifier || item.comment || item.role || (Array.isArray(item.key) ? item.key.join(', ') : item.key) || `条目 ${index + 1}`;
   const content = item.content || item.prompt || item.message || item.text || '';
   const checked = kind === 'preset' ? isPresetItemSelected(groupName, id) : isWorldItemSelected(groupName, id);
-  return `<details class="sd-context-item"><summary><label class="sd-context-entry-label"><input type="checkbox" class="sd-context-check" data-kind="${kind}" data-group="${htmlEscape(groupName)}" data-id="${htmlEscape(String(id))}" ${checked ? 'checked' : ''}><span>${htmlEscape(title)}</span>${sourceLabel ? infoTag(sourceLabel) : ''}</label></summary><pre>${htmlEscape(cleanContextText(content).slice(0, 2000))}</pre></details>`;
+  return `<details class="sd-context-item" data-acc="ci-${kind}-${htmlEscape(String(groupName))}-${htmlEscape(String(id))}"><summary><label class="sd-context-entry-label"><input type="checkbox" class="sd-context-check" data-kind="${kind}" data-group="${htmlEscape(groupName)}" data-id="${htmlEscape(String(id))}" ${checked ? 'checked' : ''}><span>${htmlEscape(title)}</span>${sourceLabel ? infoTag(sourceLabel) : ''}</label></summary><pre>${htmlEscape(cleanContextText(content).slice(0, 2000))}</pre></details>`;
 }
 
 function renderDirectorSettingsTab() {
@@ -1681,7 +1708,7 @@ function renderDirectorSettingsTab() {
     </section>
     <section class="sd-card">
       <h3>暗线注入</h3>
-      <p class="sd-muted">开启后，每次推演的结果将被提炼为「暗线灵感池」注入后续对话上下文，抽取任意一点发酵</p>
+      <p class="sd-muted">开启后，每次推演的结果将被提炼为「暗线灵感池」注入后续对话上下文，供主模型在自然时机抽取任意一点发酵，不强制触发。</p>
       <div class="sd-refresh-row">
         <label class="checkbox_label"><input type="checkbox" class="sd-inject-enabled" ${settings.injectEnabled ? 'checked' : ''}> 启用暗线注入</label>
         <label class="sd-floor-refresh"><span>注入深度</span><input class="text_pole sd-inject-depth" type="number" min="0" max="20" value="${htmlEscape(settings.injectDepth ?? 2)}"><span>层</span></label>
@@ -1700,20 +1727,21 @@ function renderDirectorSettingsTab() {
 
 const LOG_STATUS_LABELS = { success: '成功', error: '失败', cancelled: '已取消', loading: '生成中', none: '—' };
 
+// v0.5.2：日志详情平铺展示，无二级折叠
 function renderLogEntry(log, index) {
   const status = log.status || 'none';
-  return `<details class="sd-log-entry" ${index === 0 ? 'open' : ''}>
+  return `<details class="sd-log-entry" data-acc="log-${htmlEscape(log.id || String(index))}" ${index === 0 ? 'open' : ''}>
     <summary>
       <span class="sd-log-status ${htmlEscape(status)}">${htmlEscape(LOG_STATUS_LABELS[status] || status)}</span>
       <span class="sd-log-meta">${htmlEscape(log.time || '-')}</span>
       <span class="sd-log-meta">${htmlEscape(log.duration || '')}</span>
     </summary>
     <div class="sd-log-detail">
-      ${log.error ? `<pre class="sd-term sd-term-error">${htmlEscape(log.error)}</pre>` : ''}
-      <div class="sd-log-io">
-        <details><summary><i class="fa-solid fa-arrow-up"></i> 发送</summary><pre class="sd-term">${htmlEscape(log.request || '暂无')}</pre></details>
-        <details><summary><i class="fa-solid fa-arrow-down"></i> 返回</summary><pre class="sd-term">${htmlEscape(log.response || '暂无')}</pre></details>
-      </div>
+      ${log.error ? `<div class="sd-log-cap"><i class="fa-solid fa-triangle-exclamation"></i>失败提示</div><pre class="sd-term sd-term-error">${htmlEscape(log.error)}</pre>` : ''}
+      <div class="sd-log-cap"><i class="fa-solid fa-arrow-up"></i>发送</div>
+      <pre class="sd-term">${htmlEscape(log.request || '暂无')}</pre>
+      <div class="sd-log-cap"><i class="fa-solid fa-arrow-down"></i>返回</div>
+      <pre class="sd-term">${htmlEscape(log.response || '暂无')}</pre>
     </div>
   </details>`;
 }
@@ -1745,8 +1773,7 @@ function renderPlugTab() {
       <div class="sd-button-row"><button class="sd-btn sd-save-api">保存API</button><button class="sd-btn sd-save-api-profile">保存为预设</button></div>
     </section>
     <section class="sd-card">
-      <h3>界面</h3>
-      <label class="checkbox_label"><input type="checkbox" class="sd-float-toggle" ${settings.floatingButton ? 'checked' : ''}> 显示悬浮球（可拖动，位置自动记忆）</label>
+      <label class="checkbox_label"><input type="checkbox" class="sd-float-toggle" ${settings.floatingButton ? 'checked' : ''}> 显示悬浮球</label>
     </section>
     <section class="sd-card">
       <h3>日志</h3>
@@ -1786,6 +1813,7 @@ function bindActiveTabEvents(root) {
     if (!record?.plan) return;
     getChatStore().plan = clone(record.plan);
     getChatStore().updatedAt = record.createdAt || new Date().toISOString();
+    injectSelection.clear();
     await saveMetadata();
     await applyDirectorInjection();
     toast('已载入历史记录。', 'success');
@@ -1802,9 +1830,14 @@ function bindActiveTabEvents(root) {
     toast(ok ? '已写入输入框。' : '未找到输入框。', ok ? 'success' : 'error');
     if (ok) closeModal();
   }));
+  // v0.5.2：写入勾选持久化——勾选状态存入 injectSelection，重渲染/切主题不丢失
   root.querySelectorAll('.sd-select-inject').forEach((el) => {
     el.addEventListener('click', (event) => event.stopPropagation());
-    el.addEventListener('change', () => updateInjectDock(root));
+    el.addEventListener('change', () => {
+      if (el.checked) injectSelection.add(el.dataset.id);
+      else injectSelection.delete(el.dataset.id);
+      updateInjectDock(root);
+    });
   });
   root.querySelector('.sd-inject-selected')?.addEventListener('click', () => {
     const texts = Array.from(root.querySelectorAll('.sd-select-inject:checked')).map((el) => el.dataset.text || '').filter(Boolean);
@@ -2103,7 +2136,6 @@ async function importTemplates(event) {
   }
 }
 
-// v0.5.1：扩展菜单入口使用 FA 场记板图标 + 名称，修复「幕千幕」叠字
 function renderInputMenuEntry() {
   document.getElementById(INPUT_ENTRY_ID)?.remove();
   document.getElementById(INPUT_BUTTON_ID)?.remove();
@@ -2178,6 +2210,7 @@ function bindEvents() {
   };
   const rerenderHandler = async () => {
     settings = getSettings();
+    injectSelection.clear();   // v0.5.2：切换聊天后旧写入勾选失效
     renderFloatButton();
     renderInputMenuEntry();
     await applyDirectorInjection();
