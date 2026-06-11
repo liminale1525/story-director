@@ -1,9 +1,11 @@
 /* ============================================================
-   千幕 (Qianmu) v0.5.2
+   千幕 (Qianmu) v0.7.0
    ============================================================ */
 
 /* ---------- 0. 基础 ---------- */
 #story-director-settings { display: none !important; }
+
+#toast-container { z-index: 2147483010 !important; }
 
 #story-director-modal,
 #story-director-float,
@@ -306,8 +308,9 @@
 
 #story-director-modal .sd-titlebox {
   display: flex !important;
+  flex-flow: row wrap !important;       /* v0.5.5：允许换行，任何宽度都完整呈现标题/版本/副标题 */
   align-items: baseline !important;
-  gap: 10px !important;
+  gap: 4px 10px !important;
   min-width: 0 !important;
   text-align: left !important;
 }
@@ -322,18 +325,24 @@
   color: var(--sd-text) !important;
 }
 
+/* v0.5.5：版本号改为 pill 小标签 */
 #story-director-modal .sd-version-tag {
   flex: 0 0 auto;
+  align-self: center;
+  padding: 1px 8px;
+  border-radius: 999px !important;
+  border: 1px solid var(--sd-border) !important;
+  background: var(--sd-glass-weak) !important;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace !important;
   font-size: 10.5px !important;
   letter-spacing: .05em;
   color: var(--sd-muted);
-  transform: translateY(-1px);
   white-space: nowrap;
 }
 
 #story-director-modal .sd-header p {
   margin: 0 !important;
+  flex: 1 1 100%;                       /* v0.5.5：副标题独占一行，窄屏不被挤掉 */
   color: var(--sd-muted);
   font-size: 13px;
   letter-spacing: .06em;
@@ -389,7 +398,7 @@
   display: block;
   width: 18px;
   height: 18px;
-  border-radius: 50%;
+  border-radius: 50% !important;     /* v0.5.5：与 ST 主题圆角隔离，防止被改成方块 */
   background: currentColor;
   opacity: .78;
   transform: translateX(0);
@@ -444,12 +453,10 @@
   overflow: auto;
   padding: 18px 18px 72px;
   -webkit-overflow-scrolling: touch;
-  scrollbar-width: thin;
+  scrollbar-width: none;                /* v0.5.5：隐藏滚动条视觉，保留滚动功能 */
 }
 
-#story-director-modal .sd-body::-webkit-scrollbar { width: 8px; }
-#story-director-modal .sd-body::-webkit-scrollbar-thumb { background: var(--sd-border); border-radius: 99px; }
-#story-director-modal .sd-body::-webkit-scrollbar-track { background: transparent; }
+#story-director-modal .sd-body::-webkit-scrollbar { width: 0; height: 0; display: none; }
 
 #story-director-modal .sd-card,
 #story-director-modal .sd-accordion {
@@ -614,12 +621,18 @@
 #story-director-modal .sd-inject-badge i.sd-dot {
   width: 8px;
   height: 8px;
-  border-radius: 50%;
+  border-radius: 50% !important;     /* v0.5.5：与 ST 主题圆角隔离，防止被改成方块 */
   background: #9a988f;
 }
 
 #story-director-modal .sd-inject-badge.on { color: var(--sd-text) !important; }
 #story-director-modal .sd-inject-badge.on i.sd-dot { background: #6aa879; animation: sd-pulse 2.2s infinite; }
+
+/* v0.6.1 */
+#story-director-modal .sd-inject-hint { margin-top: 6px; font-size: .86em; }
+#story-director-modal .sd-inject-preview-box { margin-top: 12px; }
+#story-director-modal .sd-inject-preview-box .sd-log-cap { margin-bottom: 6px; }
+#story-director-modal .sd-inject-preview-box pre.sd-term { max-height: 240px; }
 
 #story-director-modal .sd-status-card { padding: 14px 16px; }
 
@@ -679,7 +692,7 @@
   position: relative;
   width: 52px;
   height: 52px;
-  border-radius: 50%;
+  border-radius: 50% !important;     /* v0.5.5：与 ST 主题圆角隔离，防止环形指标被改成方块 */
   display: grid;
   place-items: center;
 }
@@ -688,7 +701,7 @@
   content: '';
   position: absolute;
   inset: 0;
-  border-radius: 50%;
+  border-radius: 50% !important;
   background: conic-gradient(currentColor calc(var(--sd-value, 0) * 1%), color-mix(in srgb, currentColor 16%, transparent) 0);
   -webkit-mask: radial-gradient(closest-side, transparent calc(100% - 7px), #000 calc(100% - 6px));
   mask: radial-gradient(closest-side, transparent calc(100% - 7px), #000 calc(100% - 6px));
@@ -1197,6 +1210,22 @@
 
 #story-director-modal .sd-log-meta { color: var(--sd-muted); }
 
+/* v0.7.0 日志来源标签 */
+#story-director-modal .sd-log-kind {
+  margin-left: auto;
+  padding: 1px 9px;
+  border-radius: 999px !important;
+  border: 1px solid var(--sd-border);
+  background: var(--sd-glass-weak);
+  font-size: .82em;
+  color: var(--sd-muted);
+  white-space: nowrap;
+}
+#story-director-modal .sd-log-kind-theater {
+  color: var(--sd-text);
+  border-color: var(--sd-accent);
+}
+
 /* v0.5.2：日志详情平铺，无二级折叠 */
 #story-director-modal .sd-log-detail {
   display: flex;
@@ -1252,13 +1281,13 @@
 @media (max-width: 760px) {
   #story-director-float { width: 44px; height: 44px; }
 
-  #story-director-modal { padding: max(6px, env(safe-area-inset-top)) max(6px, env(safe-area-inset-right)) max(6px, env(safe-area-inset-bottom)) max(6px, env(safe-area-inset-left)) !important; }
+  #story-director-modal { padding: max(20px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)) !important; }
 
   #story-director-modal .sd-window {
-    width: calc(100vw - 12px) !important;
-    height: calc(100dvh - 12px) !important;
-    max-width: calc(100vw - 12px) !important;
-    max-height: calc(100dvh - 12px) !important;
+    width: calc(100vw - 32px) !important;
+    height: calc(100dvh - 40px) !important;
+    max-width: calc(100vw - 32px) !important;
+    max-height: calc(100dvh - 40px) !important;
     border-radius: 16px !important;
   }
 
@@ -1269,14 +1298,12 @@
   }
 
   #story-director-modal .sd-titlebox {
-    flex-direction: column !important;
-    align-items: flex-start !important;
-    gap: 2px !important;
+    align-items: baseline !important;
+    gap: 2px 8px !important;
   }
 
-  #story-director-modal .sd-titlebox .sd-version-tag { display: none; }
   #story-director-modal .sd-header h2 { font-size: 22px !important; }
-  #story-director-modal .sd-header p { max-width: calc(100vw - 168px); font-size: 11px; }
+  #story-director-modal .sd-header p { flex: 1 1 100%; max-width: none; font-size: 11px; }
 
   #story-director-modal .sd-body { padding: 12px 12px 72px; }
 
@@ -1320,7 +1347,7 @@
 }
 
 @media (max-width: 420px) {
-  #story-director-modal .sd-header p { display: none !important; }
+  #story-director-modal .sd-header p { font-size: 10.5px; }
 
   #story-director-modal .sd-current-blueprint-actions { grid-template-columns: 1fr !important; }
 
@@ -1373,6 +1400,179 @@
   }
 }
 
+/* ---------- 15b. 幕外 / 番外小剧场 + 阅读浮层 ---------- */
+#story-director-modal .sd-theater-script-list { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; }
+
+#story-director-modal .sd-theater-latest {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px dashed var(--sd-border) !important;
+  border-radius: 12px !important;
+  background: var(--sd-glass-weak);
+  justify-content: space-between;
+}
+
+#story-director-modal .sd-fav-on { color: #d9a23a !important; }
+
+/* 阅读浮层：独立于面板的沙箱阅读窗，携带 sd-theme-* 主题变量 */
+#story-director-theater-reader {
+  position: fixed !important;
+  inset: 0 !important;
+  display: none;
+  z-index: 2147483005;
+  color-scheme: light;
+  --sd-text: #3c352e;
+  --sd-muted: rgba(60, 53, 46, .64);
+  --sd-border: rgba(70, 60, 50, .16);
+  --sd-hairline: rgba(70, 60, 50, .10);
+  --sd-glass: rgba(255, 255, 255, .34);
+  --sd-glass-weak: rgba(255, 255, 255, .18);
+  --sd-card: rgba(255, 253, 248, .42);
+  --sd-window-bg: linear-gradient(152deg, rgba(250, 247, 240, .95) 0%, rgba(240, 233, 222, .9) 100%);
+  color: var(--sd-text);
+}
+
+#story-director-theater-reader.sd-theme-dark {
+  color-scheme: dark;
+  --sd-text: #e8e6e1;
+  --sd-muted: rgba(232, 230, 225, .60);
+  --sd-border: rgba(232, 230, 225, .14);
+  --sd-hairline: rgba(232, 230, 225, .08);
+  --sd-glass: rgba(255, 255, 255, .07);
+  --sd-glass-weak: rgba(255, 255, 255, .045);
+  --sd-card: rgba(255, 255, 255, .055);
+  --sd-window-bg: linear-gradient(152deg, rgba(32, 34, 39, .96) 0%, rgba(17, 18, 21, .94) 100%);
+}
+
+#story-director-theater-reader.open {
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  padding: max(20px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+}
+
+#story-director-theater-reader .sd-reader-backdrop {
+  position: fixed !important;
+  inset: 0 !important;
+  background: rgba(8, 8, 10, .55);
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
+}
+
+#story-director-theater-reader .sd-reader-window {
+  position: relative;
+  width: min(780px, calc(100vw - 32px));
+  height: min(680px, calc(100dvh - 40px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--sd-border);
+  border-radius: 18px !important;
+  background: var(--sd-window-bg);
+  box-shadow: 0 28px 80px rgba(0, 0, 0, .4);
+}
+
+#story-director-theater-reader .sd-reader-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--sd-hairline);
+}
+
+#story-director-theater-reader .sd-reader-header h3 {
+  margin: 0;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 19px;
+  color: var(--sd-text);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#story-director-theater-reader .sd-reader-actions { display: flex; gap: 7px; flex: 0 0 auto; }
+
+#story-director-theater-reader .sd-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 999px !important;
+  border: 1px solid var(--sd-border);
+  background: var(--sd-glass-weak);
+  color: var(--sd-text);
+  cursor: pointer;
+}
+#story-director-theater-reader .sd-icon-btn:hover { background: var(--sd-glass); }
+#story-director-theater-reader .sd-icon-btn.sd-danger { color: #c05050; }
+#story-director-theater-reader .sd-fav-on { color: #d9a23a; }
+
+#story-director-theater-reader .sd-reader-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-width: none;
+}
+#story-director-theater-reader .sd-reader-body::-webkit-scrollbar { width: 0; height: 0; display: none; }
+
+#story-director-theater-reader .sd-reader-prose {
+  padding: 22px 26px;
+  line-height: 1.85;
+  font-size: 15px;
+  color: var(--sd-text);
+  white-space: normal;
+  word-break: break-word;
+}
+
+#story-director-theater-reader .sd-reader-frame {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #fff;
+  display: block;
+}
+
+#story-director-theater-reader .sd-template-list { display: flex; flex-direction: column; gap: 10px; padding: 16px; }
+
+#story-director-theater-reader .sd-template-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  border: 1px solid var(--sd-border);
+  border-radius: 14px !important;
+  background: var(--sd-glass-weak);
+  padding: 12px;
+}
+#story-director-theater-reader .sd-template-main { min-width: 0; }
+#story-director-theater-reader .sd-template-main h4 { margin: 0 0 4px; color: var(--sd-text); }
+#story-director-theater-reader .sd-template-actions { display: flex; gap: 6px; align-items: center; }
+#story-director-theater-reader .sd-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  padding: 6px 14px;
+  border-radius: 999px !important;
+  border: 1px solid var(--sd-border);
+  background: var(--sd-glass);
+  color: var(--sd-text);
+  cursor: pointer;
+  white-space: nowrap;
+}
+#story-director-theater-reader .sd-muted { opacity: .72; }
+
+@media (max-width: 760px) {
+  #story-director-theater-reader .sd-reader-window {
+    width: calc(100vw - 32px);
+    height: calc(100dvh - 40px);
+  }
+}
+
 /* ---------- 16. ST 主题隔离层 ----------
    v0.5.2：字体改为跟随 ST（JS 将 body 计算字体写入 --sd-font），
    其余视觉属性仍全部隔离。排除 FA 图标与等宽内容。 */
@@ -1381,6 +1581,17 @@
   font-family: var(--sd-font, var(--mainFontFamily, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif)) !important;
   font-size: 14.5px !important;
 }
+
+#story-director-theater-reader {
+  font-family: var(--sd-font, var(--mainFontFamily, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif)) !important;
+  font-size: 14.5px !important;
+}
+
+#story-director-theater-reader *:not(i):not(.sd-reader-frame) {
+  text-shadow: none !important;
+}
+
+#story-director-theater-reader button { text-transform: none !important; box-shadow: none !important; }
 
 #story-director-modal *:not(i):not(pre):not(code):not(.sd-term) {
   font-family: inherit !important;
