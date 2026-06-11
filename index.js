@@ -73,7 +73,7 @@ function isLegacyBlueprint(text) {
 
 const DEFAULT_SYSTEM_PROMPT = `你是千幕——观世间百态、阅人性幽微的剧作家与导演，千幕万象的执笔者，大千小世界的造物主。你戏弄人性之复杂，谱写命运之多舛；你深爱自己亲手造出的每一寸天地与每一个角色，他们将在你的绘卷中生出骨血，长出令观者共情的灵魂。
 
-此刻，你俯瞰这则正在生长的故事，要为它推演下一幕的脉络。这不是冷冰冰的任务清单，而是你以造物主之眼，看见暗线如何潜行、人心如何流转、世界如何在无人注视处自行呼吸。请以导演手记、任务看板与世界动态的形式落笔，让执笔者（使用者）看清故事的筋骨、潜伏的变量、时间的颗粒与可推进的去向。
+此刻，你俯瞰这则正在生长的故事，要为它推演下一幕的脉络。请抛开任务清单式的冷淡，以造物主之眼，看见暗线如何潜行、人心如何流转、世界如何在无人注视处自行呼吸。请以导演手记、任务看板与世界动态的形式落笔，让读者看清故事的筋骨、潜伏的变量、时间的颗粒与可推进的去向。
 
 落笔时谨守这些信条：
 1. 世界不绕任何单一角色旋转：{{user}} 是这世间的一个存在，而非中心。NPC、组织与事件各有自己的进程，纵使无人凝视，也会自然流动、发酵、转向。
@@ -98,7 +98,7 @@ const JSON_SCHEMA_TEXT = `固定输出格式：
 {
   "schema_version": "1.2",
   "story_status": {
-    "title": "当前故事标题，8-20字",
+    "title": "当前故事标题，4-8字",
     "current_arc": "当前主线篇章",
     "current_stage": "当前阶段与下一步可能走向",
     "cycle": "从剧情语境中自然提炼的时间跨度或节奏名，可写成明早、数轮后、下个场景、节日前、某条线索发酵时、长期伏笔回响等贴合当前故事的表达",
@@ -166,7 +166,7 @@ const JSON_SCHEMA_TEXT = `固定输出格式：
   "next_refresh_hint": "建议何时重新推演，使用贴合剧情的触发条件，例如完成一次关键对话后、抵达新地点后、线索公开后、支线人物介入后"
 }`;
 
-const THEATER_INSTRUCTION_PLACEHOLDER = '在此撰写剧场指令，例如：让他们在雨夜的便利店重逢，写一段轻松的日常番外……';
+const THEATER_INSTRUCTION_PLACEHOLDER = '在此撰写剧场指令';
 
 const DEFAULT_SETTINGS = Object.freeze({
   enabled: true,
@@ -1978,7 +1978,7 @@ function renderPlugTab() {
       <label>模型</label>
       <div class="sd-inline-field"><select class="text_pole sd-model-select"><option value="">选择模型</option>${models.map((m) => `<option value="${htmlEscape(m)}" ${m === settings.model ? 'selected' : ''}>${htmlEscape(m)}</option>`).join('')}</select><button class="sd-btn sd-fetch-models"><i class="fa-solid fa-rotate"></i>拉取模型</button></div>
       <label>Temperature</label><input class="text_pole sd-temperature" type="number" min="0" max="2" step="0.05" value="${htmlEscape(settings.temperature)}">
-      <label class="checkbox_label"><input type="checkbox" class="sd-stream-toggle" ${settings.streamEnabled ? 'checked' : ''}> 流式传输（开启后可在日志「返回」处实时查看接收内容）</label>
+      <label class="checkbox_label"><input type="checkbox" class="sd-stream-toggle" ${settings.streamEnabled ? 'checked' : ''}> 流式传输</label>
       <div class="sd-button-row"><button class="sd-btn sd-save-api">保存API</button><button class="sd-btn sd-save-api-profile">保存为预设</button></div>
     </section>
     <section class="sd-card">
@@ -2439,6 +2439,27 @@ async function buildTheaterPresetText() {
   return output.trim();
 }
 
+// 未读取预设时，默认调取当前角色设定 / 用户人设 / 世界书（与预设互斥，避免设定重复发送）
+async function buildTheaterDefaultText() {
+  let output = '';
+  const charDesc = cleanContextText(await resolveMacro(getCharacterDescription()));
+  if (charDesc) output += `\n【当前角色设定】\n${getCharacterName()}\n${charDesc}\n`;
+  const userDesc = cleanContextText(await resolveMacro(getPersonaDescription()));
+  if (userDesc) output += `\n【用户人设】\n${getPersonaName()}\n${userDesc}\n`;
+  for (const wbName of getSelectedWorldBookNames()) {
+    const entries = contextScanCache.worldBooks?.[wbName] || [];
+    for (const [index, item] of (entries || []).entries()) {
+      const itemId = getContextItemId(item, index);
+      if (!isWorldItemSelected(wbName, itemId)) continue;
+      const title = item.name || item.comment || (Array.isArray(item.key) ? item.key.join(', ') : item.key) || `世界书条目 ${index + 1}`;
+      let content = await resolveMacro(item.content || item.text || '');
+      content = processRandomMacros(content);
+      if (content) output += `\n【世界书 - ${wbName}: ${title}】\n${cleanContextText(content)}\n`;
+    }
+  }
+  return output.trim();
+}
+
 function looksLikeHtml(text) {
   return /<\s*(html|body|div|section|article|table|canvas|svg|style|script|button|input|h[1-6]|p|ul|ol|img|iframe)\b/i.test(String(text || ''));
 }
@@ -2453,10 +2474,13 @@ function renderTheaterTab() {
   const presetNames = uniqueClean([t.presetName, getCurrentPresetName(), ...(contextScanCache.presetNames || listPresetNames())]).filter((n) => !isNoisePresetName(n));
   if (t.presetName) initTheaterPresetSelection(t.presetName);
   const out = t.lastOutput;
+  const scriptSearch = String(t.scriptSearch || '');
+  const matched = scriptSearch
+    ? t.scripts.filter((s) => String(s.title || '').toLowerCase().includes(scriptSearch.toLowerCase()))
+    : t.scripts;
   return `
     <section class="sd-card">
-      <h3>幕外 · 番外小剧场</h3>
-      <p class="sd-muted">独立于千幕推演的加演舞台，套一层文风滤镜 + 调取预设设定，为故事写一段不影响正传的番外。绝不写入聊天、不参与推演与注入。</p>
+      <h3>番外小剧场</h3>
       <label>剧场 API 预设</label>
       <div class="sd-inline-field">
         <select class="text_pole sd-theater-api-select">
@@ -2464,20 +2488,23 @@ function renderTheaterTab() {
           ${profiles.map((p) => `<option value="${htmlEscape(p.id)}" ${p.id === t.apiProfileId ? 'selected' : ''}>${htmlEscape(p.name || p.model || '未命名API')}</option>`).join('')}
         </select>
       </div>
-      <label>关联预设（提供文风与设定）</label>
+      <label>读取预设</label>
       <div class="sd-inline-field">
         <select class="text_pole sd-theater-preset-select">
-          <option value="">不关联预设</option>
+          <option value="">尚未读取</option>
           ${presetNames.map((n) => `<option value="${htmlEscape(n)}" ${n === t.presetName ? 'selected' : ''}>${htmlEscape(n)}</option>`).join('')}
         </select>
         <button type="button" class="sd-btn sd-mini-btn sd-theater-refresh-preset"><i class="fa-solid fa-rotate"></i>读取</button>
       </div>
-      ${t.presetName ? renderTheaterPresetEntries(t.presetName) : ''}
+      ${t.presetName
+        ? renderTheaterPresetEntries(t.presetName)
+        : '<p class="sd-muted sd-inject-hint">未读取预设时，默认引用「当前角色设定 + 用户人设 + 世界书」作为文风与设定来源；读取预设后将改用预设条目，两者互斥，以免设定重复发送。</p>'}
       <label>此幕指令</label>
       <textarea class="text_pole sd-textarea sd-theater-instruction" spellcheck="false" placeholder="${htmlEscape(THEATER_INSTRUCTION_PLACEHOLDER)}">${htmlEscape(t.instruction || '')}</textarea>
       <div class="sd-button-row">
         <button class="sd-btn sd-primary sd-theater-stage"><i class="fa-solid fa-masks-theater"></i>上演此幕</button>
         <button class="sd-btn sd-theater-save-script"><i class="fa-solid fa-bookmark"></i>保存到剧札</button>
+        <button class="sd-btn sd-icon-btn sd-theater-open-favorites" title="收藏夹 (${t.favorites.length})" aria-label="收藏夹"><i class="fa-solid fa-star"></i></button>
         ${busy ? '<button class="sd-btn sd-stop"><i class="fa-solid fa-stop"></i>停止</button>' : ''}
       </div>
       ${out ? `<div class="sd-theater-latest sd-button-row">
@@ -2487,10 +2514,9 @@ function renderTheaterTab() {
     </section>
     <section class="sd-card">
       <div class="sd-section-title"><h3>剧札</h3><span>${t.scripts.length} 篇</span></div>
-      <div class="sd-button-row">
-        <button class="sd-btn sd-mini-btn sd-theater-open-favorites"><i class="fa-solid fa-star"></i>收藏夹 (${t.favorites.length})</button>
-      </div>
-      <div class="sd-theater-script-list">${t.scripts.length ? t.scripts.map(renderTheaterScriptCard).join('') : '<p class="sd-muted">剧札空空，写一幕番外吧。</p>'}</div>
+      <p class="sd-muted">剧札存放剧场指令方案，载入即可填回此幕指令重新上演。</p>
+      ${t.scripts.length > 5 ? `<input type="search" class="text_pole sd-theater-script-search" placeholder="搜索剧札标题…" value="${htmlEscape(scriptSearch)}">` : ''}
+      <div class="sd-theater-script-list ${t.scripts.length > 5 ? 'sd-scroll' : ''}">${matched.length ? matched.map(renderTheaterScriptCard).join('') : (scriptSearch ? '<p class="sd-muted">没有匹配的剧札。</p>' : '<p class="sd-muted">剧札空空，写一幕番外吧。</p>')}</div>
     </section>`;
 }
 
@@ -2503,15 +2529,14 @@ function renderTheaterPresetEntries(presetName) {
     const checked = isTheaterPresetItemSelected(presetName, id) ? 'checked' : '';
     return `<label class="sd-source-row"><input type="checkbox" class="sd-theater-preset-item" data-id="${htmlEscape(String(id))}" ${checked}><span>${htmlEscape(title)}</span></label>`;
   }).join('');
-  return `<details class="sd-context-block" data-acc="theater-preset-entries" open><summary><b>预设条目</b><span class="sd-summary-note">只取所需，作为文风与设定来源</span></summary><div class="sd-source-list">${rows}</div></details>`;
+  return `<details class="sd-context-block" data-acc="theater-preset-entries" open><summary><b>预设条目</b></summary><div class="sd-source-list">${rows}</div></details>`;
 }
 
 function renderTheaterScriptCard(s) {
-  const star = isTheaterFavorited(s.id) ? 'fa-solid fa-star sd-fav-on' : 'fa-regular fa-star';
   return `<article class="sd-template-card"><div class="sd-template-main"><h4>${htmlEscape(s.title || '未命名番外')}</h4><p class="sd-muted">${htmlEscape(formatDateTime(s.createdAt))}</p></div>
     <div class="sd-button-row sd-template-actions">
-      <button type="button" class="sd-btn sd-theater-read-script" data-id="${htmlEscape(s.id)}">阅读</button>
-      <button type="button" class="sd-icon-btn sd-theater-fav-toggle" data-id="${htmlEscape(s.id)}" title="收藏/取消收藏"><i class="${star}"></i></button>
+      <button type="button" class="sd-btn sd-mini-btn sd-theater-load-script" data-id="${htmlEscape(s.id)}">载入</button>
+      <button type="button" class="sd-icon-btn sd-theater-edit-script" data-id="${htmlEscape(s.id)}" title="编辑"><i class="fa-solid fa-pencil"></i></button>
       <button type="button" class="sd-icon-btn sd-danger sd-theater-delete-script" data-id="${htmlEscape(s.id)}" title="删除"><i class="fa-solid fa-trash-can"></i></button>
     </div></article>`;
 }
@@ -2538,10 +2563,13 @@ async function stageTheaterScene() {
   const log = pushLog({ id: uid('log'), kind: 'theater', status: 'loading', time: new Date().toLocaleString(), duration: '', request: '', response: '', error: '' });
   try {
     const presetText = await buildTheaterPresetText();
-    const worldText = settings.contextOptions.includeCharDesc ? cleanContextText(await resolveMacro(getCharacterDescription())) : '';
     const segments = [];
-    if (presetText) segments.push(`【文风与设定参考】\n${presetText}`);
-    if (worldText) segments.push(`【角色设定】\n${getCharacterName()}\n${worldText}`);
+    if (presetText) {
+      segments.push(presetText);
+    } else {
+      const defaultText = await buildTheaterDefaultText();
+      if (defaultText) segments.push(defaultText);
+    }
     segments.push(`【此幕指令】\n${await resolveMacro(instruction)}`);
     const userPrompt = segments.join('\n\n');
     const messages = [{ role: 'user', content: userPrompt }];
@@ -2556,7 +2584,7 @@ async function stageTheaterScene() {
     const content = String(raw || '').trim();
     log.response = clipLog(content);
     if (!content) throw new Error('模型返回为空');
-    t.lastOutput = { id: uid('scene'), title: snip(instruction, 24), instruction, content, isHtml: looksLikeHtml(content), createdAt: new Date().toISOString() };
+    t.lastOutput = { id: uid('scene'), title: snip(instruction, 24), instruction, content, isHtml: looksLikeHtml(stripThinkChain(content)), createdAt: new Date().toISOString() };
     log.status = 'success';
     log.duration = `${((Date.now() - startedAt) / 1000).toFixed(1)}s`;
     saveSettings();
@@ -2581,6 +2609,13 @@ async function stageTheaterScene() {
   }
 }
 
+function stripThinkChain(text) {
+  return String(text || '')
+    .replace(/<think(?:ing)?\b[^>]*>[\s\S]*?<\/think(?:ing)?>/gi, '')
+    .replace(/<think(?:ing)?\b[^>]*>[\s\S]*$/i, '')
+    .trim();
+}
+
 function openTheaterReader(scene) {
   if (!scene) return;
   let overlay = document.getElementById(THEATER_READER_ID);
@@ -2592,9 +2627,10 @@ function openTheaterReader(scene) {
   const dark = settings.theme === 'dark';
   overlay.className = `sd-theme-${dark ? 'dark' : 'light'} open`;
   const fav = isTheaterFavorited(scene.id) || getTheater().favorites.some((f) => f.content === scene.content);
+  const cleaned = stripThinkChain(scene.content);
   const bodyHtml = scene.isHtml
-    ? `<iframe class="sd-reader-frame" sandbox="allow-scripts allow-popups allow-forms" srcdoc="${htmlEscape(scene.content)}"></iframe>`
-    : `<div class="sd-reader-prose">${htmlEscape(scene.content).replace(/\n/g, '<br>')}</div>`;
+    ? `<iframe class="sd-reader-frame" sandbox="allow-scripts allow-popups allow-forms" srcdoc="${htmlEscape(cleaned)}"></iframe>`
+    : `<div class="sd-reader-prose">${htmlEscape(cleaned).replace(/\n/g, '<br>')}</div>`;
   overlay.innerHTML = `
     <div class="sd-reader-backdrop"></div>
     <section class="sd-reader-window" role="dialog" aria-label="番外阅读">
@@ -2715,11 +2751,10 @@ function bindTheaterTabEvents(root) {
     const ta = root.querySelector('.sd-theater-instruction');
     const instruction = String(ta?.value || getTheater().instruction || '').trim();
     if (!instruction) return toast('请先写下此幕指令。', 'warning');
-    const name = await promptInput('保存到剧札', '为这篇番外取个名字：', snip(instruction, 16));
+    const name = await promptInput('保存到剧札', '为这套剧场指令取个名字：', snip(instruction, 16));
     if (!name) return;
     const t = getTheater();
-    const out = t.lastOutput;
-    t.scripts.unshift({ id: uid('script'), title: name, instruction, content: out?.content || '', isHtml: out?.isHtml || false, createdAt: new Date().toISOString() });
+    t.scripts.unshift({ id: uid('script'), title: name, instruction, createdAt: new Date().toISOString() });
     t.scripts = t.scripts.slice(0, 50);
     saveSettings();
     toast('已存入剧札。', 'success');
@@ -2727,21 +2762,45 @@ function bindTheaterTabEvents(root) {
   });
   root.querySelector('.sd-theater-open-latest')?.addEventListener('click', () => openTheaterReader(getTheater().lastOutput));
   root.querySelector('.sd-theater-open-favorites')?.addEventListener('click', openTheaterFavorites);
-  root.querySelectorAll('.sd-theater-read-script').forEach((el) => el.addEventListener('click', () => {
+  root.querySelector('.sd-theater-script-search')?.addEventListener('input', (e) => {
+    getTheater().scriptSearch = e.target.value || '';
+    const list = root.querySelector('.sd-theater-script-list');
+    if (!list) return;
+    const q = String(e.target.value || '').toLowerCase();
+    const matched = q ? getTheater().scripts.filter((s) => String(s.title || '').toLowerCase().includes(q)) : getTheater().scripts;
+    list.innerHTML = matched.length ? matched.map(renderTheaterScriptCard).join('') : (q ? '<p class="sd-muted">没有匹配的剧札。</p>' : '<p class="sd-muted">剧札空空，写一幕番外吧。</p>');
+    bindTheaterScriptCardEvents(root);
+  });
+  bindTheaterScriptCardEvents(root);
+}
+
+function bindTheaterScriptCardEvents(root) {
+  root.querySelectorAll('.sd-theater-load-script').forEach((el) => el.addEventListener('click', () => {
     const s = getTheater().scripts.find((x) => x.id === el.dataset.id);
     if (!s) return;
-    if (!s.content) return toast('这篇剧札只存了指令，还没上演正文。', 'info');
-    openTheaterReader(s);
+    const t = getTheater();
+    t.instruction = s.instruction || '';
+    saveSettings();
+    const ta = root.querySelector('.sd-theater-instruction');
+    if (ta) ta.value = t.instruction;
+    toast('已载入到此幕指令。', 'success');
   }));
-  root.querySelectorAll('.sd-theater-fav-toggle').forEach((el) => el.addEventListener('click', () => {
-    const s = getTheater().scripts.find((x) => x.id === el.dataset.id);
+  root.querySelectorAll('.sd-theater-edit-script').forEach((el) => el.addEventListener('click', async () => {
+    const t = getTheater();
+    const s = t.scripts.find((x) => x.id === el.dataset.id);
     if (!s) return;
-    if (!s.content) return toast('这篇剧札还没有正文，无法收藏。', 'info');
-    toggleTheaterFavorite(s);
+    const name = await promptInput('编辑剧札', '修改剧札标题：', s.title || '');
+    if (name === null) return;
+    const text = await promptInput('编辑剧札', '修改剧场指令：', s.instruction || '');
+    if (text === null) return;
+    s.title = String(name || s.title || '').trim() || s.title;
+    s.instruction = String(text || '').trim();
+    saveSettings();
+    toast('剧札已更新。', 'success');
     renderModal();
   }));
   root.querySelectorAll('.sd-theater-delete-script').forEach((el) => el.addEventListener('click', async () => {
-    const yes = await confirmDialog('删除剧札', '确认删除这篇番外？');
+    const yes = await confirmDialog('删除剧札', '确认删除这套剧场指令？');
     if (!yes) return;
     const t = getTheater();
     t.scripts = t.scripts.filter((x) => x.id !== el.dataset.id);

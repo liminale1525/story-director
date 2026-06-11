@@ -5,7 +5,10 @@
 /* ---------- 0. 基础 ---------- */
 #story-director-settings { display: none !important; }
 
-#toast-container { z-index: 2147483010 !important; }
+#toast-container,
+#toast-container.toast-top-center,
+#toast-container.toast-top-right,
+.toast-container { z-index: 2147483647 !important; }
 
 #story-director-modal,
 #story-director-float,
@@ -627,6 +630,19 @@
 
 #story-director-modal .sd-inject-badge.on { color: var(--sd-text) !important; }
 #story-director-modal .sd-inject-badge.on i.sd-dot { background: #6aa879; animation: sd-pulse 2.2s infinite; }
+
+#story-director-modal .sd-hero-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+#story-director-modal .sd-clear-plan {
+  width: 28px !important;
+  height: 28px !important;
+  min-width: 28px !important;
+}
+#story-director-modal .sd-clear-plan i { font-size: 12px !important; }
 
 /* v0.6.1 */
 #story-director-modal .sd-inject-hint { margin-top: 6px; font-size: .86em; }
@@ -1402,6 +1418,13 @@
 
 /* ---------- 15b. 幕外 / 番外小剧场 + 阅读浮层 ---------- */
 #story-director-modal .sd-theater-script-list { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; }
+#story-director-modal .sd-theater-script-list.sd-scroll {
+  max-height: 264px;
+  overflow-y: auto;
+  padding-right: 4px;
+  scrollbar-width: thin;
+}
+#story-director-modal .sd-theater-script-search { margin-top: 6px; }
 
 #story-director-modal .sd-theater-latest {
   margin-top: 10px;
@@ -1461,8 +1484,10 @@
 
 #story-director-theater-reader .sd-reader-window {
   position: relative;
-  width: min(780px, calc(100vw - 32px));
-  height: min(680px, calc(100dvh - 40px));
+  width: 780px;
+  max-width: 100%;
+  height: 680px;
+  max-height: 100%;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -1567,10 +1592,15 @@
 #story-director-theater-reader .sd-muted { opacity: .72; }
 
 @media (max-width: 760px) {
-  #story-director-theater-reader .sd-reader-window {
-    width: calc(100vw - 32px);
-    height: calc(100dvh - 40px);
+  #story-director-theater-reader.open {
+    padding: max(10px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
   }
+  #story-director-theater-reader .sd-reader-window {
+    width: 100%;
+    height: 100%;
+    border-radius: 14px !important;
+  }
+  #story-director-theater-reader .sd-reader-prose { padding: 18px 16px; }
 }
 
 /* ---------- 16. ST 主题隔离层 ----------
