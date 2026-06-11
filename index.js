@@ -224,6 +224,7 @@ const DEFAULT_SETTINGS = Object.freeze({
 
 let settings = null;
 let activeTab = 'dashboard';
+let theaterView = null; // null=常规；{mode:'read', scene}=阅读；{mode:'favorites'}=收藏夹
 let contextScanCache = { presets: {}, worldBooks: {}, presetNames: [], worldBookNames: [], currentPresetName: '', boundWorldBookNames: [], presetScannedAt: '', worldScannedAt: '' };
 let busy = false;
 let abortController = null;
@@ -1353,6 +1354,7 @@ function injectToInput(text) {
 function openModal(tab = activeTab) {
   if (!settings.enabled) return toast('千幕已关闭。', 'warning');
   activeTab = tab;
+  theaterView = null;
   let modal = document.getElementById(MODAL_ID);
   if (!modal) {
     modal = document.createElement('div');
@@ -1556,6 +1558,7 @@ function renderModal() {
     renderModal();
   });
   modal.querySelectorAll('.sd-tab').forEach((el) => el.addEventListener('click', () => {
+    if (el.dataset.tab !== 'theater') theaterView = null;
     activeTab = el.dataset.tab;
     renderModal();
   }));
@@ -1886,18 +1889,17 @@ function renderContextEntry(kind, groupName, item, index, sourceLabel = '') {
 
 function renderInjectPreview() {
   const store = getChatStore();
-  const active = settings?.enabled && settings.injectEnabled && store?.plan;
-  const text = active ? buildPlanDigest(store.plan) : '';
   if (!store?.plan) {
-    return '<div class="sd-inject-preview-box"><div class="sd-log-cap"><i class="fa-solid fa-eye"></i>当前注入内容</div><p class="sd-muted">尚无推演结果，暂无可注入的暗线。</p></div>';
+    return '<details class="sd-context-block sd-inject-preview-box" data-acc="inject-preview"><summary><b>当前注入内容</b></summary><p class="sd-muted">尚无推演结果，暂无可注入的暗线。</p></details>';
   }
   if (!settings.injectEnabled) {
-    return '<div class="sd-inject-preview-box"><div class="sd-log-cap"><i class="fa-solid fa-eye-slash"></i>当前注入内容</div><p class="sd-muted">暗线注入已关闭，本次推演结果不会被注入聊天。</p></div>';
+    return '<details class="sd-context-block sd-inject-preview-box" data-acc="inject-preview"><summary><b>当前注入内容</b></summary><p class="sd-muted">暗线注入已关闭，本次推演结果不会被注入聊天。</p></details>';
   }
-  return `<div class="sd-inject-preview-box">
-    <div class="sd-log-cap"><i class="fa-solid fa-eye"></i>当前注入内容${infoTag(`约 ${estimateTokens(text)} token`)}</div>
-    <pre class="sd-term">${htmlEscape(text || '（本次推演结果为空）')}</pre>
-  </div>`;
+  const text = buildPlanDigest(store.plan);
+  return `<details class="sd-context-block sd-inject-preview-box" data-acc="inject-preview">
+    <summary><b>当前注入内容</b><span class="sd-summary-note">约 ${estimateTokens(text)} token</span></summary>
+    <div class="sd-inject-preview-text">${htmlEscape(text || '（本次推演结果为空）').replace(/\n/g, '<br>')}</div>
+  </details>`;
 }
 
 function renderDirectorSettingsTab() {
@@ -1916,7 +1918,6 @@ function renderDirectorSettingsTab() {
         <label class="checkbox_label"><input type="checkbox" class="sd-inject-enabled" ${settings.injectEnabled ? 'checked' : ''}> 启用暗线注入</label>
         <label class="sd-floor-refresh"><span>注入深度</span><input class="text_pole sd-inject-depth" type="number" min="0" max="20" value="${htmlEscape(settings.injectDepth ?? 2)}"></label>
       </div>
-      <p class="sd-muted sd-inject-hint">数字越小，模型越容易留意到这些暗线；越大则越像背景里的余味。拿不准就保持 2 左右。</p>
       ${renderInjectPreview()}
     </section>
     <section class="sd-card">
@@ -2469,6 +2470,8 @@ function isTheaterFavorited(id) {
 }
 
 function renderTheaterTab() {
+  if (theaterView?.mode === 'read') return renderTheaterReadView(theaterView.scene);
+  if (theaterView?.mode === 'favorites') return renderTheaterFavoritesView();
   const t = getTheater();
   const profiles = Array.isArray(settings.apiProfiles) ? settings.apiProfiles : [];
   const presetNames = uniqueClean([t.presetName, getCurrentPresetName(), ...(contextScanCache.presetNames || listPresetNames())]).filter((n) => !isNoisePresetName(n));
@@ -2498,7 +2501,7 @@ function renderTheaterTab() {
       </div>
       ${t.presetName
         ? renderTheaterPresetEntries(t.presetName)
-        : '<p class="sd-muted sd-inject-hint">未读取预设时，默认引用「当前角色设定 + 用户人设 + 世界书」作为文风与设定来源；读取预设后将改用预设条目，两者互斥，以免设定重复发送。</p>'}
+        : '<p class="sd-muted sd-inject-hint">未读取预设时，默认注入当前聊天设定；读取预设后将改用预设条目，两者互斥，以免设定重复发送。</p>'}
       <label>此幕指令</label>
       <textarea class="text_pole sd-textarea sd-theater-instruction" spellcheck="false" placeholder="${htmlEscape(THEATER_INSTRUCTION_PLACEHOLDER)}">${htmlEscape(t.instruction || '')}</textarea>
       <div class="sd-button-row">
@@ -2514,9 +2517,46 @@ function renderTheaterTab() {
     </section>
     <section class="sd-card">
       <div class="sd-section-title"><h3>剧札</h3><span>${t.scripts.length} 篇</span></div>
-      <p class="sd-muted">剧札存放剧场指令方案，载入即可填回此幕指令重新上演。</p>
-      ${t.scripts.length > 5 ? `<input type="search" class="text_pole sd-theater-script-search" placeholder="搜索剧札标题…" value="${htmlEscape(scriptSearch)}">` : ''}
-      <div class="sd-theater-script-list ${t.scripts.length > 5 ? 'sd-scroll' : ''}">${matched.length ? matched.map(renderTheaterScriptCard).join('') : (scriptSearch ? '<p class="sd-muted">没有匹配的剧札。</p>' : '<p class="sd-muted">剧札空空，写一幕番外吧。</p>')}</div>
+      <input type="search" class="text_pole sd-theater-script-search" placeholder="搜索剧札标题…" value="${htmlEscape(scriptSearch)}">
+      <div class="sd-theater-script-list sd-scroll">${matched.length ? matched.map(renderTheaterScriptCard).join('') : (scriptSearch ? '<p class="sd-muted">没有匹配的剧札。</p>' : '<p class="sd-muted">剧札空空，写一幕番外吧。</p>')}</div>
+    </section>`;
+}
+
+function renderTheaterReadView(scene) {
+  if (!scene) { theaterView = null; return renderTheaterTab(); }
+  const fav = isTheaterFavorited(scene.id) || getTheater().favorites.some((f) => f.content === scene.content);
+  const cleaned = stripThinkChain(scene.content);
+  const bodyHtml = scene.isHtml
+    ? `<iframe class="sd-reader-frame" sandbox="allow-scripts allow-popups allow-forms" srcdoc="${htmlEscape(cleaned)}"></iframe>`
+    : `<div class="sd-reader-prose">${htmlEscape(cleaned).replace(/\n/g, '<br>')}</div>`;
+  return `
+    <section class="sd-card sd-reader-card">
+      <div class="sd-reader-bar">
+        <button class="sd-btn sd-mini-btn sd-theater-reader-back"><i class="fa-solid fa-arrow-left"></i>返回</button>
+        <h3>${htmlEscape(scene.title || '番外小剧场')}</h3>
+        <button class="sd-icon-btn sd-theater-reader-fav" title="收藏"><i class="${fav ? 'fa-solid fa-star sd-fav-on' : 'fa-regular fa-star'}"></i></button>
+      </div>
+      <div class="sd-reader-pane">${bodyHtml}</div>
+    </section>`;
+}
+
+function renderTheaterFavoritesView() {
+  const t = getTheater();
+  const rows = t.favorites.length
+    ? t.favorites.map((f) => `<article class="sd-script-row"><div class="sd-script-main"><h4>${htmlEscape(f.title || '番外')}</h4></div>
+      <div class="sd-script-actions">
+        <button type="button" class="sd-btn sd-mini-btn sd-fav-read" data-id="${htmlEscape(f.id)}">阅读</button>
+        <button type="button" class="sd-icon-btn sd-danger sd-fav-remove" data-id="${htmlEscape(f.id)}" title="移出收藏"><i class="fa-solid fa-star-half-stroke"></i></button>
+      </div></article>`).join('')
+    : '<p class="sd-muted">收藏夹还空着。</p>';
+  return `
+    <section class="sd-card sd-reader-card">
+      <div class="sd-reader-bar">
+        <button class="sd-btn sd-mini-btn sd-theater-reader-back"><i class="fa-solid fa-arrow-left"></i>返回</button>
+        <h3>收藏夹 · ${t.favorites.length} 篇</h3>
+        <span></span>
+      </div>
+      <div class="sd-theater-script-list sd-scroll" style="padding:4px 2px">${rows}</div>
     </section>`;
 }
 
@@ -2533,11 +2573,11 @@ function renderTheaterPresetEntries(presetName) {
 }
 
 function renderTheaterScriptCard(s) {
-  return `<article class="sd-template-card"><div class="sd-template-main"><h4>${htmlEscape(s.title || '未命名番外')}</h4><p class="sd-muted">${htmlEscape(formatDateTime(s.createdAt))}</p></div>
-    <div class="sd-button-row sd-template-actions">
-      <button type="button" class="sd-btn sd-mini-btn sd-theater-load-script" data-id="${htmlEscape(s.id)}">载入</button>
-      <button type="button" class="sd-icon-btn sd-theater-edit-script" data-id="${htmlEscape(s.id)}" title="编辑"><i class="fa-solid fa-pencil"></i></button>
-      <button type="button" class="sd-icon-btn sd-danger sd-theater-delete-script" data-id="${htmlEscape(s.id)}" title="删除"><i class="fa-solid fa-trash-can"></i></button>
+  return `<article class="sd-script-row"><div class="sd-script-main"><h4>${htmlEscape(s.title || '未命名番外')}</h4></div>
+    <div class="sd-script-actions">
+      <button type="button" class="sd-btn sd-script-load sd-theater-load-script" data-id="${htmlEscape(s.id)}">载入</button>
+      <button type="button" class="sd-icon-btn sd-icon-sm sd-theater-edit-script" data-id="${htmlEscape(s.id)}" title="编辑"><i class="fa-solid fa-pencil"></i></button>
+      <button type="button" class="sd-icon-btn sd-icon-sm sd-danger sd-theater-delete-script" data-id="${htmlEscape(s.id)}" title="删除"><i class="fa-solid fa-trash-can"></i></button>
     </div></article>`;
 }
 
@@ -2618,41 +2658,9 @@ function stripThinkChain(text) {
 
 function openTheaterReader(scene) {
   if (!scene) return;
-  let overlay = document.getElementById(THEATER_READER_ID);
-  if (!overlay) {
-    overlay = document.createElement('div');
-    overlay.id = THEATER_READER_ID;
-    document.body.appendChild(overlay);
-  }
-  const dark = settings.theme === 'dark';
-  overlay.className = `sd-theme-${dark ? 'dark' : 'light'} open`;
-  const fav = isTheaterFavorited(scene.id) || getTheater().favorites.some((f) => f.content === scene.content);
-  const cleaned = stripThinkChain(scene.content);
-  const bodyHtml = scene.isHtml
-    ? `<iframe class="sd-reader-frame" sandbox="allow-scripts allow-popups allow-forms" srcdoc="${htmlEscape(cleaned)}"></iframe>`
-    : `<div class="sd-reader-prose">${htmlEscape(cleaned).replace(/\n/g, '<br>')}</div>`;
-  overlay.innerHTML = `
-    <div class="sd-reader-backdrop"></div>
-    <section class="sd-reader-window" role="dialog" aria-label="番外阅读">
-      <header class="sd-reader-header">
-        <h3>${htmlEscape(scene.title || '番外小剧场')}</h3>
-        <div class="sd-reader-actions">
-          <button class="sd-icon-btn sd-reader-fav" title="收藏"><i class="${fav ? 'fa-solid fa-star sd-fav-on' : 'fa-regular fa-star'}"></i></button>
-          <button class="sd-icon-btn sd-reader-close" title="关闭"><i class="fa-solid fa-xmark"></i></button>
-        </div>
-      </header>
-      <div class="sd-reader-body">${bodyHtml}</div>
-    </section>`;
-  const close = () => overlay.classList.remove('open');
-  overlay.querySelector('.sd-reader-backdrop')?.addEventListener('click', close);
-  overlay.querySelector('.sd-reader-close')?.addEventListener('click', close);
-  overlay.querySelector('.sd-reader-fav')?.addEventListener('click', () => {
-    toggleTheaterFavorite(scene);
-    const icon = overlay.querySelector('.sd-reader-fav i');
-    const on = isTheaterFavorited(scene.id);
-    if (icon) icon.className = on ? 'fa-solid fa-star sd-fav-on' : 'fa-regular fa-star';
-    if (activeTab === 'theater') renderModal();
-  });
+  theaterView = { mode: 'read', scene };
+  activeTab = 'theater';
+  renderModal();
 }
 
 function toggleTheaterFavorite(scene) {
@@ -2670,46 +2678,36 @@ function toggleTheaterFavorite(scene) {
 }
 
 function openTheaterFavorites() {
-  const t = getTheater();
-  if (!t.favorites.length) return toast('收藏夹还空着。', 'info');
-  let overlay = document.getElementById(THEATER_READER_ID);
-  if (!overlay) {
-    overlay = document.createElement('div');
-    overlay.id = THEATER_READER_ID;
-    document.body.appendChild(overlay);
-  }
-  const dark = settings.theme === 'dark';
-  overlay.className = `sd-theme-${dark ? 'dark' : 'light'} open`;
-  const rows = t.favorites.map((f) => `<article class="sd-template-card"><div class="sd-template-main"><h4>${htmlEscape(f.title || '番外')}</h4><p class="sd-muted">${htmlEscape(formatDateTime(f.createdAt))}</p></div>
-    <div class="sd-button-row sd-template-actions">
-      <button type="button" class="sd-btn sd-fav-read" data-id="${htmlEscape(f.id)}">阅读</button>
-      <button type="button" class="sd-icon-btn sd-danger sd-fav-remove" data-id="${htmlEscape(f.id)}" title="移出收藏"><i class="fa-solid fa-star-half-stroke"></i></button>
-    </div></article>`).join('');
-  overlay.innerHTML = `
-    <div class="sd-reader-backdrop"></div>
-    <section class="sd-reader-window" role="dialog" aria-label="收藏的番外">
-      <header class="sd-reader-header">
-        <h3>收藏夹 · ${t.favorites.length} 篇</h3>
-        <div class="sd-reader-actions"><button class="sd-icon-btn sd-reader-close" title="关闭"><i class="fa-solid fa-xmark"></i></button></div>
-      </header>
-      <div class="sd-reader-body"><div class="sd-template-list">${rows}</div></div>
-    </section>`;
-  const close = () => overlay.classList.remove('open');
-  overlay.querySelector('.sd-reader-backdrop')?.addEventListener('click', close);
-  overlay.querySelector('.sd-reader-close')?.addEventListener('click', close);
-  overlay.querySelectorAll('.sd-fav-read').forEach((el) => el.addEventListener('click', () => {
-    const f = t.favorites.find((x) => x.id === el.dataset.id);
-    if (f) openTheaterReader(f);
-  }));
-  overlay.querySelectorAll('.sd-fav-remove').forEach((el) => el.addEventListener('click', () => {
-    t.favorites = t.favorites.filter((x) => x.id !== el.dataset.id);
-    saveSettings();
-    openTheaterFavorites();
-    if (activeTab === 'theater') renderModal();
-  }));
+  theaterView = { mode: 'favorites' };
+  activeTab = 'theater';
+  renderModal();
 }
 
 function bindTheaterTabEvents(root) {
+  // 阅读 / 收藏夹 内嵌视图
+  if (theaterView) {
+    root.querySelector('.sd-theater-reader-back')?.addEventListener('click', () => { theaterView = null; renderModal(); });
+    if (theaterView.mode === 'read') {
+      const scene = theaterView.scene;
+      root.querySelector('.sd-theater-reader-fav')?.addEventListener('click', () => {
+        toggleTheaterFavorite(scene);
+        const icon = root.querySelector('.sd-theater-reader-fav i');
+        if (icon) icon.className = isTheaterFavorited(scene.id) ? 'fa-solid fa-star sd-fav-on' : 'fa-regular fa-star';
+      });
+    } else if (theaterView.mode === 'favorites') {
+      root.querySelectorAll('.sd-fav-read').forEach((el) => el.addEventListener('click', () => {
+        const f = getTheater().favorites.find((x) => x.id === el.dataset.id);
+        if (f) openTheaterReader(f);
+      }));
+      root.querySelectorAll('.sd-fav-remove').forEach((el) => el.addEventListener('click', () => {
+        const t = getTheater();
+        t.favorites = t.favorites.filter((x) => x.id !== el.dataset.id);
+        saveSettings();
+        renderModal();
+      }));
+    }
+    return;
+  }
   root.querySelector('.sd-theater-api-select')?.addEventListener('change', (e) => {
     getTheater().apiProfileId = e.target.value || '';
     saveSettings();
