@@ -2092,7 +2092,7 @@ function renderDirectorSettingsTab() {
     </section>
     <section class="sd-card">
       <details class="sd-context-block" data-acc="output-schema">
-        <summary><b>输出格式</b><span class="sd-summary-note">推演返回的 JSON 结构，一般无需改动</span></summary>
+        <summary><b>输出格式</b><span class="sd-summary-note">推演返回的JSON结构，一般无需改动</span></summary>
         <textarea class="text_pole sd-textarea sd-output-schema" spellcheck="false">${htmlEscape(settings.outputSchemaText || JSON_SCHEMA_TEXT)}</textarea>
       </details>
       <div class="sd-button-row"><button class="sd-btn sd-save-director-settings">保存幕后</button><button class="sd-btn sd-reset-system">恢复默认</button></div>
