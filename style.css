@@ -5,10 +5,15 @@
 /* ---------- 0. 基础 ---------- */
 #story-director-settings { display: none !important; }
 
-#toast-container,
-#toast-container.toast-top-center,
-#toast-container.toast-top-right,
-.toast-container { z-index: 2147483647 !important; }
+/* ST 通知层级：用 html body 前缀拔高特异度，确保盖过 ST 核心 style.css 中同为 #toast-container !important 的规则（同特异度时仅靠加载顺序，不可靠） */
+html body #toast-container,
+html body #toast-container.toast-top-center,
+html body #toast-container.toast-top-right,
+html body #toast-container.toast-top-left,
+html body #toast-container.toast-bottom-center,
+html body #toast-container.toast-bottom-right,
+html body #toast-container.toast-bottom-left,
+html body .toast-container { z-index: 2147483647 !important; }
 
 #story-director-modal,
 #story-director-float,
@@ -647,8 +652,18 @@
 /* v0.6.1 */
 #story-director-modal .sd-inject-hint { margin-top: 6px; font-size: .86em; }
 #story-director-modal .sd-inject-preview-box { margin-top: 12px; }
-#story-director-modal .sd-inject-preview-box .sd-log-cap { margin-bottom: 6px; }
-#story-director-modal .sd-inject-preview-box pre.sd-term { max-height: 240px; }
+#story-director-modal .sd-inject-preview-text {
+  margin-top: 8px;
+  max-height: 240px;
+  overflow-y: auto;
+  font-family: inherit !important;
+  font-size: .9em;
+  line-height: 1.6;
+  color: var(--sd-muted);
+  white-space: normal;
+  word-break: break-word;
+  scrollbar-width: thin;
+}
 
 #story-director-modal .sd-status-card { padding: 14px 16px; }
 
@@ -1416,8 +1431,8 @@
   }
 }
 
-/* ---------- 15b. 幕外 / 番外小剧场 + 阅读浮层 ---------- */
-#story-director-modal .sd-theater-script-list { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; }
+/* ---------- 15b. 幕外 / 番外小剧场 + 面板内阅读 ---------- */
+#story-director-modal .sd-theater-script-list { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
 #story-director-modal .sd-theater-script-list.sd-scroll {
   max-height: 264px;
   overflow-y: auto;
@@ -1425,6 +1440,39 @@
   scrollbar-width: thin;
 }
 #story-director-modal .sd-theater-script-search { margin-top: 6px; }
+
+/* 剧札条目：紧凑单行排版 */
+#story-director-modal .sd-script-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--sd-border);
+  border-radius: 10px !important;
+  background: var(--sd-glass-weak);
+}
+#story-director-modal .sd-script-main { flex: 1 1 auto; min-width: 0; }
+#story-director-modal .sd-script-main h4 {
+  margin: 0;
+  font-size: .96em;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#story-director-modal .sd-script-actions { display: flex; align-items: center; gap: 5px; flex: 0 0 auto; }
+#story-director-modal .sd-script-load {
+  min-width: 0 !important;
+  min-height: 26px !important;
+  padding: 3px 12px !important;
+  font-size: .86em !important;
+}
+#story-director-modal .sd-icon-sm {
+  width: 26px !important;
+  height: 26px !important;
+  min-width: 26px !important;
+}
+#story-director-modal .sd-icon-sm i { font-size: 12px !important; }
 
 #story-director-modal .sd-theater-latest {
   margin-top: 10px;
@@ -1437,7 +1485,50 @@
 
 #story-director-modal .sd-fav-on { color: #d9a23a !important; }
 
-/* 阅读浮层：独立于面板的沙箱阅读窗，携带 sd-theme-* 主题变量 */
+/* 面板内阅读视图：覆盖千幕面板本身 */
+#story-director-modal .sd-reader-card { display: flex; flex-direction: column; min-height: 0; }
+#story-director-modal .sd-reader-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+#story-director-modal .sd-reader-bar h3 {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#story-director-modal .sd-reader-bar > .sd-mini-btn,
+#story-director-modal .sd-reader-bar > .sd-icon-btn,
+#story-director-modal .sd-reader-bar > span { flex: 0 0 auto; }
+#story-director-modal .sd-reader-pane {
+  border: 1px solid var(--sd-border);
+  border-radius: 14px !important;
+  background: var(--sd-glass-weak);
+  overflow: hidden;
+}
+#story-director-modal .sd-reader-pane .sd-reader-prose {
+  padding: 18px 20px;
+  line-height: 1.85;
+  font-size: 15px;
+  color: var(--sd-text);
+  white-space: normal;
+  word-break: break-word;
+}
+#story-director-modal .sd-reader-pane .sd-reader-frame {
+  width: 100%;
+  height: 60vh;
+  min-height: 320px;
+  border: 0;
+  background: #fff;
+  display: block;
+}
+
+/* 旧浮层（已停用，保留隐藏以防残留节点） */
 #story-director-theater-reader {
   position: fixed !important;
   inset: 0 !important;
