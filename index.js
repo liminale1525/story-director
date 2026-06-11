@@ -1,17 +1,16 @@
 // 千幕 (Qianmu) - SillyTavern third-party UI extension
-// v0.7.0
+// v1.2
 
 const MODULE_NAME = 'story_director_liminale';
 const EXTENSION_NAME = '千幕';
-const VERSION = '0.7.0';
+const VERSION = '1.2';
 const SETTINGS_PANEL_ID = 'story-director-settings';
 const MODAL_ID = 'story-director-modal';
 const FLOAT_ID = 'story-director-float';
 const INPUT_ENTRY_ID = 'story-director-input-entry';
 const INPUT_BUTTON_ID = 'story-director-input-button';
-const THEATER_READER_ID = 'story-director-theater-reader';
 
-const PROMPT_REVISION = 3;
+const PROMPT_REVISION = 4;
 const FIXED_METRICS = ['张力', '情感', '悬念', '节奏'];
 const LOG_LIMIT = 5;
 const LOG_CLIP = 80000;
@@ -189,12 +188,14 @@ const DEFAULT_SETTINGS = Object.freeze({
   injectDepth: 2,
   newcomerMode: false,
   promptRevision: 0,
+  systemPromptHash: '',
+  outputSchemaHash: '',
   logHistory: [],
   templates: [
     {
       id: 'default-free-blueprint',
       name: '通用自由剧本方案',
-      tags: ['通用'],
+      folder: '',
       content: DEFAULT_BLUEPRINT,
       createdAt: new Date().toISOString(),
     },
@@ -234,6 +235,9 @@ let eventBound = false;
 let inputMenuObserver = null;
 let templateExportMode = false;
 let templateExportSelection = new Set();
+let templateSearch = '';
+let theaterExportMode = false;
+let theaterExportSelection = new Set();
 let injectSelection = new Set();   // v0.5.2：写入勾选持久化（跨重渲染/切主题保留）
 let accState = {};                 // v0.5.2：折叠面板开合状态记忆
 
@@ -248,6 +252,14 @@ function clone(value) {
 
 function isPlainObject(value) {
   return value && typeof value === 'object' && !Array.isArray(value);
+}
+
+// 轻量字符串哈希，用于判断默认提示词是否被用户改动过
+function hashText(text) {
+  const str = String(text || '');
+  let h = 5381;
+  for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) >>> 0;
+  return `${str.length}:${h.toString(36)}`;
 }
 
 function mergeDefaults(target, defaults) {
@@ -278,17 +290,27 @@ function migrateSettings(s) {
 
   if (Number(s.promptRevision || 0) < PROMPT_REVISION) {
     const sys = String(s.systemPrompt || '');
-    if (!sys.trim() || sys.includes('你是一位顶尖剧作家导演') || (sys.includes('顶尖剧作家导演') && !sys.includes('视角分工'))) {
-      s.systemPrompt = DEFAULT_SYSTEM_PROMPT;
-    }
+    // 未改动判定：空 / 命中历史默认特征 / 与上次记录的默认哈希一致 → 视为未 DIY，随迭代自动更新
+    const sysUntouched = !sys.trim()
+      || sys.includes('你是一位顶尖剧作家导演')
+      || (sys.includes('顶尖剧作家导演') && !sys.includes('视角分工'))
+      || sys.includes('执笔者（使用者）')
+      || (s.systemPromptHash && s.systemPromptHash === hashText(sys));
+    if (sysUntouched) s.systemPrompt = DEFAULT_SYSTEM_PROMPT;
+
     const schema = String(s.outputSchemaText || '');
     const isLegacySchemaDefault = schema.includes('schema_version')
       && (!schema.includes('全知导演镜头') || (schema.includes('导演评语：分析节奏') && !schema.includes('毒舌影评人')));
-    if (!schema.trim() || isLegacySchemaDefault) {
-      s.outputSchemaText = JSON_SCHEMA_TEXT;
-    }
+    const schemaUntouched = !schema.trim()
+      || isLegacySchemaDefault
+      || (s.outputSchemaHash && s.outputSchemaHash === hashText(schema));
+    if (schemaUntouched) s.outputSchemaText = JSON_SCHEMA_TEXT;
+
     s.promptRevision = PROMPT_REVISION;
   }
+  // 记录当前默认文本的哈希：与默认一致则存哈希（标记“未改动”），不一致则清空（标记“已 DIY”）
+  s.systemPromptHash = String(s.systemPrompt || '') === DEFAULT_SYSTEM_PROMPT ? hashText(DEFAULT_SYSTEM_PROMPT) : '';
+  s.outputSchemaHash = String(s.outputSchemaText || '') === JSON_SCHEMA_TEXT ? hashText(JSON_SCHEMA_TEXT) : '';
 
   if (!Array.isArray(s.logHistory)) s.logHistory = [];
   if (s.lastLog && typeof s.lastLog === 'object') {
@@ -317,7 +339,14 @@ function migrateSettings(s) {
   if (!Array.isArray(s.theater.favorites)) s.theater.favorites = [];
   if (!isPlainObject(s.theater.presetItems)) s.theater.presetItems = {};
   if (!Array.isArray(s.templates)) s.templates = [];
-  s.templates = s.templates.map((tpl) => ({ ...tpl, tags: sanitizeTemplateTags(tpl.tags) }));
+  // tags → folder：取首个旧标签作为文件夹，移除 tags 字段
+  s.templates = s.templates.map((tpl) => {
+    const folder = typeof tpl.folder === 'string'
+      ? sanitizeFolder(tpl.folder)
+      : sanitizeFolder(Array.isArray(tpl.tags) ? tpl.tags[0] : '');
+    const { tags, ...rest } = tpl;
+    return { ...rest, folder };
+  });
   if (s.contextOptions) {
     if (!Array.isArray(s.contextOptions.tagRules)) {
       const names = String(s.contextOptions.tagNames || '').split(/[,，\s\n]+/).map((x) => x.trim()).filter(Boolean);
@@ -527,16 +556,161 @@ function uniqueClean(list) {
   return [...new Set((list || []).map((x) => String(x || '').trim()).filter(Boolean))];
 }
 
-function sanitizeTemplateTags(tags) {
-  return uniqueClean(Array.isArray(tags) ? tags : String(tags || '').split(/[，,\s]+/))
-    .map((tag) => tag.slice(0, 4))
-    .filter(Boolean)
-    .slice(0, 8);
-}
-
 function normalizeSourceName(name) {
   return String(name || '').trim();
 }
+
+/* ============================================================
+   通用资料库前端（剧本库 / 剧札共用）：文件夹分组 + 紧凑行 + 滚动 + 搜索 + 多选导入导出
+   cfg: { ns, items, getName, getFolder, getSearch, setSearch, exportMode, selection,
+          emptyText, searchPlaceholder }
+   ============================================================ */
+function sanitizeFolder(name) {
+  return String(name || '').trim().slice(0, 16);
+}
+
+function groupByFolder(items, getFolder) {
+  const folders = new Map();
+  const loose = [];
+  for (const it of items) {
+    const f = sanitizeFolder(getFolder(it));
+    if (f) {
+      if (!folders.has(f)) folders.set(f, []);
+      folders.get(f).push(it);
+    } else {
+      loose.push(it);
+    }
+  }
+  const folderList = [...folders.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0], 'zh'))
+    .map(([name, list]) => ({ name, list }));
+  return { folderList, loose };
+}
+
+function renderLibraryRow(cfg, item) {
+  const pick = cfg.exportMode
+    ? `<label class="sd-lib-pick" title="选择导出"><input type="checkbox" class="sd-lib-select" data-id="${htmlEscape(item.id)}" ${cfg.selection.has(item.id) ? 'checked' : ''}></label>`
+    : '';
+  return `<article class="sd-lib-row${cfg.exportMode ? ' sd-export-mode' : ''}">${pick}<div class="sd-lib-main"><h4>${htmlEscape(cfg.getName(item) || '未命名')}</h4></div>
+    <div class="sd-lib-actions">
+      <button type="button" class="sd-btn sd-lib-load" data-id="${htmlEscape(item.id)}">载入</button>
+      <button type="button" class="sd-icon-btn sd-icon-sm sd-lib-edit" data-id="${htmlEscape(item.id)}" title="编辑"><i class="fa-solid fa-pencil"></i></button>
+      <button type="button" class="sd-icon-btn sd-icon-sm sd-danger sd-lib-delete" data-id="${htmlEscape(item.id)}" title="删除"><i class="fa-solid fa-trash-can"></i></button>
+    </div></article>`;
+}
+
+function renderLibraryListBody(cfg, items) {
+  if (!items.length) {
+    return `<p class="sd-muted">${cfg.getSearch() ? '没有匹配的条目。' : htmlEscape(cfg.emptyText || '暂无条目')}</p>`;
+  }
+  const { folderList, loose } = groupByFolder(items, cfg.getFolder);
+  const folderHtml = folderList.map(({ name, list }) => `
+    <details class="sd-lib-folder" data-acc="${cfg.ns}-folder-${htmlEscape(name)}" open>
+      <summary><i class="fa-solid fa-folder"></i><b>${htmlEscape(name)}</b><span>${list.length}</span></summary>
+      <div class="sd-lib-folder-body">${list.map((it) => renderLibraryRow(cfg, it)).join('')}</div>
+    </details>`).join('');
+  const looseHtml = loose.map((it) => renderLibraryRow(cfg, it)).join('');
+  return folderHtml + looseHtml;
+}
+
+function renderLibrarySection(cfg) {
+  const all = cfg.items;
+  const search = cfg.getSearch();
+  const matched = search
+    ? all.filter((it) => String(cfg.getName(it) || '').toLowerCase().includes(search.toLowerCase()))
+    : all;
+  const exportBar = cfg.exportMode
+    ? `<div class="sd-export-bar"><span class="sd-export-hint">勾选要导出的条目</span><button type="button" class="sd-btn sd-mini-btn sd-lib-confirm-export">导出 (<span>${cfg.selection.size}</span>)</button><button type="button" class="sd-btn sd-mini-btn sd-lib-cancel-export">取消</button></div>`
+    : '';
+  return `
+      <div class="sd-template-head">
+        <h3>${htmlEscape(cfg.title)}</h3>
+        <div class="sd-template-io-buttons">
+          <label class="sd-icon-btn sd-file-label sd-lib-import-label" title="导入" aria-label="导入"><i class="fa-solid fa-file-import"></i><input type="file" accept="application/json" class="sd-lib-import"></label>
+          <button type="button" class="sd-icon-btn sd-lib-export-toggle ${cfg.exportMode ? 'active' : ''}" title="导出" aria-label="导出"><i class="fa-solid fa-file-export"></i></button>
+        </div>
+        <span class="sd-tpl-count">${all.length} 个</span>
+      </div>
+      ${exportBar}
+      <input type="search" class="text_pole sd-lib-search" placeholder="${htmlEscape(cfg.searchPlaceholder || '搜索标题…')}" value="${htmlEscape(search)}">
+      <div class="sd-lib-list sd-scroll">${renderLibraryListBody(cfg, matched)}</div>`;
+}
+
+// 绑定通用库事件。handlers: { onLoad, onEdit, onDelete, onImport, onExport, rebuildCfg }
+function bindLibraryEvents(root, makeCfg, handlers) {
+  const cfg = makeCfg();
+  const refreshList = () => {
+    const c = makeCfg();
+    const search = c.getSearch();
+    const matched = search ? c.items.filter((it) => String(c.getName(it) || '').toLowerCase().includes(search.toLowerCase())) : c.items;
+    const list = root.querySelector('.sd-lib-list');
+    if (list) {
+      list.innerHTML = renderLibraryListBody(c, matched);
+      applyAccState(root);
+      bindRowEvents();
+    }
+  };
+  const bindRowEvents = () => {
+    root.querySelectorAll('.sd-lib-load').forEach((el) => el.addEventListener('click', () => handlers.onLoad(el.dataset.id)));
+    root.querySelectorAll('.sd-lib-edit').forEach((el) => el.addEventListener('click', () => handlers.onEdit(el.dataset.id)));
+    root.querySelectorAll('.sd-lib-delete').forEach((el) => el.addEventListener('click', () => handlers.onDelete(el.dataset.id)));
+    root.querySelectorAll('.sd-lib-select').forEach((el) => el.addEventListener('change', () => {
+      const c = makeCfg();
+      if (el.checked) c.selection.add(el.dataset.id);
+      else c.selection.delete(el.dataset.id);
+      const span = root.querySelector('.sd-lib-confirm-export span');
+      if (span) span.textContent = String(c.selection.size);
+    }));
+  };
+  root.querySelector('.sd-lib-search')?.addEventListener('input', (e) => {
+    cfg.setSearch(e.target.value || '');
+    refreshList();
+  });
+  root.querySelector('.sd-lib-export-toggle')?.addEventListener('click', handlers.onToggleExport);
+  root.querySelector('.sd-lib-cancel-export')?.addEventListener('click', handlers.onCancelExport);
+  root.querySelector('.sd-lib-confirm-export')?.addEventListener('click', handlers.onConfirmExport);
+  root.querySelector('.sd-lib-import')?.addEventListener('change', handlers.onImport);
+  bindRowEvents();
+}
+
+// 通用编辑弹窗：名称 + 文件夹 + 内容
+async function promptLibraryEdit({ dialogTitle, nameLabel, folderLabel, contentLabel, name, folder, content }) {
+  const context = ctx();
+  const Popup = context.Popup;
+  if (Popup && context.POPUP_TYPE) {
+    const wrap = document.createElement('div');
+    wrap.className = 'sd-lib-edit-form';
+    wrap.innerHTML = `
+      <label style="display:block;text-align:left;margin:0 0 4px">${htmlEscape(nameLabel)}</label>
+      <input type="text" class="text_pole sd-le-name" style="width:100%;margin:0 0 10px">
+      <label style="display:block;text-align:left;margin:0 0 4px">${htmlEscape(folderLabel)}</label>
+      <input type="text" class="text_pole sd-le-folder" placeholder="留空则不分类" style="width:100%;margin:0 0 10px">
+      <label style="display:block;text-align:left;margin:0 0 4px">${htmlEscape(contentLabel)}</label>
+      <textarea class="text_pole sd-le-content" rows="8" style="width:100%;resize:vertical"></textarea>`;
+    wrap.querySelector('.sd-le-name').value = name || '';
+    wrap.querySelector('.sd-le-folder').value = folder || '';
+    wrap.querySelector('.sd-le-content').value = content || '';
+    try {
+      const popup = new Popup(wrap, context.POPUP_TYPE.CONFIRM, '', { okButton: '保存', cancelButton: '取消' });
+      const ok = await popup.show();
+      if (!ok) return null;
+      return {
+        name: String(wrap.querySelector('.sd-le-name').value || '').trim(),
+        folder: sanitizeFolder(wrap.querySelector('.sd-le-folder').value),
+        content: String(wrap.querySelector('.sd-le-content').value || '').trim(),
+      };
+    } catch (_) {}
+  }
+  const newName = await promptInput(dialogTitle, `${nameLabel}：`, name || '');
+  if (newName === null) return null;
+  const newFolder = await promptInput(dialogTitle, `${folderLabel}（留空不分类）：`, folder || '');
+  if (newFolder === null) return null;
+  const newContent = await promptInput(dialogTitle, `${contentLabel}：`, content || '');
+  if (newContent === null) return null;
+  return { name: String(newName || '').trim(), folder: sanitizeFolder(newFolder), content: String(newContent || '').trim() };
+}
+
+
 
 function isNoisePresetName(name) {
   const value = normalizeSourceName(name);
@@ -996,7 +1170,7 @@ async function buildPrompt() {
 
   const presetText = await buildPresetContextText();
   if (presetText) {
-    segments.push(`【参考·预设】\n以下为表达风格与思维方式参考，请先以此校准后续所有阅读与推演：\n${presetText}`);
+    segments.push(presetText);
   }
 
   const worldText = await buildWorldContextText();
@@ -1765,12 +1939,24 @@ function badge(text) {
   return text ? `<span class="sd-badge">${htmlEscape(text)}</span>` : '';
 }
 
+function templateLibraryCfg() {
+  return {
+    ns: 'tpl',
+    title: '剧本库',
+    items: settings.templates || [],
+    getName: (t) => t.name,
+    getFolder: (t) => t.folder,
+    getSearch: () => templateSearch,
+    setSearch: (v) => { templateSearch = v; },
+    exportMode: templateExportMode,
+    selection: templateExportSelection,
+    emptyText: '暂无剧本',
+    searchPlaceholder: '搜索剧本标题…',
+  };
+}
+
 function renderBlueprintTab() {
   const store = getChatStore();
-  const templates = settings.templates || [];
-  const exportBar = templateExportMode
-    ? `<div class="sd-export-bar"><span class="sd-export-hint">勾选要导出的剧本</span><button type="button" class="sd-btn sd-mini-btn sd-confirm-export">导出 (<span>${templateExportSelection.size}</span>)</button><button type="button" class="sd-btn sd-mini-btn sd-cancel-export">取消</button></div>`
-    : '';
   return `
     <section class="sd-card">
       <h3>当前聊天的剧本</h3>
@@ -1781,30 +1967,10 @@ function renderBlueprintTab() {
         <button type="button" class="sd-btn sd-reset-blueprint">恢复默认剧本</button>
       </div>
     </section>
-    <section class="sd-card">
-      <div class="sd-template-head">
-        <h3>剧本库</h3>
-        <div class="sd-template-io-buttons">
-          <label class="sd-icon-btn sd-file-label" title="导入剧本" aria-label="导入剧本"><i class="fa-solid fa-file-import"></i><input type="file" accept="application/json" class="sd-import-templates"></label>
-          <button type="button" class="sd-icon-btn sd-export-mode-toggle ${templateExportMode ? 'active' : ''}" title="导出剧本" aria-label="导出剧本"><i class="fa-solid fa-file-export"></i></button>
-        </div>
-        <span class="sd-tpl-count">${templates.length} 个</span>
-      </div>
-      ${exportBar}
-      <div class="sd-template-list">${templates.length ? templates.map(renderTemplateCard).join('') : '<p class="sd-muted">暂无剧本</p>'}</div>
-    </section>`;
+    <section class="sd-card">${renderLibrarySection(templateLibraryCfg())}</section>`;
 }
 
-function renderTemplateCard(t) {
-  const tags = sanitizeTemplateTags(t.tags);
-  const tagHtml = tags.length
-    ? `<div class="sd-template-tags">${tags.map((tag) => `<span class="sd-template-tag">${htmlEscape(tag)}<button type="button" class="sd-template-remove-tag" data-id="${htmlEscape(t.id)}" data-tag="${htmlEscape(tag)}" title="删除标签" aria-label="删除标签"><i class="fa-solid fa-xmark"></i></button></span>`).join('')}</div>`
-    : '<div class="sd-template-tags"><span class="sd-muted">暂无标签</span></div>';
-  const pick = templateExportMode
-    ? `<label class="sd-template-pick" title="选择导出"><input type="checkbox" class="sd-template-select" data-id="${htmlEscape(t.id)}" ${templateExportSelection.has(t.id) ? 'checked' : ''}></label>`
-    : '';
-  return `<article class="sd-template-card ${templateExportMode ? 'sd-export-mode' : ''}">${pick}<div class="sd-template-main"><h4>${htmlEscape(t.name || '未命名剧本')}</h4>${tagHtml}</div><div class="sd-button-row sd-template-actions"><button type="button" class="sd-btn sd-load-template" data-id="${htmlEscape(t.id)}">载入</button><button type="button" class="sd-icon-btn sd-add-template-tag" data-id="${htmlEscape(t.id)}" title="添加标签" aria-label="添加标签"><i class="fa-solid fa-plus"></i></button><button type="button" class="sd-icon-btn sd-danger sd-delete-template" data-id="${htmlEscape(t.id)}" title="删除剧本" aria-label="删除剧本"><i class="fa-solid fa-trash-can"></i></button></div></article>`;
-}
+
 
 function renderContextTab() {
   const opts = settings.contextOptions;
@@ -1925,8 +2091,10 @@ function renderDirectorSettingsTab() {
       <textarea class="text_pole sd-textarea sd-system-prompt" spellcheck="false">${htmlEscape(settings.systemPrompt || DEFAULT_SYSTEM_PROMPT)}</textarea>
     </section>
     <section class="sd-card">
-      <h3>输出格式</h3>
-      <textarea class="text_pole sd-textarea sd-output-schema" spellcheck="false">${htmlEscape(settings.outputSchemaText || JSON_SCHEMA_TEXT)}</textarea>
+      <details class="sd-context-block" data-acc="output-schema">
+        <summary><b>输出格式</b><span class="sd-summary-note">推演返回的 JSON 结构，一般无需改动</span></summary>
+        <textarea class="text_pole sd-textarea sd-output-schema" spellcheck="false">${htmlEscape(settings.outputSchemaText || JSON_SCHEMA_TEXT)}</textarea>
+      </details>
       <div class="sd-button-row"><button class="sd-btn sd-save-director-settings">保存幕后</button><button class="sd-btn sd-reset-system">恢复默认</button></div>
     </section>`;
 }
@@ -2103,70 +2271,66 @@ function bindActiveTabEvents(root) {
   root.querySelector('.sd-save-template')?.addEventListener('click', async () => {
     const name = await promptInput('保存到剧本库', '剧本名称：', '我的剧本');
     if (!name) return;
-    settings.templates.push({ id: uid('tpl'), name, tags: [], content: root.querySelector('.sd-blueprint')?.value || DEFAULT_BLUEPRINT, createdAt: new Date().toISOString() });
+    settings.templates.push({ id: uid('tpl'), name, folder: '', content: root.querySelector('.sd-blueprint')?.value || DEFAULT_BLUEPRINT, createdAt: new Date().toISOString() });
     saveSettings();
     renderModal();
   });
-  root.querySelectorAll('.sd-load-template').forEach((el) => el.addEventListener('click', async () => {
-    const t = settings.templates.find((x) => x.id === el.dataset.id);
-    if (!t) return;
-    getChatStore().blueprint = t.content;
-    getChatStore().blueprintEdited = true;
-    await saveMetadata();
-    toast('已载入剧本。', 'success');
-    renderModal();
-  }));
-  root.querySelectorAll('.sd-delete-template').forEach((el) => el.addEventListener('click', async () => {
-    const yes = await confirmDialog('删除剧本', '确认删除这个剧本？');
-    if (!yes) return;
-    settings.templates = (settings.templates || []).filter((x) => x.id !== el.dataset.id);
-    ctx().extensionSettings[MODULE_NAME].templates = settings.templates;
-    templateExportSelection.delete(el.dataset.id);
-    saveSettings();
-    toast('已删除。', 'success');
-    renderModal();
-  }));
-  root.querySelectorAll('.sd-add-template-tag').forEach((el) => el.addEventListener('click', async () => {
-    const t = settings.templates.find((x) => x.id === el.dataset.id);
-    if (!t) return;
-    const raw = await promptInput('添加剧本标签', '单个上限4字，多个可用逗号分隔', '悬疑');
-    if (!raw) return;
-    t.tags = sanitizeTemplateTags([...(t.tags || []), ...String(raw).split(/[，,\s]+/)]);
-    saveSettings();
-    renderModal();
-  }));
-  root.querySelectorAll('.sd-template-remove-tag').forEach((el) => el.addEventListener('click', () => {
-    const t = settings.templates.find((x) => x.id === el.dataset.id);
-    if (!t) return;
-    t.tags = sanitizeTemplateTags(t.tags).filter((tag) => tag !== el.dataset.tag);
-    saveSettings();
-    renderModal();
-  }));
 
-  root.querySelector('.sd-export-mode-toggle')?.addEventListener('click', () => {
-    templateExportMode = !templateExportMode;
-    if (!templateExportMode) templateExportSelection.clear();
-    renderModal();
+  bindLibraryEvents(root, templateLibraryCfg, {
+    onLoad: async (id) => {
+      const t = (settings.templates || []).find((x) => x.id === id);
+      if (!t) return;
+      getChatStore().blueprint = t.content;
+      getChatStore().blueprintEdited = true;
+      await saveMetadata();
+      toast('已载入剧本。', 'success');
+      renderModal();
+    },
+    onEdit: async (id) => {
+      const t = (settings.templates || []).find((x) => x.id === id);
+      if (!t) return;
+      const edited = await promptLibraryEdit({
+        dialogTitle: '编辑剧本', nameLabel: '剧本名称', folderLabel: '文件夹', contentLabel: '剧本内容',
+        name: t.name, folder: t.folder, content: t.content,
+      });
+      if (edited === null) return;
+      if (!edited.content) return toast('剧本内容不能为空。', 'warning');
+      t.name = edited.name || t.name;
+      t.folder = edited.folder;
+      t.content = edited.content;
+      saveSettings();
+      toast('剧本已更新。', 'success');
+      renderModal();
+    },
+    onDelete: async (id) => {
+      const yes = await confirmDialog('删除剧本', '确认删除这个剧本？');
+      if (!yes) return;
+      settings.templates = (settings.templates || []).filter((x) => x.id !== id);
+      ctx().extensionSettings[MODULE_NAME].templates = settings.templates;
+      templateExportSelection.delete(id);
+      saveSettings();
+      toast('已删除。', 'success');
+      renderModal();
+    },
+    onToggleExport: () => {
+      templateExportMode = !templateExportMode;
+      if (!templateExportMode) templateExportSelection.clear();
+      renderModal();
+    },
+    onCancelExport: () => {
+      templateExportMode = false;
+      templateExportSelection.clear();
+      renderModal();
+    },
+    onConfirmExport: () => {
+      if (!templateExportSelection.size) return toast('请先勾选要导出的剧本。', 'warning');
+      exportTemplates([...templateExportSelection]);
+      templateExportMode = false;
+      templateExportSelection.clear();
+      renderModal();
+    },
+    onImport: importTemplates,
   });
-  root.querySelector('.sd-cancel-export')?.addEventListener('click', () => {
-    templateExportMode = false;
-    templateExportSelection.clear();
-    renderModal();
-  });
-  root.querySelectorAll('.sd-template-select').forEach((el) => el.addEventListener('change', () => {
-    if (el.checked) templateExportSelection.add(el.dataset.id);
-    else templateExportSelection.delete(el.dataset.id);
-    const span = root.querySelector('.sd-confirm-export span');
-    if (span) span.textContent = String(templateExportSelection.size);
-  }));
-  root.querySelector('.sd-confirm-export')?.addEventListener('click', () => {
-    if (!templateExportSelection.size) return toast('请先勾选要导出的剧本。', 'warning');
-    exportTemplates([...templateExportSelection]);
-    templateExportMode = false;
-    templateExportSelection.clear();
-    renderModal();
-  });
-  root.querySelector('.sd-import-templates')?.addEventListener('change', importTemplates);
 
   root.querySelectorAll('.sd-opt').forEach((el) => el.addEventListener('change', () => {
     settings.contextOptions[el.dataset.key] = el.checked;
@@ -2236,6 +2400,9 @@ function bindActiveTabEvents(root) {
     settings.injectDepth = Math.max(0, Math.min(20, Number(root.querySelector('.sd-inject-depth')?.value ?? 2)));
     settings.systemPrompt = root.querySelector('.sd-system-prompt')?.value || DEFAULT_SYSTEM_PROMPT;
     settings.outputSchemaText = root.querySelector('.sd-output-schema')?.value || JSON_SCHEMA_TEXT;
+    // 与默认一致存哈希（未改动，随迭代更新），不一致清空（已 DIY，保留记忆）
+    settings.systemPromptHash = settings.systemPrompt === DEFAULT_SYSTEM_PROMPT ? hashText(DEFAULT_SYSTEM_PROMPT) : '';
+    settings.outputSchemaHash = settings.outputSchemaText === JSON_SCHEMA_TEXT ? hashText(JSON_SCHEMA_TEXT) : '';
     saveSettings();
     await applyDirectorInjection();
     toast('设置已保存。', 'success');
@@ -2244,6 +2411,8 @@ function bindActiveTabEvents(root) {
     settings.systemPrompt = DEFAULT_SYSTEM_PROMPT;
     settings.outputSchemaText = JSON_SCHEMA_TEXT;
     settings.promptRevision = PROMPT_REVISION;
+    settings.systemPromptHash = hashText(DEFAULT_SYSTEM_PROMPT);
+    settings.outputSchemaHash = hashText(JSON_SCHEMA_TEXT);
     saveSettings();
     renderModal();
   });
@@ -2367,7 +2536,7 @@ async function importTemplates(event) {
     for (const item of incoming) {
       if (!item?.content) continue;
       const id = item.id && !(settings.templates || []).some((tpl) => tpl.id === item.id) ? item.id : uid('tpl');
-      settings.templates.push({ id, name: item.name || '导入剧本', tags: sanitizeTemplateTags(item.tags), content: item.content, createdAt: item.createdAt || new Date().toISOString() });
+      settings.templates.push({ id, name: item.name || '导入剧本', folder: sanitizeFolder(item.folder || (Array.isArray(item.tags) ? item.tags[0] : '')), content: item.content, createdAt: item.createdAt || new Date().toISOString() });
     }
     saveSettings();
     toast('剧本已导入。', 'success');
@@ -2440,18 +2609,22 @@ async function buildTheaterPresetText() {
   return output.trim();
 }
 
-// 未读取预设时，默认调取当前角色设定 / 用户人设 / 世界书（与预设互斥，避免设定重复发送）
+// 未读取预设时，默认注入当前聊天设定：角色设定 + 用户人设 + 当前角色绑定的世界书（与预设互斥，避免设定重复发送）
 async function buildTheaterDefaultText() {
   let output = '';
   const charDesc = cleanContextText(await resolveMacro(getCharacterDescription()));
   if (charDesc) output += `\n【当前角色设定】\n${getCharacterName()}\n${charDesc}\n`;
   const userDesc = cleanContextText(await resolveMacro(getPersonaDescription()));
   if (userDesc) output += `\n【用户人设】\n${getPersonaName()}\n${userDesc}\n`;
-  for (const wbName of getSelectedWorldBookNames()) {
-    const entries = contextScanCache.worldBooks?.[wbName] || [];
+  // 直接读取当前角色绑定的世界书全部启用条目（不依赖扩展页的勾选与缓存）
+  const boundNames = uniqueClean([...detectBoundWorldBookNames(), ...(contextScanCache.boundWorldBookNames || [])]);
+  for (const wbName of boundNames) {
+    let entries = contextScanCache.worldBooks?.[wbName];
+    if (!entries || !entries.length) {
+      try { entries = await getWorldBookEntries(wbName); } catch (_) { entries = []; }
+    }
     for (const [index, item] of (entries || []).entries()) {
-      const itemId = getContextItemId(item, index);
-      if (!isWorldItemSelected(wbName, itemId)) continue;
+      if (item?.enabled === false || item?.disable === true) continue;
       const title = item.name || item.comment || (Array.isArray(item.key) ? item.key.join(', ') : item.key) || `世界书条目 ${index + 1}`;
       let content = await resolveMacro(item.content || item.text || '');
       content = processRandomMacros(content);
@@ -2469,6 +2642,23 @@ function isTheaterFavorited(id) {
   return getTheater().favorites.some((f) => f.id === id);
 }
 
+function theaterScriptLibraryCfg() {
+  const t = getTheater();
+  return {
+    ns: 'script',
+    title: '剧札',
+    items: t.scripts || [],
+    getName: (s) => s.title,
+    getFolder: (s) => s.folder,
+    getSearch: () => String(t.scriptSearch || ''),
+    setSearch: (v) => { getTheater().scriptSearch = v; },
+    exportMode: theaterExportMode,
+    selection: theaterExportSelection,
+    emptyText: '剧札空空，写一幕番外吧',
+    searchPlaceholder: '搜索剧札标题…',
+  };
+}
+
 function renderTheaterTab() {
   if (theaterView?.mode === 'read') return renderTheaterReadView(theaterView.scene);
   if (theaterView?.mode === 'favorites') return renderTheaterFavoritesView();
@@ -2477,31 +2667,27 @@ function renderTheaterTab() {
   const presetNames = uniqueClean([t.presetName, getCurrentPresetName(), ...(contextScanCache.presetNames || listPresetNames())]).filter((n) => !isNoisePresetName(n));
   if (t.presetName) initTheaterPresetSelection(t.presetName);
   const out = t.lastOutput;
-  const scriptSearch = String(t.scriptSearch || '');
-  const matched = scriptSearch
-    ? t.scripts.filter((s) => String(s.title || '').toLowerCase().includes(scriptSearch.toLowerCase()))
-    : t.scripts;
   return `
     <section class="sd-card">
-      <h3>番外小剧场</h3>
-      <label>剧场 API 预设</label>
+      <h3>番外小剧场栏目组</h3>
+      <label>API</label>
       <div class="sd-inline-field">
         <select class="text_pole sd-theater-api-select">
-          <option value="">跟随千幕主 API 设置</option>
+          <option value="">跟随当前 API 设置</option>
           ${profiles.map((p) => `<option value="${htmlEscape(p.id)}" ${p.id === t.apiProfileId ? 'selected' : ''}>${htmlEscape(p.name || p.model || '未命名API')}</option>`).join('')}
         </select>
       </div>
-      <label>读取预设</label>
+      <label>预设</label>
       <div class="sd-inline-field">
         <select class="text_pole sd-theater-preset-select">
-          <option value="">尚未读取</option>
+          <option value="">无</option>
           ${presetNames.map((n) => `<option value="${htmlEscape(n)}" ${n === t.presetName ? 'selected' : ''}>${htmlEscape(n)}</option>`).join('')}
         </select>
         <button type="button" class="sd-btn sd-mini-btn sd-theater-refresh-preset"><i class="fa-solid fa-rotate"></i>读取</button>
       </div>
       ${t.presetName
         ? renderTheaterPresetEntries(t.presetName)
-        : '<p class="sd-muted sd-inject-hint">未读取预设时，默认注入当前聊天设定；读取预设后将改用预设条目，两者互斥，以免设定重复发送。</p>'}
+        : '<p class="sd-muted sd-inject-hint">未载入预设时，默认注入当前聊天设定；读取预设后将改用预设条目，两者互斥</p>'}
       <label>此幕指令</label>
       <textarea class="text_pole sd-textarea sd-theater-instruction" spellcheck="false" placeholder="${htmlEscape(THEATER_INSTRUCTION_PLACEHOLDER)}">${htmlEscape(t.instruction || '')}</textarea>
       <div class="sd-button-row">
@@ -2515,11 +2701,7 @@ function renderTheaterTab() {
         <button class="sd-btn sd-mini-btn sd-theater-open-latest"><i class="fa-solid fa-book-open"></i>阅读</button>
       </div>` : ''}
     </section>
-    <section class="sd-card">
-      <div class="sd-section-title"><h3>剧札</h3><span>${t.scripts.length} 篇</span></div>
-      <input type="search" class="text_pole sd-theater-script-search" placeholder="搜索剧札标题…" value="${htmlEscape(scriptSearch)}">
-      <div class="sd-theater-script-list sd-scroll">${matched.length ? matched.map(renderTheaterScriptCard).join('') : (scriptSearch ? '<p class="sd-muted">没有匹配的剧札。</p>' : '<p class="sd-muted">剧札空空，写一幕番外吧。</p>')}</div>
-    </section>`;
+    <section class="sd-card">${renderLibrarySection(theaterScriptLibraryCfg())}</section>`;
 }
 
 function renderTheaterReadView(scene) {
@@ -2536,27 +2718,27 @@ function renderTheaterReadView(scene) {
         <h3>${htmlEscape(scene.title || '番外小剧场')}</h3>
         <button class="sd-icon-btn sd-theater-reader-fav" title="收藏"><i class="${fav ? 'fa-solid fa-star sd-fav-on' : 'fa-regular fa-star'}"></i></button>
       </div>
-      <div class="sd-reader-pane">${bodyHtml}</div>
+      ${bodyHtml}
     </section>`;
 }
 
 function renderTheaterFavoritesView() {
   const t = getTheater();
   const rows = t.favorites.length
-    ? t.favorites.map((f) => `<article class="sd-script-row"><div class="sd-script-main"><h4>${htmlEscape(f.title || '番外')}</h4></div>
-      <div class="sd-script-actions">
-        <button type="button" class="sd-btn sd-mini-btn sd-fav-read" data-id="${htmlEscape(f.id)}">阅读</button>
-        <button type="button" class="sd-icon-btn sd-danger sd-fav-remove" data-id="${htmlEscape(f.id)}" title="移出收藏"><i class="fa-solid fa-star-half-stroke"></i></button>
+    ? t.favorites.map((f) => `<article class="sd-lib-row"><div class="sd-lib-main"><h4>${htmlEscape(f.title || '番外')}</h4></div>
+      <div class="sd-lib-actions">
+        <button type="button" class="sd-btn sd-lib-load sd-fav-read" data-id="${htmlEscape(f.id)}">阅读</button>
+        <button type="button" class="sd-icon-btn sd-icon-sm sd-danger sd-fav-remove" data-id="${htmlEscape(f.id)}" title="移出收藏"><i class="fa-solid fa-star-half-stroke"></i></button>
       </div></article>`).join('')
     : '<p class="sd-muted">收藏夹还空着。</p>';
   return `
     <section class="sd-card sd-reader-card">
       <div class="sd-reader-bar">
         <button class="sd-btn sd-mini-btn sd-theater-reader-back"><i class="fa-solid fa-arrow-left"></i>返回</button>
-        <h3>收藏夹 · ${t.favorites.length} 篇</h3>
+        <h3>收藏夹</h3>
         <span></span>
       </div>
-      <div class="sd-theater-script-list sd-scroll" style="padding:4px 2px">${rows}</div>
+      <div class="sd-lib-list sd-scroll" style="padding:4px 2px">${rows}</div>
     </section>`;
 }
 
@@ -2570,15 +2752,6 @@ function renderTheaterPresetEntries(presetName) {
     return `<label class="sd-source-row"><input type="checkbox" class="sd-theater-preset-item" data-id="${htmlEscape(String(id))}" ${checked}><span>${htmlEscape(title)}</span></label>`;
   }).join('');
   return `<details class="sd-context-block" data-acc="theater-preset-entries" open><summary><b>预设条目</b></summary><div class="sd-source-list">${rows}</div></details>`;
-}
-
-function renderTheaterScriptCard(s) {
-  return `<article class="sd-script-row"><div class="sd-script-main"><h4>${htmlEscape(s.title || '未命名番外')}</h4></div>
-    <div class="sd-script-actions">
-      <button type="button" class="sd-btn sd-script-load sd-theater-load-script" data-id="${htmlEscape(s.id)}">载入</button>
-      <button type="button" class="sd-icon-btn sd-icon-sm sd-theater-edit-script" data-id="${htmlEscape(s.id)}" title="编辑"><i class="fa-solid fa-pencil"></i></button>
-      <button type="button" class="sd-icon-btn sd-icon-sm sd-danger sd-theater-delete-script" data-id="${htmlEscape(s.id)}" title="删除"><i class="fa-solid fa-trash-can"></i></button>
-    </div></article>`;
 }
 
 async function stageTheaterScene() {
@@ -2752,7 +2925,7 @@ function bindTheaterTabEvents(root) {
     const name = await promptInput('保存到剧札', '为这套剧场指令取个名字：', snip(instruction, 16));
     if (!name) return;
     const t = getTheater();
-    t.scripts.unshift({ id: uid('script'), title: name, instruction, createdAt: new Date().toISOString() });
+    t.scripts.unshift({ id: uid('script'), title: name, folder: '', instruction, createdAt: new Date().toISOString() });
     t.scripts = t.scripts.slice(0, 50);
     saveSettings();
     toast('已存入剧札。', 'success');
@@ -2760,52 +2933,107 @@ function bindTheaterTabEvents(root) {
   });
   root.querySelector('.sd-theater-open-latest')?.addEventListener('click', () => openTheaterReader(getTheater().lastOutput));
   root.querySelector('.sd-theater-open-favorites')?.addEventListener('click', openTheaterFavorites);
-  root.querySelector('.sd-theater-script-search')?.addEventListener('input', (e) => {
-    getTheater().scriptSearch = e.target.value || '';
-    const list = root.querySelector('.sd-theater-script-list');
-    if (!list) return;
-    const q = String(e.target.value || '').toLowerCase();
-    const matched = q ? getTheater().scripts.filter((s) => String(s.title || '').toLowerCase().includes(q)) : getTheater().scripts;
-    list.innerHTML = matched.length ? matched.map(renderTheaterScriptCard).join('') : (q ? '<p class="sd-muted">没有匹配的剧札。</p>' : '<p class="sd-muted">剧札空空，写一幕番外吧。</p>');
-    bindTheaterScriptCardEvents(root);
+
+  bindLibraryEvents(root, theaterScriptLibraryCfg, {
+    onLoad: (id) => {
+      const s = getTheater().scripts.find((x) => x.id === id);
+      if (!s) return;
+      const t = getTheater();
+      t.instruction = s.instruction || '';
+      saveSettings();
+      const ta = root.querySelector('.sd-theater-instruction');
+      if (ta) ta.value = t.instruction;
+      toast('已载入到此幕指令。', 'success');
+    },
+    onEdit: async (id) => {
+      const t = getTheater();
+      const s = t.scripts.find((x) => x.id === id);
+      if (!s) return;
+      const edited = await promptLibraryEdit({
+        dialogTitle: '编辑剧札', nameLabel: '剧札标题', folderLabel: '文件夹', contentLabel: '剧场指令',
+        name: s.title, folder: s.folder, content: s.instruction,
+      });
+      if (edited === null) return;
+      if (!edited.content) return toast('剧场指令不能为空。', 'warning');
+      s.title = edited.name || s.title;
+      s.folder = edited.folder;
+      s.instruction = edited.content;
+      saveSettings();
+      toast('剧札已更新。', 'success');
+      renderModal();
+    },
+    onDelete: async (id) => {
+      const yes = await confirmDialog('删除剧札', '确认删除这套剧场指令？');
+      if (!yes) return;
+      const t = getTheater();
+      t.scripts = t.scripts.filter((x) => x.id !== id);
+      theaterExportSelection.delete(id);
+      saveSettings();
+      toast('已删除。', 'success');
+      renderModal();
+    },
+    onToggleExport: () => {
+      theaterExportMode = !theaterExportMode;
+      if (!theaterExportMode) theaterExportSelection.clear();
+      renderModal();
+    },
+    onCancelExport: () => {
+      theaterExportMode = false;
+      theaterExportSelection.clear();
+      renderModal();
+    },
+    onConfirmExport: () => {
+      if (!theaterExportSelection.size) return toast('请先勾选要导出的剧札。', 'warning');
+      exportTheaterScripts([...theaterExportSelection]);
+      theaterExportMode = false;
+      theaterExportSelection.clear();
+      renderModal();
+    },
+    onImport: importTheaterScripts,
   });
-  bindTheaterScriptCardEvents(root);
 }
 
-function bindTheaterScriptCardEvents(root) {
-  root.querySelectorAll('.sd-theater-load-script').forEach((el) => el.addEventListener('click', () => {
-    const s = getTheater().scripts.find((x) => x.id === el.dataset.id);
-    if (!s) return;
+function exportTheaterScripts(ids = null) {
+  const all = getTheater().scripts || [];
+  const selectedIds = Array.isArray(ids) ? ids.filter(Boolean) : null;
+  const scripts = selectedIds?.length ? all.filter((s) => selectedIds.includes(s.id)) : all;
+  if (!scripts.length) return toast('请先选择要导出的剧札。', 'warning');
+  const blob = new Blob([JSON.stringify({ version: 1, type: 'theater-scripts', scripts }, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `qianmu-scripts-${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  toast(`已导出 ${scripts.length} 篇剧札。`, 'success');
+}
+
+async function importTheaterScripts(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  try {
+    const text = await file.text();
+    const data = JSON.parse(text);
+    const incoming = Array.isArray(data) ? data : (data.scripts || data.templates);
+    if (!Array.isArray(incoming)) throw new Error('没有找到剧札数组。');
     const t = getTheater();
-    t.instruction = s.instruction || '';
+    for (const item of incoming) {
+      const instruction = item?.instruction || item?.content;
+      if (!instruction) continue;
+      const id = item.id && !t.scripts.some((s) => s.id === item.id) ? item.id : uid('script');
+      t.scripts.unshift({ id, title: item.title || item.name || '导入剧札', folder: sanitizeFolder(item.folder), instruction, createdAt: item.createdAt || new Date().toISOString() });
+    }
+    t.scripts = t.scripts.slice(0, 50);
     saveSettings();
-    const ta = root.querySelector('.sd-theater-instruction');
-    if (ta) ta.value = t.instruction;
-    toast('已载入到此幕指令。', 'success');
-  }));
-  root.querySelectorAll('.sd-theater-edit-script').forEach((el) => el.addEventListener('click', async () => {
-    const t = getTheater();
-    const s = t.scripts.find((x) => x.id === el.dataset.id);
-    if (!s) return;
-    const name = await promptInput('编辑剧札', '修改剧札标题：', s.title || '');
-    if (name === null) return;
-    const text = await promptInput('编辑剧札', '修改剧场指令：', s.instruction || '');
-    if (text === null) return;
-    s.title = String(name || s.title || '').trim() || s.title;
-    s.instruction = String(text || '').trim();
-    saveSettings();
-    toast('剧札已更新。', 'success');
+    toast('剧札已导入。', 'success');
     renderModal();
-  }));
-  root.querySelectorAll('.sd-theater-delete-script').forEach((el) => el.addEventListener('click', async () => {
-    const yes = await confirmDialog('删除剧札', '确认删除这套剧场指令？');
-    if (!yes) return;
-    const t = getTheater();
-    t.scripts = t.scripts.filter((x) => x.id !== el.dataset.id);
-    saveSettings();
-    toast('已删除。', 'success');
-    renderModal();
-  }));
+  } catch (error) {
+    toast(`导入失败：${error.message}`, 'error');
+  } finally {
+    event.target.value = '';
+  }
 }
 
 function renderInputMenuEntry() {
@@ -2942,7 +3170,6 @@ function cleanupRuntime(resetSettings = false) {
   clearDirectorInjection();
   document.getElementById(SETTINGS_PANEL_ID)?.remove();
   document.getElementById(MODAL_ID)?.remove();
-  document.getElementById(THEATER_READER_ID)?.remove();
   document.getElementById(FLOAT_ID)?.remove();
   document.getElementById(INPUT_ENTRY_ID)?.remove();
   document.getElementById(INPUT_BUTTON_ID)?.remove();
