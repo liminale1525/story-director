@@ -5,7 +5,7 @@
 /* ---------- 0. 基础 ---------- */
 #story-director-settings { display: none !important; }
 
-/* ST 通知层级 */
+/* ST 通知层级：用 html body 前缀拔高特异度，确保盖过 ST 核心 style.css 中同为 #toast-container !important 的规则（同特异度时仅靠加载顺序，不可靠） */
 html body #toast-container,
 html body #toast-container.toast-top-center,
 html body #toast-container.toast-top-right,
@@ -1464,6 +1464,7 @@ html body #zmer-universal-toast-theme-layer { z-index: 2147483646 !important; }
   border-radius: 10px !important;
   background: var(--sd-glass-weak) !important;
   overflow: hidden;
+  flex: 0 0 auto;          /* 不被父级 flex 压缩，由 .sd-lib-list 整体滚动 */
 }
 #story-director-modal .sd-lib-folder > summary {
   display: flex !important;
@@ -1478,7 +1479,7 @@ html body #zmer-universal-toast-theme-layer { z-index: 2147483646 !important; }
 #story-director-modal .sd-lib-folder > summary i { opacity: .7; }
 #story-director-modal .sd-lib-folder > summary b { flex: 1 1 auto; min-width: 0; font-weight: 600; }
 #story-director-modal .sd-lib-folder > summary span { color: var(--sd-muted); font-size: .9em; }
-#story-director-modal .sd-lib-folder-body { display: flex; flex-direction: column; gap: 5px; padding: 0 8px 8px; max-height: 280px; overflow-y: auto; scrollbar-width: thin; }
+#story-director-modal .sd-lib-folder-body { display: flex; flex-direction: column; gap: 5px; padding: 0 8px 8px; }
 
 /* 条目：紧凑单行 */
 #story-director-modal .sd-lib-row {
@@ -1489,6 +1490,7 @@ html body #zmer-universal-toast-theme-layer { z-index: 2147483646 !important; }
   border: 1px solid var(--sd-border);
   border-radius: 10px !important;
   background: var(--sd-glass-weak);
+  flex: 0 0 auto;
 }
 #story-director-modal .sd-lib-folder-body .sd-lib-row { background: var(--sd-glass); }
 #story-director-modal .sd-lib-main { flex: 1 1 auto; min-width: 0; }
