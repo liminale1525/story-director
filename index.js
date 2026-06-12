@@ -12,7 +12,7 @@ const INPUT_ENTRY_ID = 'story-director-input-entry';
 const INPUT_BUTTON_ID = 'story-director-input-button';
 
 const PROMPT_REVISION = 5;
-const BUILTIN_THEATER_REVISION = 1;   // 内置剧场组版本，升一档即重置内置项（保留用户自建剧札）
+const BUILTIN_THEATER_REVISION = 2;   // 内置剧场组版本，升一档即重置内置项（保留用户自建剧札）
 const FIXED_METRICS = ['张力', '情感', '悬念', '节奏'];
 const LOG_LIMIT = 5;
 const LOG_CLIP = 80000;
@@ -2842,6 +2842,14 @@ function seedBuiltinTheaters() {
   saveSettings();
 }
 
+// 上限只约束用户自建剧札（最多 50 条），内置项全部保留，不被裁掉
+function capUserScripts(scripts) {
+  const list = Array.isArray(scripts) ? scripts : [];
+  const builtins = list.filter((s) => s.builtin);
+  const user = list.filter((s) => !s.builtin).slice(0, 50);
+  return [...user, ...builtins];
+}
+
 function theaterApiConfig() {
   const t = getTheater();
   const profile = (settings.apiProfiles || []).find((p) => p.id === t.apiProfileId);
@@ -3260,7 +3268,7 @@ function bindTheaterTabEvents(root) {
     if (!result.name) return toast('请为这一幕取个剧名。', 'warning');
     const t = getTheater();
     t.scripts.unshift({ id: uid('script'), title: result.name, folder: result.folder || '', instruction, createdAt: new Date().toISOString() });
-    t.scripts = t.scripts.slice(0, 50);
+    t.scripts = capUserScripts(t.scripts);
     saveSettings();
     toast('已存入剧札。', 'success');
     renderModal();
@@ -3360,7 +3368,7 @@ async function importTheaterScripts(event) {
       const id = item.id && !t.scripts.some((s) => s.id === item.id) ? item.id : uid('script');
       t.scripts.unshift({ id, title: item.title || item.name || '导入剧札', folder: sanitizeFolder(item.folder), instruction, createdAt: item.createdAt || new Date().toISOString() });
     }
-    t.scripts = t.scripts.slice(0, 50);
+    t.scripts = capUserScripts(t.scripts);
     saveSettings();
     toast('剧札已导入。', 'success');
     renderModal();
