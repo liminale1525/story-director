@@ -3,7 +3,7 @@
 
 const MODULE_NAME = 'story_director_liminale';
 const EXTENSION_NAME = '千幕';
-const VERSION = '1.2.2';
+const VERSION = '1.2.3';
 const SETTINGS_PANEL_ID = 'story-director-settings';
 const MODAL_ID = 'story-director-modal';
 const FLOAT_ID = 'story-director-float';
@@ -176,6 +176,8 @@ const DEFAULT_SETTINGS = Object.freeze({
   availableModels: [],
   apiProfiles: [],
   temperature: 0.75,
+  maxOutputTokens: 32000,
+  contextBudget: 1000000,
   streamEnabled: false,
   floatingButton: true,
   floatPosition: { x: null, y: null },
@@ -222,13 +224,14 @@ const DEFAULT_SETTINGS = Object.freeze({
     lastOutput: null,
     readerFontScale: 'medium',
     useChatHistory: true,
-    historyDepth: 12,
+    historyDepth: 5,
   },
 });
 
 let settings = null;
 let activeTab = 'dashboard';
 let theaterView = null; // null=常规；{mode:'read', scene}=阅读；{mode:'favorites'}=收藏夹
+let theaterScriptSource = '';   // 当前此幕指令来自哪个剧札标题；空=即兴（手动输入/未保存）
 let contextScanCache = { presets: {}, worldBooks: {}, presetNames: [], worldBookNames: [], currentPresetName: '', boundWorldBookNames: [], presetScannedAt: '', worldScannedAt: '' };
 let busy = false;
 let abortController = null;
@@ -521,20 +524,35 @@ function getChatHistoryText() {
   const chat = Array.isArray(context.chat) ? context.chat : [];
   const max = Math.max(1, Math.min(200, Number(settings.contextOptions.contextDepth || 5)));
   const recent = chat.slice(-max);
-  return recent.map((m) => {
+  const lines = recent.map((m) => {
     const role = m.is_user ? '<user>' : (m.name || '<char>');
     const text = cleanContextText(m.mes || '');
     return text ? `${role}: ${text}` : '';
-  }).filter(Boolean).join('\n');
+  }).filter(Boolean);
+  return capByBudget(lines).join('\n');
 }
 
-// 幕外专用：取最近 N 层「可见」楼层原文（过滤被记忆/隐藏插件标记的 is_system 楼），并设字符软上限防爆 token。
-// 与推演 getChatHistoryText 完全独立：自己的楼层数、自己的截断，互不污染。
-const THEATER_HISTORY_CHAR_CAP = 8000;
+// 上下文长度预算（字符近似 token）软裁剪：从最近一层往前累加，超出即停，优先保留最近楼层。
+// 全局统一上限，推演与幕外各自独立调用、互不污染。0 或未设视为不限。
+function capByBudget(lines) {
+  const budget = Number(settings.contextBudget || 0);
+  if (!(budget > 0)) return lines;
+  const kept = [];
+  let total = 0;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    total += lines[i].length + 1;
+    if (total > budget && kept.length) break;
+    kept.unshift(lines[i]);
+  }
+  return kept;
+}
+
+// 幕外专用：取最近 N 层「可见」楼层原文（过滤被记忆/隐藏插件标记的 is_system 楼），再走全局上下文长度软裁剪。
+// 与推演 getChatHistoryText 完全独立：自己的楼层数，互不污染。
 function getTheaterChatHistoryText() {
   const context = ctx();
   const chat = Array.isArray(context.chat) ? context.chat : [];
-  const depth = Math.max(1, Math.min(200, Number(getTheater().historyDepth || 12)));
+  const depth = Math.max(1, Math.min(200, Number(getTheater().historyDepth || 5)));
   const visible = chat.filter((m) => m && m.is_system !== true);
   const recent = visible.slice(-depth);
   const lines = recent.map((m) => {
@@ -542,15 +560,7 @@ function getTheaterChatHistoryText() {
     const text = cleanContextText(m.mes || '');
     return text ? `${role}: ${text}` : '';
   }).filter(Boolean);
-  // 字符软上限：从最近一层往前累加，超出即停，优先保留最近楼层
-  const kept = [];
-  let total = 0;
-  for (let i = lines.length - 1; i >= 0; i--) {
-    total += lines[i].length + 1;
-    if (total > THEATER_HISTORY_CHAR_CAP && kept.length) break;
-    kept.unshift(lines[i]);
-  }
-  return kept.join('\n');
+  return capByBudget(lines).join('\n');
 }
 
 function processRandomMacros(text) {
@@ -737,6 +747,35 @@ async function promptLibraryEdit({ dialogTitle, nameLabel, folderLabel, contentL
   const newContent = await promptInput(dialogTitle, `${contentLabel}：`, content || '');
   if (newContent === null) return null;
   return { name: String(newName || '').trim(), folder: sanitizeFolder(newFolder), content: String(newContent || '').trim() };
+}
+
+// 剧名 + 文件夹弹窗（保存到剧札用）：占位符提示、无默认填充
+async function promptNameAndFolder({ dialogTitle, namePlaceholder, name = '', folder = '' }) {
+  const context = ctx();
+  const Popup = context.Popup;
+  if (Popup && context.POPUP_TYPE) {
+    const wrap = document.createElement('div');
+    wrap.className = 'sd-lib-edit-form';
+    wrap.innerHTML = `
+      <input type="text" class="text_pole sd-nf-name" placeholder="${htmlEscape(namePlaceholder || '名称')}" style="width:100%;margin:0 0 10px">
+      <input type="text" class="text_pole sd-nf-folder" placeholder="文件夹（留空则不分类）" style="width:100%;margin:0">`;
+    wrap.querySelector('.sd-nf-name').value = name || '';
+    wrap.querySelector('.sd-nf-folder').value = folder || '';
+    try {
+      const popup = new Popup(wrap, context.POPUP_TYPE.CONFIRM, '', { okButton: '保存', cancelButton: '取消' });
+      const ok = await popup.show();
+      if (!ok) return null;
+      return {
+        name: String(wrap.querySelector('.sd-nf-name').value || '').trim(),
+        folder: sanitizeFolder(wrap.querySelector('.sd-nf-folder').value),
+      };
+    } catch (_) {}
+  }
+  const newName = await promptInput(dialogTitle, `${namePlaceholder || '名称'}：`, name || '');
+  if (newName === null) return null;
+  const newFolder = await promptInput(dialogTitle, '文件夹（留空不分类）：', folder || '');
+  if (newFolder === null) return null;
+  return { name: String(newName || '').trim(), folder: sanitizeFolder(newFolder) };
 }
 
 
@@ -1292,6 +1331,8 @@ async function callExternalApi(messages, onDelta = null, cfg = null) {
   abortController = new AbortController();
   const stream = !!settings.streamEnabled && typeof onDelta === 'function';
   const body = { model, messages, temperature: Number(temperature || 0.75), stream };
+  const maxTokens = Number(settings.maxOutputTokens || 0);
+  if (maxTokens > 0) body.max_tokens = maxTokens;
   const res = await fetch(`${base}/v1/chat/completions`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
@@ -2056,18 +2097,17 @@ function renderBlueprintTab() {
 
 function renderContextTab() {
   const opts = settings.contextOptions;
-  const charDesc = getCharacterDescription();
-  const userDesc = getPersonaDescription();
   return `
-    <details class="sd-accordion" data-acc="acc-base" open>
-      <summary><b>基础引用</b><span>勾选后将会作为千幕参考项</span></summary>
-      <div class="sd-base-grid">
+    <section class="sd-card sd-base-card">
+      <div class="sd-base-row">
         <label class="checkbox_label"><input type="checkbox" class="sd-opt" data-key="includeChatHistory" ${opts.includeChatHistory ? 'checked' : ''}> 上下文参考</label>
         <label class="sd-depth-field"><span>参考楼层数</span><input class="text_pole sd-context-depth" type="number" min="1" max="200" value="${htmlEscape(opts.contextDepth || 5)}"></label>
-        <div class="sd-fixed-ref sd-span-2"><span class="sd-fixed-ref-label">角色设定</span>${infoTag(getCharacterName())}${infoTag(`${estimateTokens(charDesc)} token`)}
-        <div class="sd-fixed-ref sd-span-2"><span class="sd-fixed-ref-label">用户人设</span>${infoTag(getPersonaName())}${infoTag(`${estimateTokens(userDesc)} token`)}
       </div>
-    </details>
+      <div class="sd-base-row">
+        <span class="sd-fixed-ref"><span class="sd-fixed-ref-label">当前角色</span>${infoTag(getCharacterName())}</span>
+        <span class="sd-fixed-ref"><span class="sd-fixed-ref-label">当前用户</span>${infoTag(getPersonaName())}</span>
+      </div>
+    </section>
     <details class="sd-accordion" data-acc="acc-tags" open>
       <summary><b>上下文处理</b><span>标签规则</span></summary>
       <div class="sd-tag-rule-list">${renderTagRules()}</div>
@@ -2249,8 +2289,19 @@ function renderPlugTab() {
       <label>模型</label>
       <div class="sd-inline-field"><select class="text_pole sd-model-select"><option value="">选择模型</option>${models.map((m) => `<option value="${htmlEscape(m)}" ${m === settings.model ? 'selected' : ''}>${htmlEscape(m)}</option>`).join('')}</select><button class="sd-btn sd-fetch-models"><i class="fa-solid fa-rotate"></i>拉取模型</button></div>
       <label>Temperature</label><input class="text_pole sd-temperature" type="number" min="0" max="2" step="0.05" value="${htmlEscape(settings.temperature)}">
+      <label>最大输出 token</label><input class="text_pole sd-max-output" type="number" min="0" step="256" placeholder="0 表示不限" value="${htmlEscape(settings.maxOutputTokens ?? 32000)}">
+      <label>上下文长度（字符近似）</label><input class="text_pole sd-context-budget" type="number" min="0" step="1000" placeholder="0 表示不限" value="${htmlEscape(settings.contextBudget ?? 1000000)}">
       <label class="checkbox_label"><input type="checkbox" class="sd-stream-toggle" ${settings.streamEnabled ? 'checked' : ''}> 流式传输</label>
       <div class="sd-button-row"><button class="sd-btn sd-test-api"><i class="fa-solid fa-plug-circle-check"></i>测试连接</button><button class="sd-btn sd-save-api">保存API</button><button class="sd-btn sd-save-api-profile">保存为预设</button></div>
+    </section>
+    <section class="sd-card">
+      <h3>配置备份</h3>
+      <p class="sd-muted">导出千幕的全部本地配置（剧本、剧札、标签规则、提示词、各项设置）。导入将覆盖当前配置。</p>
+      <div class="sd-button-row">
+        <button class="sd-btn sd-export-config"><i class="fa-solid fa-file-export"></i>导出配置</button>
+        <button class="sd-btn sd-import-config"><i class="fa-solid fa-file-import"></i>导入配置</button>
+        <input type="file" class="sd-import-config-file" accept="application/json,.json" hidden>
+      </div>
     </section>
     <section class="sd-card">
       <label class="checkbox_label"><input type="checkbox" class="sd-float-toggle" ${settings.floatingButton ? 'checked' : ''}> 显示悬浮球</label>
@@ -2537,9 +2588,14 @@ function bindActiveTabEvents(root) {
     settings.apiKey = root.querySelector('.sd-api-key')?.value || '';
     settings.model = root.querySelector('.sd-model-select')?.value || '';
     settings.temperature = Number(root.querySelector('.sd-temperature')?.value || 0.75);
+    settings.maxOutputTokens = Math.max(0, Number(root.querySelector('.sd-max-output')?.value || 0));
+    settings.contextBudget = Math.max(0, Number(root.querySelector('.sd-context-budget')?.value || 0));
     saveSettings();
     toast('API已保存。', 'success');
   });
+  root.querySelector('.sd-export-config')?.addEventListener('click', exportConfig);
+  root.querySelector('.sd-import-config')?.addEventListener('click', () => root.querySelector('.sd-import-config-file')?.click());
+  root.querySelector('.sd-import-config-file')?.addEventListener('change', importConfig);
   root.querySelector('.sd-test-api')?.addEventListener('click', async (e) => {
     const btn = e.currentTarget;
     const apiUrl = root.querySelector('.sd-api-url')?.value || '';
@@ -2634,6 +2690,60 @@ async function confirmDialog(title, text) {
   return globalThis.confirm(`${title}\n${text}`);
 }
 
+// API 凭据相关字段，导出时按用户选择决定是否一并带出
+const API_CONFIG_KEYS = ['apiUrl', 'apiKey', 'model', 'availableModels', 'apiProfiles', 'providerMode'];
+
+async function exportConfig() {
+  const includeApi = await confirmDialog('导出配置', '是否一并导出 API 配置（URL / Key / 模型 / 预设）？\n选「取消」则排除 API 凭据，仅导出其余全部配置。');
+  const snapshot = clone(settings);
+  if (!includeApi) {
+    for (const key of API_CONFIG_KEYS) delete snapshot[key];
+  }
+  const payload = { version: 1, type: 'qianmu-config', includeApi, exportedAt: new Date().toISOString(), settings: snapshot };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `qianmu-config-${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  toast(includeApi ? '配置已导出（含 API）。' : '配置已导出（不含 API）。', 'success');
+}
+
+async function importConfig(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  event.target.value = '';
+  let incoming;
+  try {
+    const data = JSON.parse(await file.text());
+    incoming = data?.settings && typeof data.settings === 'object' ? data.settings : null;
+    if (!incoming || data.type !== 'qianmu-config') throw new Error('格式不符');
+  } catch (_) {
+    return toast('导入失败：不是有效的千幕配置文件。', 'error');
+  }
+  const yes = await confirmDialog('导入配置', '导入将覆盖当前全部本地配置（剧本、剧札、标签规则、提示词、各项设置）。此操作不可撤销，确认导入？');
+  if (!yes) return;
+  const context = ctx();
+  const extensionSettings = context.extensionSettings || (context.extensionSettings = {});
+  // 覆盖式导入：以默认结构为底，套上导入内容；未包含 API 的文件则保留当前 API 凭据
+  const merged = clone(DEFAULT_SETTINGS);
+  Object.assign(merged, incoming);
+  const hasApi = API_CONFIG_KEYS.some((key) => typeof incoming[key] !== 'undefined');
+  if (!hasApi) {
+    for (const key of API_CONFIG_KEYS) merged[key] = settings[key];
+  }
+  extensionSettings[MODULE_NAME] = merged;
+  settings = getSettings();
+  saveSettings();
+  await applyDirectorInjection();
+  renderFloatButton();
+  renderModal();
+  toast('配置已导入并覆盖。', 'success');
+}
+
 function exportTemplates(ids = null) {
   const all = settings.templates || [];
   const selectedIds = Array.isArray(ids) ? ids.filter(Boolean) : null;
@@ -2686,7 +2796,7 @@ function getTheater() {
   if (!Array.isArray(t.favorites)) t.favorites = [];
   if (!isPlainObject(t.presetItems)) t.presetItems = {};
   if (typeof t.useChatHistory === 'undefined') t.useChatHistory = true;
-  if (typeof t.historyDepth === 'undefined') t.historyDepth = 12;
+  if (typeof t.historyDepth === 'undefined') t.historyDepth = 5;
   return t;
 }
 
@@ -2815,12 +2925,11 @@ function renderTheaterTab() {
       </div>
       ${t.presetName
         ? renderTheaterPresetEntries(t.presetName)
-        : '<p class="sd-muted sd-inject-hint">默认始终注入当前聊天的角色设定、用户人设与绑定世界书；读取预设后预设条目作为额外叠加</p>'}
+        : ''}
       <div class="sd-theater-history-row">
         <label class="checkbox_label"><input type="checkbox" class="sd-theater-use-history" ${t.useChatHistory !== false ? 'checked' : ''}> 衔接当前正文</label>
-        <label class="sd-depth-field"><span>参考楼层</span><input class="text_pole sd-theater-history-depth" type="number" min="1" max="200" value="${htmlEscape(t.historyDepth || 12)}" ${t.useChatHistory !== false ? '' : 'disabled'}></label>
+        <label class="sd-depth-field"><span>参考楼层</span><input class="text_pole sd-theater-history-depth" type="number" min="1" max="200" value="${htmlEscape(t.historyDepth || 5)}" ${t.useChatHistory !== false ? '' : 'disabled'}></label>
       </div>
-      <p class="sd-muted sd-inject-hint">开启后番外会衔接近期正文的人物状态与口吻；关闭则写脱离正文的平行/脑洞番外</p>
       <label>此幕指令</label>
       <textarea class="text_pole sd-textarea sd-theater-instruction" spellcheck="false" placeholder="${htmlEscape(THEATER_INSTRUCTION_PLACEHOLDER)}">${htmlEscape(t.instruction || '')}</textarea>
       <div class="sd-button-row">
@@ -2830,12 +2939,31 @@ function renderTheaterTab() {
         ${busy ? '<button class="sd-btn sd-stop"><i class="fa-solid fa-stop"></i>停止</button>' : ''}
       </div>
       ${out ? `<div class="sd-theater-latest sd-button-row">
-        <span class="sd-muted">最近一幕：${htmlEscape(snip(out.title || out.instruction || '番外', 24))}</span>
+        <span class="sd-muted">最近一幕：${htmlEscape(theaterOpening(out))}</span>
         <button class="sd-btn sd-mini-btn sd-theater-open-latest"><i class="fa-solid fa-book-open"></i>阅读</button>
       </div>` : ''}
     </section>
     <section class="sd-card">${renderLibrarySection(theaterScriptLibraryCfg())}</section>`;
 }
+
+// 番外正文开端：清洗思维链/HTML 标签后取开头若干字，作为列表/最近一幕的显示名
+function theaterOpening(scene, n = 28) {
+  if (!scene) return '番外';
+  let text = stripThinkChain(String(scene.content || ''));
+  if (scene.isHtml || /<[^>]+>/.test(text)) {
+    text = text.replace(/<style[\s\S]*?<\/style>/gi, '').replace(/<script[\s\S]*?<\/script>/gi, '').replace(/<[^>]+>/g, ' ');
+  }
+  text = text.replace(/\s+/g, ' ').trim();
+  return text ? snip(text, n) : '番外';
+}
+
+// 阅读页副标题：来自剧札则 @剧札名，否则 @即兴
+function theaterSubtitle(scene) {
+  const src = String(scene?.source || '').trim();
+  return src ? `@${src}` : '@即兴';
+}
+
+const THEATER_READ_TITLE = '幕外一折';
 
 function renderTheaterReadView(scene) {
   if (!scene) { theaterView = null; return renderTheaterTab(); }
@@ -2852,9 +2980,12 @@ function renderTheaterReadView(scene) {
     <section class="sd-card sd-reader-card">
       <div class="sd-reader-bar">
         <button class="sd-btn sd-mini-btn sd-theater-reader-back"><i class="fa-solid fa-arrow-left"></i>返回</button>
-        <h3>${htmlEscape(scene.title || '番外小剧场')}</h3>
         ${fontControl}
         <button class="sd-icon-btn sd-theater-reader-fav" title="收藏"><i class="${fav ? 'fa-solid fa-star sd-fav-on' : 'fa-regular fa-star'}"></i></button>
+      </div>
+      <div class="sd-reader-title">
+        <h3>${htmlEscape(THEATER_READ_TITLE)}</h3>
+        <p class="sd-reader-subtitle">${htmlEscape(theaterSubtitle(scene))}</p>
       </div>
       ${bodyHtml}
     </section>`;
@@ -2863,7 +2994,7 @@ function renderTheaterReadView(scene) {
 function renderTheaterFavoritesView() {
   const t = getTheater();
   const rows = t.favorites.length
-    ? t.favorites.map((f) => `<article class="sd-lib-row"><div class="sd-lib-main"><h4>${htmlEscape(f.title || '番外')}</h4></div>
+    ? t.favorites.map((f) => `<article class="sd-lib-row"><div class="sd-lib-main"><h4>${htmlEscape(theaterOpening(f))}</h4><p class="sd-muted sd-fav-time">${htmlEscape(theaterSubtitle(f))} · ${htmlEscape(formatDateTime(f.createdAt))}</p></div>
       <div class="sd-lib-actions">
         <button type="button" class="sd-btn sd-lib-load sd-fav-read" data-id="${htmlEscape(f.id)}">阅读</button>
         <button type="button" class="sd-icon-btn sd-icon-sm sd-danger sd-fav-remove" data-id="${htmlEscape(f.id)}" title="移出收藏"><i class="fa-solid fa-star-half-stroke"></i></button>
@@ -2873,7 +3004,6 @@ function renderTheaterFavoritesView() {
     <section class="sd-card sd-reader-card">
       <div class="sd-reader-bar">
         <button class="sd-btn sd-mini-btn sd-theater-reader-back"><i class="fa-solid fa-arrow-left"></i>返回</button>
-        <h3>收藏夹</h3>
         <span></span>
       </div>
       <div class="sd-lib-list sd-scroll" style="padding:4px 2px">${rows}</div>
@@ -2941,7 +3071,7 @@ async function stageTheaterScene() {
     const content = String(raw || '').trim();
     log.response = clipLog(content);
     if (!content) throw new Error('模型返回为空');
-    t.lastOutput = { id: uid('scene'), title: snip(instruction, 24), instruction, content, isHtml: looksLikeHtml(stripThinkChain(content)), createdAt: new Date().toISOString() };
+    t.lastOutput = { id: uid('scene'), source: theaterScriptSource || '', instruction, content, isHtml: looksLikeHtml(stripThinkChain(content)), createdAt: new Date().toISOString() };
     log.status = 'success';
     log.duration = `${((Date.now() - startedAt) / 1000).toFixed(1)}s`;
     saveSettings();
@@ -2987,7 +3117,7 @@ function toggleTheaterFavorite(scene) {
     t.favorites = t.favorites.filter((f) => f.id !== scene.id);
     toast('已取消收藏。', 'info');
   } else {
-    t.favorites.unshift({ id: scene.id, title: scene.title, instruction: scene.instruction, content: scene.content, isHtml: scene.isHtml, createdAt: scene.createdAt || new Date().toISOString() });
+    t.favorites.unshift({ id: scene.id, source: scene.source || '', instruction: scene.instruction, content: scene.content, isHtml: scene.isHtml, createdAt: scene.createdAt || new Date().toISOString() });
     t.favorites = t.favorites.slice(0, 50);
     toast('已收藏这一幕。', 'success');
   }
@@ -3066,11 +3196,12 @@ function bindTheaterTabEvents(root) {
     renderModal();
   });
   root.querySelector('.sd-theater-history-depth')?.addEventListener('change', (e) => {
-    getTheater().historyDepth = Math.max(1, Math.min(200, Number(e.target.value || 12)));
+    getTheater().historyDepth = Math.max(1, Math.min(200, Number(e.target.value || 5)));
     saveSettings();
   });
   root.querySelector('.sd-theater-instruction')?.addEventListener('change', (e) => {
     getTheater().instruction = e.target.value || '';
+    theaterScriptSource = '';   // 手动改动指令即视为即兴，脱离剧札来源
     saveSettings();
   });
   root.querySelector('.sd-theater-stage')?.addEventListener('click', () => {
@@ -3082,10 +3213,11 @@ function bindTheaterTabEvents(root) {
     const ta = root.querySelector('.sd-theater-instruction');
     const instruction = String(ta?.value || getTheater().instruction || '').trim();
     if (!instruction) return toast('请先写下此幕指令。', 'warning');
-    const name = await promptInput('保存到剧札', '为这套剧场指令取个名字：', snip(instruction, 16));
-    if (!name) return;
+    const result = await promptNameAndFolder({ dialogTitle: '保存到剧札', namePlaceholder: '此幕剧名' });
+    if (!result) return;
+    if (!result.name) return toast('请为这一幕取个剧名。', 'warning');
     const t = getTheater();
-    t.scripts.unshift({ id: uid('script'), title: name, folder: '', instruction, createdAt: new Date().toISOString() });
+    t.scripts.unshift({ id: uid('script'), title: result.name, folder: result.folder || '', instruction, createdAt: new Date().toISOString() });
     t.scripts = t.scripts.slice(0, 50);
     saveSettings();
     toast('已存入剧札。', 'success');
@@ -3100,6 +3232,7 @@ function bindTheaterTabEvents(root) {
       if (!s) return;
       const t = getTheater();
       t.instruction = s.instruction || '';
+      theaterScriptSource = s.title || '';   // 记录来源剧札名，供阅读页副标题显示
       saveSettings();
       const ta = root.querySelector('.sd-theater-instruction');
       if (ta) ta.value = t.instruction;
