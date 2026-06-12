@@ -1,9 +1,10 @@
 // 千幕 (Qianmu) - SillyTavern third-party UI extension
 // v1.2
+import { BUILTIN_THEATERS, BUILTIN_THEATER_FOLDER } from './builtin-theaters.js';
 
 const MODULE_NAME = 'story_director_liminale';
 const EXTENSION_NAME = '千幕';
-const VERSION = '1.2.3';
+const VERSION = '1.2.4';
 const SETTINGS_PANEL_ID = 'story-director-settings';
 const MODAL_ID = 'story-director-modal';
 const FLOAT_ID = 'story-director-float';
@@ -11,6 +12,7 @@ const INPUT_ENTRY_ID = 'story-director-input-entry';
 const INPUT_BUTTON_ID = 'story-director-input-button';
 
 const PROMPT_REVISION = 5;
+const BUILTIN_THEATER_REVISION = 1;   // 内置剧场组版本，升一档即重置内置项（保留用户自建剧札）
 const FIXED_METRICS = ['张力', '情感', '悬念', '节奏'];
 const LOG_LIMIT = 5;
 const LOG_CLIP = 80000;
@@ -2166,9 +2168,13 @@ function renderWorldBookSourcePanel() {
   const names = uniqueClean([...boundNames, ...(contextScanCache.worldBookNames || [])]).filter(Boolean);
   if (!names.length) return '<p class="sd-muted">未读取到世界书。</p>';
   const selected = getSelectedWorldBookNames().filter((name) => names.includes(name));
-  if (lastWorldView && !selected.includes(lastWorldView)) lastWorldView = '';
+  if (lastWorldView && !names.includes(lastWorldView)) lastWorldView = '';
   const viewName = lastWorldView || selected[selected.length - 1] || '';
-  const rows = names.map((name) => `<label class="sd-source-row"><input type="checkbox" class="sd-toggle-worldbook" data-name="${htmlEscape(name)}" ${selected.includes(name) ? 'checked' : ''}><span>${htmlEscape(name)}</span>${boundNames.includes(name) ? badge('当前绑定') : ''}</label>`).join('');
+  // 勾选框只管选中/取消；书名是独立按钮，点名只切换下方查看的条目，不动选中状态
+  const rows = names.map((name) => `<div class="sd-source-row sd-world-row${viewName === name ? ' sd-world-viewing' : ''}">
+    <input type="checkbox" class="sd-toggle-worldbook" data-name="${htmlEscape(name)}" ${selected.includes(name) ? 'checked' : ''} title="选中作为引用">
+    <button type="button" class="sd-world-name" data-name="${htmlEscape(name)}"><span>${htmlEscape(name)}</span>${boundNames.includes(name) ? badge('当前绑定') : ''}</button>
+  </div>`).join('');
   return `
     <details class="sd-dropdown" data-acc="dd-world">
       <summary class="sd-dropdown-head"><span>选择世界书</span><b>${selected.length} 项</b></summary>
@@ -2234,7 +2240,7 @@ function renderDirectorSettingsTab() {
     </section>
     <section class="sd-card">
       <details class="sd-plain-fold" data-acc="output-schema">
-        <summary><b>输出格式</b><span class="sd-summary-note">推演返回的 JSON 结构，一般无需改动</span></summary>
+        <summary><b>输出格式</b><span class="sd-summary-note">推演返回的JSON结构，一般无需改动</span></summary>
         <textarea class="text_pole sd-textarea sd-output-schema" spellcheck="false">${htmlEscape(settings.outputSchemaText || JSON_SCHEMA_TEXT)}</textarea>
       </details>
       <div class="sd-button-row"><button class="sd-btn sd-save-director-settings">保存幕后</button><button class="sd-btn sd-reset-system">恢复默认</button></div>
@@ -2290,18 +2296,9 @@ function renderPlugTab() {
       <div class="sd-inline-field"><select class="text_pole sd-model-select"><option value="">选择模型</option>${models.map((m) => `<option value="${htmlEscape(m)}" ${m === settings.model ? 'selected' : ''}>${htmlEscape(m)}</option>`).join('')}</select><button class="sd-btn sd-fetch-models"><i class="fa-solid fa-rotate"></i>拉取模型</button></div>
       <label>Temperature</label><input class="text_pole sd-temperature" type="number" min="0" max="2" step="0.05" value="${htmlEscape(settings.temperature)}">
       <label>最大输出 token</label><input class="text_pole sd-max-output" type="number" min="0" step="256" placeholder="0 表示不限" value="${htmlEscape(settings.maxOutputTokens ?? 32000)}">
-      <label>上下文长度（字符近似）</label><input class="text_pole sd-context-budget" type="number" min="0" step="1000" placeholder="0 表示不限" value="${htmlEscape(settings.contextBudget ?? 1000000)}">
+      <label>上下文长度</label><input class="text_pole sd-context-budget" type="number" min="0" step="1000" placeholder="0 表示不限" value="${htmlEscape(settings.contextBudget ?? 1000000)}">
       <label class="checkbox_label"><input type="checkbox" class="sd-stream-toggle" ${settings.streamEnabled ? 'checked' : ''}> 流式传输</label>
       <div class="sd-button-row"><button class="sd-btn sd-test-api"><i class="fa-solid fa-plug-circle-check"></i>测试连接</button><button class="sd-btn sd-save-api">保存API</button><button class="sd-btn sd-save-api-profile">保存为预设</button></div>
-    </section>
-    <section class="sd-card">
-      <h3>配置备份</h3>
-      <p class="sd-muted">导出千幕的全部本地配置（剧本、剧札、标签规则、提示词、各项设置）。导入将覆盖当前配置。</p>
-      <div class="sd-button-row">
-        <button class="sd-btn sd-export-config"><i class="fa-solid fa-file-export"></i>导出配置</button>
-        <button class="sd-btn sd-import-config"><i class="fa-solid fa-file-import"></i>导入配置</button>
-        <input type="file" class="sd-import-config-file" accept="application/json,.json" hidden>
-      </div>
     </section>
     <section class="sd-card">
       <label class="checkbox_label"><input type="checkbox" class="sd-float-toggle" ${settings.floatingButton ? 'checked' : ''}> 显示悬浮球</label>
@@ -2310,6 +2307,15 @@ function renderPlugTab() {
       <h3>日志</h3>
       <p class="sd-muted">保留最近 ${LOG_LIMIT} 次生成记录。</p>
       ${logs.length ? `<div class="sd-log-list">${logs.map((log, i) => renderLogEntry(log, i)).join('')}</div>` : '<p class="sd-muted">暂无日志。</p>'}
+    </section>
+    <section class="sd-card">
+      <h3>配置备份</h3>
+      <p class="sd-muted">导出千幕的全部本地配置，导入将覆盖当前配置。</p>
+      <div class="sd-button-row">
+        <button class="sd-btn sd-export-config"><i class="fa-solid fa-file-export"></i>导出配置</button>
+        <button class="sd-btn sd-import-config"><i class="fa-solid fa-file-import"></i>导入配置</button>
+        <input type="file" class="sd-import-config-file" accept="application/json,.json" hidden>
+      </div>
     </section>`;
 }
 
@@ -2514,7 +2520,18 @@ function bindActiveTabEvents(root) {
   }));
   root.querySelectorAll('.sd-toggle-worldbook').forEach((el) => el.addEventListener('change', async () => {
     await setWorldBookNameSelected(el.dataset.name, el.checked);
-    lastWorldView = el.checked ? el.dataset.name : '';   // 最后勾选的世界书 = 下方查看项
+    // 勾选时顺带把它作为下方查看项；取消时若取消的正是当前查看项，则清空查看
+    if (el.checked) lastWorldView = el.dataset.name;
+    else if (lastWorldView === el.dataset.name) lastWorldView = '';
+    renderModal();
+  }));
+  root.querySelectorAll('.sd-world-name').forEach((el) => el.addEventListener('click', async () => {
+    // 点书名只切换下方查看的条目，不改变选中状态
+    const name = el.dataset.name;
+    if (!contextScanCache.worldBooks?.[name]) {
+      contextScanCache.worldBooks[name] = await getWorldBookEntries(name);
+    }
+    lastWorldView = name;
     renderModal();
   }));
   root.querySelectorAll('.sd-context-check').forEach((el) => {
@@ -2724,7 +2741,7 @@ async function importConfig(event) {
   } catch (_) {
     return toast('导入失败：不是有效的千幕配置文件。', 'error');
   }
-  const yes = await confirmDialog('导入配置', '导入将覆盖当前全部本地配置（剧本、剧札、标签规则、提示词、各项设置）。此操作不可撤销，确认导入？');
+  const yes = await confirmDialog('导入配置', '导入将覆盖当前全部本地配置，此操作不可撤销，确认导入？');
   if (!yes) return;
   const context = ctx();
   const extensionSettings = context.extensionSettings || (context.extensionSettings = {});
@@ -2737,6 +2754,7 @@ async function importConfig(event) {
   }
   extensionSettings[MODULE_NAME] = merged;
   settings = getSettings();
+  seedBuiltinTheaters();   // 导入的配置可能早于内置剧场组，补种一次
   saveSettings();
   await applyDirectorInjection();
   renderFloatButton();
@@ -2798,6 +2816,25 @@ function getTheater() {
   if (typeof t.useChatHistory === 'undefined') t.useChatHistory = true;
   if (typeof t.historyDepth === 'undefined') t.historyDepth = 5;
   return t;
+}
+
+// 内置剧场组「吱吱小剧场」种入剧札：保留用户自建项，版本升级时整组替换。
+// 内置项以 builtin:true + 稳定 id 标记，永远排在用户剧札之后，组内顺序与 builtin-theaters.js 一致。
+function seedBuiltinTheaters() {
+  const t = getTheater();
+  if (Number(t.builtinRevision || 0) === BUILTIN_THEATER_REVISION) return;
+  const userScripts = (t.scripts || []).filter((s) => !s.builtin);
+  const builtins = BUILTIN_THEATERS.map((item, index) => ({
+    id: `sd-bt-${index}`,
+    title: item.title,
+    folder: BUILTIN_THEATER_FOLDER,
+    instruction: item.instruction,
+    builtin: true,
+    createdAt: '2025-01-01T00:00:00.000Z',
+  }));
+  t.scripts = [...userScripts, ...builtins];
+  t.builtinRevision = BUILTIN_THEATER_REVISION;
+  saveSettings();
 }
 
 function theaterApiConfig() {
@@ -3425,6 +3462,7 @@ function init() {
   if (initialized) return;
   initialized = true;
   settings = getSettings();
+  seedBuiltinTheaters();
   renderSettingsPanel();
   renderFloatButton();
   renderInputMenuEntry();

@@ -1,5 +1,5 @@
 /* ============================================================
-   千幕 (Qianmu) v1.2.3
+   千幕 (Qianmu) v1.2.4
    ============================================================ */
 
 /* ---------- 0. 基础 ---------- */
@@ -243,8 +243,8 @@ html body #zmer-universal-toast-theme-layer { z-index: 2147483646 !important; }
   --sd-accent: #5f7a68;
   --sd-primary: #2e2a26;
   --sd-primary-text: #f7f3ea;
-  --sd-window-bg: linear-gradient(152deg, rgba(250, 247, 240, .9) 0%, rgba(240, 233, 222, .8) 48%, rgba(228, 220, 207, .86) 100%);
-  --sd-window-glow: radial-gradient(120% 60% at 8% 0%, rgba(255, 255, 255, .42), transparent 52%);
+  --sd-window-bg: linear-gradient(152deg, rgba(250, 247, 240, .66) 0%, rgba(240, 233, 222, .54) 48%, rgba(228, 220, 207, .62) 100%);
+  --sd-window-glow: radial-gradient(120% 60% at 8% 0%, rgba(255, 255, 255, .30), transparent 52%);
   color: var(--sd-text) !important;
 }
 
@@ -264,8 +264,8 @@ html body #zmer-universal-toast-theme-layer { z-index: 2147483646 !important; }
   --sd-accent: #a4cdb2;                 /* v0.5.2：提亮 */
   --sd-primary: #e9e6df;
   --sd-primary-text: #17181b;
-  --sd-window-bg: linear-gradient(152deg, rgba(32, 34, 39, .9) 0%, rgba(23, 24, 28, .84) 50%, rgba(17, 18, 21, .88) 100%);
-  --sd-window-glow: radial-gradient(120% 60% at 8% 0%, rgba(140, 160, 190, .10), transparent 50%);
+  --sd-window-bg: linear-gradient(152deg, rgba(32, 34, 39, .66) 0%, rgba(23, 24, 28, .58) 50%, rgba(17, 18, 21, .64) 100%);
+  --sd-window-glow: radial-gradient(120% 60% at 8% 0%, rgba(140, 160, 190, .08), transparent 50%);
 }
 
 #story-director-modal.open {
@@ -1140,6 +1140,31 @@ html body #zmer-universal-toast-theme-layer { z-index: 2147483646 !important; }
 #story-director-modal .sd-source-row input { flex: 0 0 auto !important; }
 #story-director-modal .sd-source-row span { min-width: 0 !important; }
 
+/* 世界书行：勾选框 + 独立书名按钮（点名只切换查看，不改选中） */
+#story-director-modal .sd-world-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px;
+  margin: 0;
+  border: none !important;
+  background: transparent;
+  color: var(--sd-text);
+  text-align: left;
+  cursor: pointer;
+  border-radius: 8px !important;
+}
+#story-director-modal .sd-world-name > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#story-director-modal .sd-world-row.sd-world-viewing { background: var(--sd-glass); }
+#story-director-modal .sd-world-row.sd-world-viewing .sd-world-name { font-weight: 600; }
+
 #story-director-modal .sd-context-item {
   margin: 8px 0 10px !important;
   border-radius: 12px !important;
@@ -1352,9 +1377,6 @@ html body #zmer-universal-toast-theme-layer { z-index: 2147483646 !important; }
   #story-director-modal .sd-body { padding: 12px 12px 72px; }
 
   #story-director-modal .sd-base-row .sd-depth-field { margin-left: 0; }
-
-  #story-director-modal .sd-refresh-row { grid-template-columns: 1fr; }
-  #story-director-modal .sd-floor-refresh { justify-self: start; }
 
   #story-director-modal .sd-current-blueprint-actions {
     grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
