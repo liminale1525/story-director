@@ -664,6 +664,7 @@ function renderLibrarySection(cfg) {
     ? `<div class="sd-export-bar"><span class="sd-export-hint">勾选要导出的条目</span><button type="button" class="sd-btn sd-mini-btn sd-lib-confirm-export">导出 (<span>${cfg.selection.size}</span>)</button><button type="button" class="sd-btn sd-mini-btn sd-lib-cancel-export">取消</button></div>`
     : '';
   return `
+      <div class="sd-lib-scope" data-lib="${htmlEscape(cfg.ns)}">
       <div class="sd-template-head">
         <h3>${htmlEscape(cfg.title)}</h3>
         <div class="sd-template-io-buttons">
@@ -674,12 +675,16 @@ function renderLibrarySection(cfg) {
       </div>
       ${exportBar}
       <input type="search" class="text_pole sd-lib-search" placeholder="${htmlEscape(cfg.searchPlaceholder || '搜索标题…')}" value="${htmlEscape(search)}">
-      <div class="sd-lib-list sd-scroll">${renderLibraryListBody(cfg, matched)}</div>`;
+      <div class="sd-lib-list sd-scroll">${renderLibraryListBody(cfg, matched)}</div>
+      </div>`;
 }
 
 // 绑定通用库事件。handlers: { onLoad, onEdit, onDelete, onImport, onExport, rebuildCfg }
-function bindLibraryEvents(root, makeCfg, handlers) {
+function bindLibraryEvents(rootEl, makeCfg, handlers) {
   const cfg = makeCfg();
+  // 作用域隔离：只在本库自己的容器内查询，绝不串到另一个库（剧本库 / 剧札共用同套 class）
+  const root = rootEl.querySelector(`.sd-lib-scope[data-lib="${cfg.ns}"]`);
+  if (!root) return;   // 当前标签未渲染该库，跳过
   const refreshList = () => {
     const c = makeCfg();
     const search = c.getSearch();
@@ -3293,7 +3298,7 @@ function bindTheaterTabEvents(root) {
       renderModal();
     },
     onDelete: async (id) => {
-      const yes = await confirmDialog('删除剧札', '确认删除这套剧场指令？');
+      const yes = await confirmDialog('删除剧札', '确认删除这个剧札？');
       if (!yes) return;
       const t = getTheater();
       t.scripts = t.scripts.filter((x) => x.id !== id);
