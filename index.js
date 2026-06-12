@@ -2694,7 +2694,7 @@ async function confirmDialog(title, text) {
 const API_CONFIG_KEYS = ['apiUrl', 'apiKey', 'model', 'availableModels', 'apiProfiles', 'providerMode'];
 
 async function exportConfig() {
-  const includeApi = await confirmDialog('导出配置', '是否一并导出 API 配置（URL / Key / 模型 / 预设）？\n选「取消」则排除 API 凭据，仅导出其余全部配置。');
+  const includeApi = await confirmDialog('导出配置', '是否一并导出API配置？');
   const snapshot = clone(settings);
   if (!includeApi) {
     for (const key of API_CONFIG_KEYS) delete snapshot[key];
