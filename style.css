@@ -1,5 +1,5 @@
 /* ============================================================
-   千幕 (Qianmu) v1.2
+   千幕 (Qianmu) v1.2.1
    ============================================================ */
 
 /* ---------- 0. 基础 ---------- */
@@ -14,6 +14,12 @@ html body #toast-container.toast-bottom-center,
 html body #toast-container.toast-bottom-right,
 html body #toast-container.toast-bottom-left,
 html body .toast-container { z-index: 2147483647 !important; }
+
+/* v1.2.1：兼容「酒馆提示框综合美化」插件——它会新建 #zmer-universal-toast-theme-layer（z-index 999999）
+   并把所有 toast 搬进去，导致美化后的提示落在千幕面板（2147483001）之下被遮挡。
+   仅当该层存在时（即用户装了此插件）把它拔到最顶；未装此插件的原生用户无此节点，规则不生效，互不影响。 */
+html body [id$="-universal-toast-theme-layer"],
+html body #zmer-universal-toast-theme-layer { z-index: 2147483646 !important; }
 
 #story-director-modal,
 #story-director-float,
@@ -651,7 +657,6 @@ html body .toast-container { z-index: 2147483647 !important; }
 
 /* v0.6.1 */
 #story-director-modal .sd-inject-hint { margin-top: 6px; font-size: .86em; }
-#story-director-modal .sd-inject-preview-box { margin-top: 12px; }
 #story-director-modal .sd-inject-preview-text {
   margin-top: 8px;
   max-height: 240px;
@@ -664,6 +669,24 @@ html body .toast-container { z-index: 2147483647 !important; }
   word-break: break-word;
   scrollbar-width: thin;
 }
+
+/* v1.2.1：极简折叠（当前注入内容 / 输出格式）——只借 .sd-card 外框，自身无边框无底色，去掉套娃 */
+#story-director-modal .sd-plain-fold { margin-top: 12px; }
+#story-director-modal .sd-plain-fold > summary {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 10px;
+  padding: 0 0 2px !important;
+  cursor: pointer;
+  list-style: none;
+}
+#story-director-modal .sd-plain-fold > summary::-webkit-details-marker { display: none; }
+#story-director-modal .sd-plain-fold > summary b { font-weight: 600; }
+#story-director-modal .sd-plain-fold > .sd-textarea { margin-top: 8px; }
+
+/* v1.2.1：取材页基础引用互斥小字注释 */
+#story-director-modal .sd-base-note { margin: 8px 2px 0; font-size: .82em; }
 
 #story-director-modal .sd-status-card { padding: 14px 16px; }
 
@@ -1029,6 +1052,50 @@ html body .toast-container { z-index: 2147483647 !important; }
 
 #story-director-modal .sd-context-block > .sd-source-list,
 #story-director-modal .sd-context-block > p.sd-muted { margin-bottom: 12px !important; }
+
+/* v1.2.1：取材页下拉勾选框（预设单选 / 世界书多选） */
+#story-director-modal .sd-dropdown {
+  margin: 10px 15px;
+  border: 1px solid var(--sd-border) !important;
+  border-radius: 12px !important;
+  background: var(--sd-input-bg) !important;
+  overflow: hidden;
+}
+#story-director-modal .sd-dropdown-head {
+  display: flex !important;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 12px;
+  cursor: pointer;
+  list-style: none;
+  font-size: .92em;
+}
+#story-director-modal .sd-dropdown-head::-webkit-details-marker { display: none; }
+#story-director-modal .sd-dropdown-head::after {
+  content: '▾';
+  margin-left: auto;
+  opacity: .6;
+  transition: transform .16s ease;
+}
+#story-director-modal .sd-dropdown[open] .sd-dropdown-head::after { transform: rotate(180deg); }
+#story-director-modal .sd-dropdown-head span { color: var(--sd-muted); }
+#story-director-modal .sd-dropdown-head b { font-weight: 600; color: var(--sd-text); }
+#story-director-modal .sd-dropdown-body {
+  display: grid;
+  gap: 4px;
+  padding: 6px 10px 10px;
+  border-top: 1px solid var(--sd-hairline);
+}
+#story-director-modal .sd-dropdown-body.sd-scroll { max-height: 240px; overflow-y: auto; scrollbar-width: thin; }
+
+/* v1.2.1：条目列表滚动容器，列表过长不再难滑 */
+#story-director-modal .sd-entry-scroll {
+  max-height: 320px;
+  overflow-y: auto;
+  margin: 0 12px 12px !important;
+  scrollbar-width: thin;
+}
 
 #story-director-modal .sd-source-list { display: grid; gap: 6px; }
 
