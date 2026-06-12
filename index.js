@@ -2686,7 +2686,7 @@ function getTheater() {
   if (!Array.isArray(t.favorites)) t.favorites = [];
   if (!isPlainObject(t.presetItems)) t.presetItems = {};
   if (typeof t.useChatHistory === 'undefined') t.useChatHistory = true;
-  if (typeof t.historyDepth === 'undefined') t.historyDepth = 5;
+  if (typeof t.historyDepth === 'undefined') t.historyDepth = 12;
   return t;
 }
 
