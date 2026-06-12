@@ -2037,8 +2037,8 @@ function renderContextTab() {
       <div class="sd-base-grid">
         <label class="checkbox_label"><input type="checkbox" class="sd-opt" data-key="includeChatHistory" ${opts.includeChatHistory ? 'checked' : ''}> 上下文参考</label>
         <label class="sd-depth-field"><span>参考楼层数</span><input class="text_pole sd-context-depth" type="number" min="1" max="200" value="${htmlEscape(opts.contextDepth || 5)}"></label>
-        <div class="sd-fixed-ref sd-span-2"><span class="sd-fixed-ref-label">角色设定</span>${infoTag(getCharacterName())}${infoTag(`${estimateTokens(charDesc)} token`)}<span class="sd-fixed-ref-note">必然引用</span></div>
-        <div class="sd-fixed-ref sd-span-2"><span class="sd-fixed-ref-label">用户人设</span>${infoTag(getPersonaName())}${infoTag(`${estimateTokens(userDesc)} token`)}<span class="sd-fixed-ref-note">必然引用</span></div>
+        <div class="sd-fixed-ref sd-span-2"><span class="sd-fixed-ref-label">角色设定</span>${infoTag(getCharacterName())}${infoTag(`${estimateTokens(charDesc)} token`)}
+        <div class="sd-fixed-ref sd-span-2"><span class="sd-fixed-ref-label">用户人设</span>${infoTag(getPersonaName())}${infoTag(`${estimateTokens(userDesc)} token`)}
       </div>
     </details>
     <details class="sd-accordion" data-acc="acc-tags" open>
