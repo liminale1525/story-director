@@ -221,6 +221,8 @@ const DEFAULT_SETTINGS = Object.freeze({
     favorites: [],
     lastOutput: null,
     readerFontScale: 'medium',
+    useChatHistory: true,
+    historyDepth: 12,
   },
 });
 
@@ -524,6 +526,31 @@ function getChatHistoryText() {
     const text = cleanContextText(m.mes || '');
     return text ? `${role}: ${text}` : '';
   }).filter(Boolean).join('\n');
+}
+
+// 幕外专用：取最近 N 层「可见」楼层原文（过滤被记忆/隐藏插件标记的 is_system 楼），并设字符软上限防爆 token。
+// 与推演 getChatHistoryText 完全独立：自己的楼层数、自己的截断，互不污染。
+const THEATER_HISTORY_CHAR_CAP = 8000;
+function getTheaterChatHistoryText() {
+  const context = ctx();
+  const chat = Array.isArray(context.chat) ? context.chat : [];
+  const depth = Math.max(1, Math.min(200, Number(getTheater().historyDepth || 12)));
+  const visible = chat.filter((m) => m && m.is_system !== true);
+  const recent = visible.slice(-depth);
+  const lines = recent.map((m) => {
+    const role = m.is_user ? '<user>' : (m.name || '<char>');
+    const text = cleanContextText(m.mes || '');
+    return text ? `${role}: ${text}` : '';
+  }).filter(Boolean);
+  // 字符软上限：从最近一层往前累加，超出即停，优先保留最近楼层
+  const kept = [];
+  let total = 0;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    total += lines[i].length + 1;
+    if (total > THEATER_HISTORY_CHAR_CAP && kept.length) break;
+    kept.unshift(lines[i]);
+  }
+  return kept.join('\n');
 }
 
 function processRandomMacros(text) {
@@ -2531,7 +2558,7 @@ function bindActiveTabEvents(root) {
         body: JSON.stringify({ model, messages: [{ role: 'user', content: 'ping' }], max_tokens: 1, stream: false }),
       });
       if (res.ok) {
-        toast('连接成功', 'success');
+        toast('连接成功，鉴权与模型可用。', 'success');
       } else {
         const text = await res.text().catch(() => '');
         toast(`连接失败：HTTP ${res.status}${text ? ` · ${text.slice(0, 120)}` : ''}`, 'error');
@@ -2658,6 +2685,8 @@ function getTheater() {
   if (!Array.isArray(t.scripts)) t.scripts = [];
   if (!Array.isArray(t.favorites)) t.favorites = [];
   if (!isPlainObject(t.presetItems)) t.presetItems = {};
+  if (typeof t.useChatHistory === 'undefined') t.useChatHistory = true;
+  if (typeof t.historyDepth === 'undefined') t.historyDepth = 5;
   return t;
 }
 
@@ -2786,7 +2815,12 @@ function renderTheaterTab() {
       </div>
       ${t.presetName
         ? renderTheaterPresetEntries(t.presetName)
-        : '<p class="sd-muted sd-inject-hint">未载入预设时，默认注入当前聊天设定；读取预设后将改用预设条目，两者互斥</p>'}
+        : '<p class="sd-muted sd-inject-hint">默认始终注入当前聊天的角色设定、用户人设与绑定世界书；读取预设后预设条目作为额外叠加</p>'}
+      <div class="sd-theater-history-row">
+        <label class="checkbox_label"><input type="checkbox" class="sd-theater-use-history" ${t.useChatHistory !== false ? 'checked' : ''}> 衔接当前正文</label>
+        <label class="sd-depth-field"><span>参考楼层</span><input class="text_pole sd-theater-history-depth" type="number" min="1" max="200" value="${htmlEscape(t.historyDepth || 12)}" ${t.useChatHistory !== false ? '' : 'disabled'}></label>
+      </div>
+      <p class="sd-muted sd-inject-hint">开启后番外会衔接近期正文的人物状态与口吻；关闭则写脱离正文的平行/脑洞番外</p>
       <label>此幕指令</label>
       <textarea class="text_pole sd-textarea sd-theater-instruction" spellcheck="false" placeholder="${htmlEscape(THEATER_INSTRUCTION_PLACEHOLDER)}">${htmlEscape(t.instruction || '')}</textarea>
       <div class="sd-button-row">
@@ -2885,7 +2919,15 @@ async function stageTheaterScene() {
     if (defaultText) segments.push(defaultText);
     const presetText = await buildTheaterPresetText();
     if (presetText) segments.push(presetText);
+    const useHistory = getTheater().useChatHistory !== false;
+    if (useHistory) {
+      const history = getTheaterChatHistoryText();
+      if (history) segments.push(`【当前正文片段】（衔接背景：人物当前状态、关系与口吻锚点，并非要你续写正文）\n${history}`);
+    }
     segments.push(`【此幕指令】\n${await resolveMacro(instruction)}`);
+    if (useHistory) {
+      segments.push('以上正文片段是衔接背景，请据此保持人物口吻、关系与既有事实一致；番外可自由延展想象，但不要与正文已发生的事实冲突。');
+    }
     const userPrompt = segments.join('\n\n');
     const messages = [{ role: 'user', content: userPrompt }];
     log.request = clipLog(JSON.stringify(messages, null, 2));
@@ -3017,6 +3059,15 @@ function bindTheaterTabEvents(root) {
   root.querySelectorAll('.sd-theater-preset-item').forEach((el) => {
     el.addEventListener('click', (event) => event.stopPropagation());
     el.addEventListener('change', () => setTheaterPresetItemSelected(getTheater().presetName, el.dataset.id, el.checked));
+  });
+  root.querySelector('.sd-theater-use-history')?.addEventListener('change', (e) => {
+    getTheater().useChatHistory = e.target.checked;
+    saveSettings();
+    renderModal();
+  });
+  root.querySelector('.sd-theater-history-depth')?.addEventListener('change', (e) => {
+    getTheater().historyDepth = Math.max(1, Math.min(200, Number(e.target.value || 12)));
+    saveSettings();
   });
   root.querySelector('.sd-theater-instruction')?.addEventListener('change', (e) => {
     getTheater().instruction = e.target.value || '';
