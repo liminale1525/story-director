@@ -2531,7 +2531,7 @@ function bindActiveTabEvents(root) {
         body: JSON.stringify({ model, messages: [{ role: 'user', content: 'ping' }], max_tokens: 1, stream: false }),
       });
       if (res.ok) {
-        toast('连接成功，鉴权与模型可用。', 'success');
+        toast('连接成功', 'success');
       } else {
         const text = await res.text().catch(() => '');
         toast(`连接失败：HTTP ${res.status}${text ? ` · ${text.slice(0, 120)}` : ''}`, 'error');
