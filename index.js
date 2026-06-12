@@ -3,7 +3,7 @@
 
 const MODULE_NAME = 'story_director_liminale';
 const EXTENSION_NAME = '千幕';
-const VERSION = '1.2';
+const VERSION = '1.2.1';
 const SETTINGS_PANEL_ID = 'story-director-settings';
 const MODAL_ID = 'story-director-modal';
 const FLOAT_ID = 'story-director-float';
@@ -204,7 +204,7 @@ const DEFAULT_SETTINGS = Object.freeze({
     includeChatHistory: true,
     contextDepth: 5,
     includeCharDesc: true,
-    includeUserDesc: false,
+    includeUserDesc: true,
     tagRules: [{ name: 'thinking', action: 'remove' }],
   },
   selectedPresetNamesByChat: {},
@@ -236,6 +236,7 @@ let inputMenuObserver = null;
 let templateExportMode = false;
 let templateExportSelection = new Set();
 let templateSearch = '';
+let lastWorldView = '';   // v1.2.1：世界书下拉「最后选择」的查看项
 let theaterExportMode = false;
 let theaterExportSelection = new Set();
 let injectSelection = new Set();   // v0.5.2：写入勾选持久化（跨重渲染/切主题保留）
@@ -1036,8 +1037,60 @@ function initializeSelectedContextState(cache) {
   }
 }
 
+// v1.2.1：预设里的「标记条目」（charDescription / worldInfo / persona 等）本身无字面内容，
+// 由 ST 在生成时填充。仅开预设时这些条目会被当成空而漏发，这里按 identifier 解析为真实内容。
+async function resolvePresetMarker(item) {
+  const id = String(item?.identifier || item?.name || '').toLowerCase();
+  const isMarker = item?.marker === true || !(item?.content || item?.prompt || item?.message || item?.text);
+  if (!isMarker) return null;
+  if (id.includes('chardescription') || id === 'description') {
+    const v = cleanContextText(await resolveMacro(getCharacterDescription()));
+    return v ? { title: `角色设定 - ${getCharacterName()}`, content: v } : null;
+  }
+  if (id.includes('charpersonality') || id === 'personality') {
+    const ch = ctx().characters?.[ctx().characterId];
+    const v = cleanContextText(await resolveMacro(ch?.personality || ch?.data?.personality || ''));
+    return v ? { title: '角色性格', content: v } : null;
+  }
+  if (id.includes('scenario')) {
+    const ch = ctx().characters?.[ctx().characterId];
+    const v = cleanContextText(await resolveMacro(ch?.scenario || ch?.data?.scenario || ''));
+    return v ? { title: '场景', content: v } : null;
+  }
+  if (id.includes('persona')) {
+    const v = cleanContextText(await resolveMacro(getPersonaDescription()));
+    return v ? { title: `用户人设 - ${getPersonaName()}`, content: v } : null;
+  }
+  if (id.includes('worldinfo') || id.includes('world_info') || id.includes('charlore') || id.includes('lore')) {
+    const v = await buildBoundWorldText();
+    return v ? { title: '世界书（绑定）', content: v, isWorld: true } : null;
+  }
+  return null;
+}
+
+// 读取当前角色绑定的世界书全部启用条目（复用于预设 worldInfo 标记解析与幕外默认上下文）
+async function buildBoundWorldText() {
+  let output = '';
+  const boundNames = uniqueClean([...detectBoundWorldBookNames(), ...(contextScanCache.boundWorldBookNames || [])]);
+  for (const wbName of boundNames) {
+    let entries = contextScanCache.worldBooks?.[wbName];
+    if (!entries || !entries.length) {
+      try { entries = await getWorldBookEntries(wbName); } catch (_) { entries = []; }
+    }
+    for (const [index, item] of (entries || []).entries()) {
+      if (item?.enabled === false || item?.disable === true) continue;
+      const title = item.name || item.comment || (Array.isArray(item.key) ? item.key.join(', ') : item.key) || `世界书条目 ${index + 1}`;
+      let content = await resolveMacro(item.content || item.text || '');
+      content = processRandomMacros(content);
+      if (content) output += `\n【${wbName}: ${title}】\n${cleanContextText(content)}\n`;
+    }
+  }
+  return output.trim();
+}
+
 async function buildPresetContextText() {
   let output = '';
+  let worldInjected = false;
   for (const presetName of getSelectedPresetNames()) {
     const entries = contextScanCache.presets?.[presetName] || getPresetEntries(presetName);
     for (const [index, item] of (entries || []).entries()) {
@@ -1046,7 +1099,19 @@ async function buildPresetContextText() {
       const title = item.name || item.identifier || item.role || `预设条目 ${index + 1}`;
       let content = await resolveMacro(item.content || item.prompt || item.message || item.text || '');
       content = processRandomMacros(content);
-      if (content) output += `\n【预设 - ${presetName}: ${title}】\n${cleanContextText(content)}\n`;
+      if (content) {
+        output += `\n【预设 - ${presetName}: ${title}】\n${cleanContextText(content)}\n`;
+        continue;
+      }
+      // 空内容 → 尝试按标记条目解析为真实设定/世界书
+      const resolved = await resolvePresetMarker(item);
+      if (resolved) {
+        if (resolved.isWorld) {
+          if (worldInjected) continue; // 多个世界书标记只注入一次，避免重复
+          worldInjected = true;
+        }
+        output += `\n【预设 - ${presetName}: ${resolved.title}】\n${resolved.content}\n`;
+      }
     }
   }
   return output.trim();
@@ -1183,7 +1248,7 @@ async function buildPrompt() {
   }
 
   if (store.plan) {
-    segments.push(`【上次审片状态】\n${JSON.stringify(store.plan, null, 2)}`);
+    segments.push(`【上次审片状态】\n${JSON.stringify(store.plan, null, 2)}\n\n【承接原则】上次审片状态仅作连续性参考，不是必须推进的剧本。请始终以「近期对话」的真实节奏为第一优先：\n- 与 {{user}} 直接相关的任务、剧情节点：只有当近期对话确实触碰、回应或推进了它们时才往下走；若正文并未涉及，则保持原状或仅作合理的环境留存，切勿自顾自地替 {{user}} 推进。\n- 与 {{user}} 无关的世界运转（NPC 自身进程、组织、公共事件、远处暗线）：可依自身逻辑持续流动、发酵、转向，无需等待 {{user}}。\n- 若上次状态与当前正文出现矛盾，以当前正文为准并自然校正。`);
   }
 
   if (settings.newcomerMode) {
@@ -1695,7 +1760,7 @@ function renderModal() {
     ['blueprint', '编剧'],
     ['tasksnodes', '任务节点'],
     ['castworld', '角色世界'],
-    ['context', '扩展'],
+    ['context', '取材'],
     ['settings', '幕后'],
     ['theater', '幕外'],
   ];
@@ -1985,6 +2050,7 @@ function renderContextTab() {
         <label class="checkbox_label sd-span-2"><input type="checkbox" class="sd-opt" data-key="includeCharDesc" ${opts.includeCharDesc ? 'checked' : ''}> 引用当前角色设定 ${infoTag(getCharacterName())}${infoTag(`${estimateTokens(charDesc)} token`)}</label>
         <label class="checkbox_label sd-span-2"><input type="checkbox" class="sd-opt" data-key="includeUserDesc" ${opts.includeUserDesc ? 'checked' : ''}> 引用用户人设 ${infoTag(getPersonaName())}${infoTag(`${estimateTokens(userDesc)} token`)}</label>
       </div>
+      <p class="sd-muted sd-base-note">此处勾选与预设中启用「角色设定相关条目」二选其一即可，避免设定重复发送。</p>
     </details>
     <details class="sd-accordion" data-acc="acc-tags" open>
       <summary><b>上下文处理</b><span>标签规则</span></summary>
@@ -2009,13 +2075,24 @@ function renderTagRules() {
   return list.map((rule, index) => `<div class="sd-tag-rule-row"><input class="text_pole sd-tag-rule-name" data-index="${index}" placeholder="标签名，如 thinking" value="${htmlEscape(rule.name || '')}"><select class="text_pole sd-tag-rule-action" data-index="${index}"><option value="remove" ${rule.action !== 'extract' ? 'selected' : ''}>屏蔽</option><option value="extract" ${rule.action === 'extract' ? 'selected' : ''}>提取</option></select><button type="button" class="sd-icon-btn sd-delete-tag-rule" data-index="${index}" title="删除"><i class="fa-solid fa-xmark"></i></button></div>`).join('');
 }
 
+// 预设：下拉勾选（单选），下方滚动容器呈现所选预设的条目
 function renderPresetSourcePanel() {
   const currentName = contextScanCache.currentPresetName || getCurrentPresetName();
   const names = uniqueClean([currentName, ...(contextScanCache.presetNames || listPresetNames())]).filter((name) => !isNoisePresetName(name));
   if (!names.length) return '<p class="sd-muted">未读取到预设。</p>';
   const selected = getSelectedPresetNames().filter((name) => names.includes(name));
-  const choiceRows = names.map((name) => `<label class="checkbox_label sd-source-row"><input type="checkbox" class="sd-toggle-preset" data-name="${htmlEscape(name)}" ${selected.includes(name) ? 'checked' : ''}><span>${htmlEscape(name)}</span>${currentName && name === currentName ? badge('当前使用') : ''}</label>`).join('');
-  return `<details class="sd-context-block" data-acc="blk-preset-pick" open><summary><b>选择预设</b><span>${selected.length}/${names.length}</span></summary><div class="sd-source-list">${choiceRows}</div></details>${renderSelectedPresetEntries(selected)}`;
+  const active = selected[0] || '';
+  const headLabel = active || '未选择';
+  const rows = names.map((name) => `<label class="sd-source-row"><input type="radio" name="sd-preset-radio" class="sd-pick-preset" data-name="${htmlEscape(name)}" ${name === active ? 'checked' : ''}><span>${htmlEscape(name)}</span>${currentName && name === currentName ? badge('当前使用') : ''}</label>`).join('');
+  return `
+    <details class="sd-dropdown" data-acc="dd-preset">
+      <summary class="sd-dropdown-head"><span>选择预设（单选）</span><b>${htmlEscape(headLabel)}</b></summary>
+      <div class="sd-dropdown-body sd-scroll">
+        <label class="sd-source-row"><input type="radio" name="sd-preset-radio" class="sd-pick-preset" data-name="" ${active ? '' : 'checked'}><span class="sd-muted">不使用预设</span></label>
+        ${rows}
+      </div>
+    </details>
+    ${active ? renderSelectedPresetEntries([active]) : ''}`;
 }
 
 function renderSelectedPresetEntries(selectedNames) {
@@ -2024,16 +2101,24 @@ function renderSelectedPresetEntries(selectedNames) {
     const items = contextScanCache.presets?.[name] || getPresetEntries(name);
     (items || []).forEach((item, index) => rows.push(renderContextEntry('preset', name, item, index, selectedNames.length > 1 ? name : '')));
   }
-  return `<details class="sd-context-block" data-acc="blk-preset-entries" open><summary><b>预设条目</b><span class="sd-summary-note">建议只开所需条目，避免冲突导致模型左右脑互搏</span></summary>${rows.join('') || '<p class="sd-muted">暂无条目</p>'}</details>`;
+  return `<details class="sd-context-block" data-acc="blk-preset-entries" open><summary><b>预设条目</b><span class="sd-summary-note">建议只开所需条目，避免冲突导致模型左右脑互搏</span></summary><div class="sd-entry-scroll sd-scroll">${rows.join('') || '<p class="sd-muted">暂无条目</p>'}</div></details>`;
 }
 
+// 世界书：下拉勾选（多选），下方滚动容器呈现「最后选择」的世界书条目
 function renderWorldBookSourcePanel() {
   const boundNames = contextScanCache.boundWorldBookNames || detectBoundWorldBookNames();
   const names = uniqueClean([...boundNames, ...(contextScanCache.worldBookNames || [])]).filter(Boolean);
   if (!names.length) return '<p class="sd-muted">未读取到世界书。</p>';
   const selected = getSelectedWorldBookNames().filter((name) => names.includes(name));
-  const choiceRows = names.map((name) => `<label class="checkbox_label sd-source-row"><input type="checkbox" class="sd-toggle-worldbook" data-name="${htmlEscape(name)}" ${selected.includes(name) ? 'checked' : ''}><span>${htmlEscape(name)}</span>${boundNames.includes(name) ? badge('当前绑定') : ''}</label>`).join('');
-  return `<details class="sd-context-block" data-acc="blk-world-pick" open><summary><b>选择世界书</b><span>${selected.length}/${names.length}</span></summary><div class="sd-source-list">${choiceRows}</div></details>${renderSelectedWorldBookEntries(selected)}`;
+  if (lastWorldView && !selected.includes(lastWorldView)) lastWorldView = '';
+  const viewName = lastWorldView || selected[selected.length - 1] || '';
+  const rows = names.map((name) => `<label class="sd-source-row"><input type="checkbox" class="sd-toggle-worldbook" data-name="${htmlEscape(name)}" ${selected.includes(name) ? 'checked' : ''}><span>${htmlEscape(name)}</span>${boundNames.includes(name) ? badge('当前绑定') : ''}</label>`).join('');
+  return `
+    <details class="sd-dropdown" data-acc="dd-world">
+      <summary class="sd-dropdown-head"><span>选择世界书（可多选）</span><b>${selected.length} 项</b></summary>
+      <div class="sd-dropdown-body sd-scroll">${rows}</div>
+    </details>
+    ${viewName ? renderSelectedWorldBookEntries([viewName]) : ''}`;
 }
 
 function renderSelectedWorldBookEntries(selectedNames) {
@@ -2042,7 +2127,8 @@ function renderSelectedWorldBookEntries(selectedNames) {
     const items = contextScanCache.worldBooks?.[name] || [];
     (items || []).forEach((item, index) => rows.push(renderContextEntry('world', name, item, index, selectedNames.length > 1 ? name : '')));
   }
-  return `<details class="sd-context-block" data-acc="blk-world-entries" open><summary><b>世界书条目</b></summary>${rows.join('') || '<p class="sd-muted">暂无条目</p>'}</details>`;
+  const label = selectedNames.length === 1 ? `世界书条目 · ${selectedNames[0]}` : '世界书条目';
+  return `<details class="sd-context-block" data-acc="blk-world-entries" open><summary><b>${htmlEscape(label)}</b></summary><div class="sd-entry-scroll sd-scroll">${rows.join('') || '<p class="sd-muted">暂无条目</p>'}</div></details>`;
 }
 
 function renderContextEntry(kind, groupName, item, index, sourceLabel = '') {
@@ -2056,13 +2142,13 @@ function renderContextEntry(kind, groupName, item, index, sourceLabel = '') {
 function renderInjectPreview() {
   const store = getChatStore();
   if (!store?.plan) {
-    return '<details class="sd-context-block sd-inject-preview-box" data-acc="inject-preview"><summary><b>当前注入内容</b></summary><p class="sd-muted">尚无推演结果，暂无可注入的暗线。</p></details>';
+    return '<details class="sd-plain-fold" data-acc="inject-preview"><summary><b>当前注入内容</b></summary><p class="sd-muted">尚无推演结果，暂无可注入的暗线。</p></details>';
   }
   if (!settings.injectEnabled) {
-    return '<details class="sd-context-block sd-inject-preview-box" data-acc="inject-preview"><summary><b>当前注入内容</b></summary><p class="sd-muted">暗线注入已关闭，本次推演结果不会被注入聊天。</p></details>';
+    return '<details class="sd-plain-fold" data-acc="inject-preview"><summary><b>当前注入内容</b></summary><p class="sd-muted">暗线注入已关闭，本次推演结果不会被注入聊天。</p></details>';
   }
   const text = buildPlanDigest(store.plan);
-  return `<details class="sd-context-block sd-inject-preview-box" data-acc="inject-preview">
+  return `<details class="sd-plain-fold" data-acc="inject-preview">
     <summary><b>当前注入内容</b><span class="sd-summary-note">约 ${estimateTokens(text)} token</span></summary>
     <div class="sd-inject-preview-text">${htmlEscape(text || '（本次推演结果为空）').replace(/\n/g, '<br>')}</div>
   </details>`;
@@ -2091,8 +2177,8 @@ function renderDirectorSettingsTab() {
       <textarea class="text_pole sd-textarea sd-system-prompt" spellcheck="false">${htmlEscape(settings.systemPrompt || DEFAULT_SYSTEM_PROMPT)}</textarea>
     </section>
     <section class="sd-card">
-      <details class="sd-context-block" data-acc="output-schema">
-        <summary><b>输出格式</b><span class="sd-summary-note">推演返回的JSON结构，一般无需改动</span></summary>
+      <details class="sd-plain-fold" data-acc="output-schema">
+        <summary><b>输出格式</b><span class="sd-summary-note">推演返回的 JSON 结构，一般无需改动</span></summary>
         <textarea class="text_pole sd-textarea sd-output-schema" spellcheck="false">${htmlEscape(settings.outputSchemaText || JSON_SCHEMA_TEXT)}</textarea>
       </details>
       <div class="sd-button-row"><button class="sd-btn sd-save-director-settings">保存幕后</button><button class="sd-btn sd-reset-system">恢复默认</button></div>
@@ -2118,7 +2204,7 @@ function renderLogEntry(log, index) {
       <div class="sd-log-cap"><i class="fa-solid fa-arrow-up"></i>发送${log.request ? infoTag(`约 ${estimateTokens(log.request)} token`) : ''}</div>
       <pre class="sd-term">${htmlEscape(log.request || '暂无')}</pre>
       <div class="sd-log-cap"><i class="fa-solid fa-arrow-down"></i>返回${log.response ? infoTag(`约 ${estimateTokens(log.response)} token`) : ''}</div>
-      <pre class="sd-term">${htmlEscape(log.response || '暂无')}</pre>
+      <pre class="sd-term">${htmlEscape(stripThinkChain(log.response) || (log.response ? '（仅含思维链，已折除）' : '暂无'))}</pre>
     </div>
   </details>`;
 }
@@ -2212,22 +2298,10 @@ function bindActiveTabEvents(root) {
   }));
   root.querySelectorAll('.sd-delete-history').forEach((el) => el.addEventListener('click', async () => {
     const store = getChatStore();
-    const record = (store.history || []).find((x) => x.id === el.dataset.id);
+    // v1.2.1：删除历史记录只移除该条日志，绝不连带清空当前推演（清空交由扫帚按钮）
     store.history = (store.history || []).filter((x) => x.id !== el.dataset.id);
-    // v0.5.3：删除的记录若正是当前展示的推演，视为废弃——
-    // 界面完全清空、暗线注入清除、不再并入下次推演提示词
-    const isCurrentPlan = !!record && !!store.plan && (
-      (store.updatedAt && record.createdAt && store.updatedAt === record.createdAt)
-      || JSON.stringify(record.plan) === JSON.stringify(store.plan)
-    );
-    if (isCurrentPlan) {
-      store.plan = null;
-      store.updatedAt = '';
-      injectSelection.clear();
-    }
     await saveMetadata();
-    await applyDirectorInjection();
-    toast(isCurrentPlan ? '已删除并废弃当前推演。' : '历史记录已删除。', 'success');
+    toast('历史记录已删除。', 'success');
     renderModal();
   }));
   root.querySelectorAll('.sd-inject').forEach((el) => el.addEventListener('click', () => {
@@ -2365,12 +2439,15 @@ function bindActiveTabEvents(root) {
   }));
   root.querySelectorAll('.sd-refresh-presets').forEach((el) => el.addEventListener('click', () => refreshPresets(true)));
   root.querySelectorAll('.sd-refresh-worldbooks').forEach((el) => el.addEventListener('click', () => refreshWorldBooks(true)));
-  root.querySelectorAll('.sd-toggle-preset').forEach((el) => el.addEventListener('change', () => {
-    setPresetNameSelected(el.dataset.name, el.checked);
+  root.querySelectorAll('.sd-pick-preset').forEach((el) => el.addEventListener('change', () => {
+    // 单选：先清掉所有已选预设，再选中当前项（空 = 不使用预设）
+    for (const name of getSelectedPresetNames()) setPresetNameSelected(name, false);
+    if (el.dataset.name) setPresetNameSelected(el.dataset.name, true);
     renderModal();
   }));
   root.querySelectorAll('.sd-toggle-worldbook').forEach((el) => el.addEventListener('change', async () => {
     await setWorldBookNameSelected(el.dataset.name, el.checked);
+    lastWorldView = el.checked ? el.dataset.name : '';   // 最后勾选的世界书 = 下方查看项
     renderModal();
   }));
   root.querySelectorAll('.sd-context-check').forEach((el) => {
@@ -2598,13 +2675,26 @@ async function buildTheaterPresetText() {
   if (!presetName) return '';
   const entries = contextScanCache.presets?.[presetName] || getPresetEntries(presetName);
   let output = '';
+  let worldInjected = false;
   for (const [index, item] of (entries || []).entries()) {
     const itemId = getContextItemId(item, index);
     if (!isTheaterPresetItemSelected(presetName, itemId)) continue;
     const title = item.name || item.identifier || item.role || `条目 ${index + 1}`;
     let content = await resolveMacro(item.content || item.prompt || item.message || item.text || '');
     content = processRandomMacros(content);
-    if (content) output += `\n【${title}】\n${cleanContextText(content)}\n`;
+    if (content) {
+      output += `\n【${title}】\n${cleanContextText(content)}\n`;
+      continue;
+    }
+    // v1.2.1：解析空内容的标记条目（角色设定 / 世界书 / 人设等）
+    const resolved = await resolvePresetMarker(item);
+    if (resolved) {
+      if (resolved.isWorld) {
+        if (worldInjected) continue;
+        worldInjected = true;
+      }
+      output += `\n【${resolved.title}】\n${resolved.content}\n`;
+    }
   }
   return output.trim();
 }
@@ -2616,21 +2706,8 @@ async function buildTheaterDefaultText() {
   if (charDesc) output += `\n【当前角色设定】\n${getCharacterName()}\n${charDesc}\n`;
   const userDesc = cleanContextText(await resolveMacro(getPersonaDescription()));
   if (userDesc) output += `\n【用户人设】\n${getPersonaName()}\n${userDesc}\n`;
-  // 直接读取当前角色绑定的世界书全部启用条目（不依赖扩展页的勾选与缓存）
-  const boundNames = uniqueClean([...detectBoundWorldBookNames(), ...(contextScanCache.boundWorldBookNames || [])]);
-  for (const wbName of boundNames) {
-    let entries = contextScanCache.worldBooks?.[wbName];
-    if (!entries || !entries.length) {
-      try { entries = await getWorldBookEntries(wbName); } catch (_) { entries = []; }
-    }
-    for (const [index, item] of (entries || []).entries()) {
-      if (item?.enabled === false || item?.disable === true) continue;
-      const title = item.name || item.comment || (Array.isArray(item.key) ? item.key.join(', ') : item.key) || `世界书条目 ${index + 1}`;
-      let content = await resolveMacro(item.content || item.text || '');
-      content = processRandomMacros(content);
-      if (content) output += `\n【世界书 - ${wbName}: ${title}】\n${cleanContextText(content)}\n`;
-    }
-  }
+  const worldText = await buildBoundWorldText();
+  if (worldText) output += `\n【世界书】\n${worldText}\n`;
   return output.trim();
 }
 
@@ -2751,7 +2828,7 @@ function renderTheaterPresetEntries(presetName) {
     const checked = isTheaterPresetItemSelected(presetName, id) ? 'checked' : '';
     return `<label class="sd-source-row"><input type="checkbox" class="sd-theater-preset-item" data-id="${htmlEscape(String(id))}" ${checked}><span>${htmlEscape(title)}</span></label>`;
   }).join('');
-  return `<details class="sd-context-block" data-acc="theater-preset-entries" open><summary><b>预设条目</b></summary><div class="sd-source-list">${rows}</div></details>`;
+  return `<details class="sd-context-block" data-acc="theater-preset-entries" open><summary><b>预设条目</b></summary><div class="sd-source-list sd-entry-scroll sd-scroll">${rows}</div></details>`;
 }
 
 async function stageTheaterScene() {
