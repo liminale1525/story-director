@@ -1018,6 +1018,17 @@ html body #zmer-universal-toast-theme-layer { z-index: 2147483646 !important; }
 
 #story-director-modal .sd-depth-field input { width: 88px !important; margin: 0 !important; text-align: center; }
 
+#story-director-modal .sd-theater-history-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin: 10px 2px 4px;
+}
+#story-director-modal .sd-theater-history-row .checkbox_label { margin: 0 !important; }
+#story-director-modal .sd-theater-history-row .sd-depth-field { justify-self: start; }
+#story-director-modal .sd-theater-history-row .sd-depth-field input { width: 72px !important; }
+
 #story-director-modal .sd-tag-rule-list { margin: 8px 15px 0; }
 
 #story-director-modal .sd-tag-rule-row {
