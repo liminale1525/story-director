@@ -1,5 +1,5 @@
 /* ============================================================
-   千幕 (Qianmu) v1.2.1
+   千幕 (Qianmu) v1.2.2
    ============================================================ */
 
 /* ---------- 0. 基础 ---------- */
@@ -685,9 +685,6 @@ html body #zmer-universal-toast-theme-layer { z-index: 2147483646 !important; }
 #story-director-modal .sd-plain-fold > summary b { font-weight: 600; }
 #story-director-modal .sd-plain-fold > .sd-textarea { margin-top: 8px; }
 
-/* v1.2.1：取材页基础引用互斥小字注释 */
-#story-director-modal .sd-base-note { margin: 8px 2px 0; font-size: .82em; }
-
 #story-director-modal .sd-status-card { padding: 14px 16px; }
 
 #story-director-modal .sd-metric {
@@ -846,8 +843,17 @@ html body #zmer-universal-toast-theme-layer { z-index: 2147483646 !important; }
 #story-director-modal .sd-item-summary-main h4 { margin: 0 0 6px; line-height: 1.35; }
 
 #story-director-modal .sd-mini-chip-row { display: flex; flex-flow: row wrap; gap: 6px; }
-#story-director-modal .sd-mini-chip-row .sd-badge { margin: 0; }
-#story-director-modal .sd-mini-chip-row .sd-badge b { margin-right: 4px; color: var(--sd-text); }
+#story-director-modal .sd-mini-chip-row .sd-badge {
+  margin: 0;
+  max-width: 100%;
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  align-items: flex-start;
+  border-radius: 10px !important;
+  line-height: 1.4;
+}
+#story-director-modal .sd-mini-chip-row .sd-badge b { margin-right: 4px; color: var(--sd-text); flex: 0 0 auto; }
 
 #story-director-modal .sd-inject-select-label {
   flex: 0 0 auto;
@@ -986,6 +992,20 @@ html body #zmer-universal-toast-theme-layer { z-index: 2147483646 !important; }
 
 #story-director-modal .sd-base-grid .checkbox_label { margin: 0 !important; }
 #story-director-modal .sd-base-grid .sd-span-2 { grid-column: 1 / -1; }
+
+#story-director-modal .sd-fixed-ref {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+#story-director-modal .sd-fixed-ref .sd-fixed-ref-label { color: var(--sd-text); }
+#story-director-modal .sd-fixed-ref .sd-fixed-ref-note {
+  margin-left: auto;
+  font-size: .78em;
+  color: var(--sd-muted);
+  opacity: .85;
+}
 
 #story-director-modal .sd-depth-field {
   display: inline-flex !important;
@@ -1508,11 +1528,30 @@ html body #zmer-universal-toast-theme-layer { z-index: 2147483646 !important; }
 #story-director-modal .sd-reader-bar > .sd-icon-btn,
 #story-director-modal .sd-reader-bar > span { flex: 0 0 auto; }
 #story-director-modal .sd-reader-card .sd-reader-prose {
-  line-height: 1.85;
+  line-height: 1.6;
   font-size: 15px;
   color: var(--sd-text);
   white-space: normal;
   word-break: break-word;
+}
+#story-director-modal .sd-reader-card .sd-reader-prose[data-scale="small"] { font-size: 13px; line-height: 1.5; }
+#story-director-modal .sd-reader-card .sd-reader-prose[data-scale="medium"] { font-size: 15px; line-height: 1.6; }
+#story-director-modal .sd-reader-card .sd-reader-prose[data-scale="large"] { font-size: 18px; line-height: 1.7; }
+#story-director-modal .sd-reader-font { flex: 0 0 auto; display: inline-flex; gap: 2px; }
+#story-director-modal .sd-reader-font-btn {
+  min-width: 26px;
+  padding: 2px 7px;
+  border: 1px solid var(--sd-border) !important;
+  border-radius: 8px !important;
+  background: var(--sd-glass-weak);
+  color: var(--sd-muted);
+  font-size: .8em;
+  cursor: pointer;
+}
+#story-director-modal .sd-reader-font-btn.active {
+  background: var(--sd-glass);
+  color: var(--sd-text);
+  border-color: var(--sd-text) !important;
 }
 #story-director-modal .sd-reader-card .sd-reader-frame {
   width: 100%;
