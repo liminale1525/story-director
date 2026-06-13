@@ -645,11 +645,16 @@ function renderLibraryListBody(cfg, items) {
     return `<p class="sd-muted">${cfg.getSearch() ? '没有匹配的条目。' : htmlEscape(cfg.emptyText || '暂无条目')}</p>`;
   }
   const { folderList, loose } = groupByFolder(items, cfg.getFolder);
-  const folderHtml = folderList.map(({ name, list }) => `
+  const folderHtml = folderList.map(({ name, list }) => {
+    const folderPick = cfg.exportMode
+      ? `<label class="sd-lib-folder-pick" title="选择整个文件夹"><input type="checkbox" class="sd-lib-folder-select" ${list.length && list.every((it) => cfg.selection.has(it.id)) ? 'checked' : ''}></label>`
+      : '';
+    return `
     <details class="sd-lib-folder" data-acc="${cfg.ns}-folder-${htmlEscape(name)}" open>
-      <summary><i class="fa-solid fa-folder"></i><b>${htmlEscape(name)}</b><span>${list.length}</span></summary>
+      <summary>${folderPick}<i class="fa-solid fa-folder"></i><b>${htmlEscape(name)}</b><span>${list.length}</span></summary>
       <div class="sd-lib-folder-body">${list.map((it) => renderLibraryRow(cfg, it)).join('')}</div>
-    </details>`).join('');
+    </details>`;
+  }).join('');
   const looseHtml = loose.map((it) => renderLibraryRow(cfg, it)).join('');
   return folderHtml + looseHtml;
 }
@@ -661,7 +666,7 @@ function renderLibrarySection(cfg) {
     ? all.filter((it) => String(cfg.getName(it) || '').toLowerCase().includes(search.toLowerCase()))
     : all;
   const exportBar = cfg.exportMode
-    ? `<div class="sd-export-bar"><span class="sd-export-hint">勾选要导出的条目</span><button type="button" class="sd-btn sd-mini-btn sd-lib-confirm-export">导出 (<span>${cfg.selection.size}</span>)</button><button type="button" class="sd-btn sd-mini-btn sd-lib-cancel-export">取消</button></div>`
+    ? `<div class="sd-export-bar"><button type="button" class="sd-btn sd-mini-btn sd-lib-select-all">全选</button><span class="sd-export-hint">已选 <span class="sd-lib-sel-count">${cfg.selection.size}</span> 项</span><button type="button" class="sd-btn sd-mini-btn sd-danger sd-lib-batch-delete">删除</button><button type="button" class="sd-btn sd-mini-btn sd-lib-confirm-export">导出</button><button type="button" class="sd-btn sd-mini-btn sd-lib-cancel-export">取消</button></div>`
     : '';
   return `
       <div class="sd-lib-scope" data-lib="${htmlEscape(cfg.ns)}">
@@ -669,7 +674,7 @@ function renderLibrarySection(cfg) {
         <h3>${htmlEscape(cfg.title)}</h3>
         <div class="sd-template-io-buttons">
           <label class="sd-icon-btn sd-file-label sd-lib-import-label" title="导入" aria-label="导入"><i class="fa-solid fa-file-import"></i><input type="file" accept="application/json" class="sd-lib-import"></label>
-          <button type="button" class="sd-icon-btn sd-lib-export-toggle ${cfg.exportMode ? 'active' : ''}" title="导出" aria-label="导出"><i class="fa-solid fa-file-export"></i></button>
+          <button type="button" class="sd-icon-btn sd-lib-export-toggle ${cfg.exportMode ? 'active' : ''}" title="多选" aria-label="多选"><i class="fa-solid fa-square-check"></i></button>
         </div>
         <span class="sd-tpl-count">${all.length} 个</span>
       </div>
@@ -685,6 +690,11 @@ function bindLibraryEvents(rootEl, makeCfg, handlers) {
   // 作用域隔离：只在本库自己的容器内查询，绝不串到另一个库（剧本库 / 剧札共用同套 class）
   const root = rootEl.querySelector(`.sd-lib-scope[data-lib="${cfg.ns}"]`);
   if (!root) return;   // 当前标签未渲染该库，跳过
+  const updateSelCount = () => {
+    const c = makeCfg();
+    const cnt = root.querySelector('.sd-lib-sel-count');
+    if (cnt) cnt.textContent = String(c.selection.size);
+  };
   const refreshList = () => {
     const c = makeCfg();
     const search = c.getSearch();
@@ -704,8 +714,24 @@ function bindLibraryEvents(rootEl, makeCfg, handlers) {
       const c = makeCfg();
       if (el.checked) c.selection.add(el.dataset.id);
       else c.selection.delete(el.dataset.id);
-      const span = root.querySelector('.sd-lib-confirm-export span');
-      if (span) span.textContent = String(c.selection.size);
+      updateSelCount();
+      const fold = el.closest('.sd-lib-folder');
+      const fpick = fold?.querySelector('.sd-lib-folder-select');
+      if (fpick) {
+        const boxes = [...fold.querySelectorAll('.sd-lib-select')];
+        fpick.checked = boxes.length > 0 && boxes.every((b) => b.checked);
+      }
+    }));
+    root.querySelectorAll('.sd-lib-folder-select').forEach((el) => el.addEventListener('click', (e) => e.stopPropagation()));
+    root.querySelectorAll('.sd-lib-folder-select').forEach((el) => el.addEventListener('change', () => {
+      const c = makeCfg();
+      const fold = el.closest('.sd-lib-folder');
+      fold?.querySelectorAll('.sd-lib-select').forEach((box) => {
+        box.checked = el.checked;
+        if (el.checked) c.selection.add(box.dataset.id);
+        else c.selection.delete(box.dataset.id);
+      });
+      updateSelCount();
     }));
   };
   root.querySelector('.sd-lib-search')?.addEventListener('input', (e) => {
@@ -715,6 +741,17 @@ function bindLibraryEvents(rootEl, makeCfg, handlers) {
   root.querySelector('.sd-lib-export-toggle')?.addEventListener('click', handlers.onToggleExport);
   root.querySelector('.sd-lib-cancel-export')?.addEventListener('click', handlers.onCancelExport);
   root.querySelector('.sd-lib-confirm-export')?.addEventListener('click', handlers.onConfirmExport);
+  root.querySelector('.sd-lib-batch-delete')?.addEventListener('click', handlers.onBatchDelete);
+  root.querySelector('.sd-lib-select-all')?.addEventListener('click', () => {
+    const c = makeCfg();
+    const search = c.getSearch();
+    const matched = search ? c.items.filter((it) => String(c.getName(it) || '').toLowerCase().includes(search.toLowerCase())) : c.items;
+    const allSelected = matched.length > 0 && matched.every((it) => c.selection.has(it.id));
+    if (allSelected) matched.forEach((it) => c.selection.delete(it.id));
+    else matched.forEach((it) => c.selection.add(it.id));
+    refreshList();
+    updateSelCount();
+  });
   root.querySelector('.sd-lib-import')?.addEventListener('change', handlers.onImport);
   bindRowEvents();
 }
@@ -2481,6 +2518,18 @@ function bindActiveTabEvents(root) {
       templateExportSelection.clear();
       renderModal();
     },
+    onBatchDelete: async () => {
+      if (!templateExportSelection.size) return toast('请先勾选要删除的剧本。', 'warning');
+      const yes = await confirmDialog('批量删除', `确认删除选中的 ${templateExportSelection.size} 个剧本？`);
+      if (!yes) return;
+      settings.templates = (settings.templates || []).filter((x) => !templateExportSelection.has(x.id));
+      ctx().extensionSettings[MODULE_NAME].templates = settings.templates;
+      templateExportSelection.clear();
+      templateExportMode = false;
+      saveSettings();
+      toast('已删除。', 'success');
+      renderModal();
+    },
     onImport: importTemplates,
   });
 
@@ -3330,6 +3379,18 @@ function bindTheaterTabEvents(root) {
       exportTheaterScripts([...theaterExportSelection]);
       theaterExportMode = false;
       theaterExportSelection.clear();
+      renderModal();
+    },
+    onBatchDelete: async () => {
+      if (!theaterExportSelection.size) return toast('请先勾选要删除的剧札。', 'warning');
+      const yes = await confirmDialog('批量删除', `确认删除选中的 ${theaterExportSelection.size} 个剧札？`);
+      if (!yes) return;
+      const t = getTheater();
+      t.scripts = (t.scripts || []).filter((x) => !theaterExportSelection.has(x.id));
+      theaterExportSelection.clear();
+      theaterExportMode = false;
+      saveSettings();
+      toast('已删除。', 'success');
       renderModal();
     },
     onImport: importTheaterScripts,
