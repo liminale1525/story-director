@@ -5,7 +5,7 @@
 /* ---------- 0. 基础 ---------- */
 #story-director-settings { display: none !important; }
 
-/* ST 通知层级：用 html body 前缀拔高特异度，确保盖过 ST 核心 style.css 中同为 #toast-container !important 的规则（同特异度时仅靠加载顺序，不可靠） */
+/* ST 通知层级 */
 html body #toast-container,
 html body #toast-container.toast-top-center,
 html body #toast-container.toast-top-right,
