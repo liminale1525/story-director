@@ -424,9 +424,18 @@ function normalizeUrl(url) {
   return value;
 }
 
+let uidCounter = 0;
 function uid(prefix = 'id') {
-  if (globalThis.crypto?.randomUUID) return `${prefix}-${globalThis.crypto.randomUUID().slice(0, 8)}`;
-  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+  uidCounter = (uidCounter + 1) % 1000000;
+  const rand = globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID().slice(0, 8) : Math.random().toString(36).slice(2, 9);
+  return `${prefix}-${Date.now().toString(36)}-${uidCounter.toString(36)}-${rand}`;
+}
+
+// 导出文件名时间戳：本地时区 YYYY-MM-DD_HH-MM-SS
+function fileStamp() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}_${p(d.getHours())}-${p(d.getMinutes())}-${p(d.getSeconds())}`;
 }
 
 function toast(message, type = 'info') {
@@ -2761,7 +2770,66 @@ async function confirmDialog(title, text) {
   return globalThis.confirm(`${title}\n${text}`);
 }
 
-// API 凭据相关字段，导出时按用户选择决定是否一并带出
+// 导入同名冲突弹窗：返回 { action: 'overwrite'|'skip', all: bool } 或 null（取消整次导入）
+async function importConflictDialog(names, single = false) {
+  const context = ctx();
+  const Popup = context.Popup;
+  const count = names.length;
+  const preview = single
+    ? `「${names[0]}」`
+    : names.slice(0, 8).map((n) => `「${n}」`).join('、') + (count > 8 ? ` 等 ${count} 项` : '');
+  if (Popup && context.POPUP_TYPE) {
+    const wrap = document.createElement('div');
+    wrap.className = 'sd-conflict-form';
+    const head = single
+      ? `<p style="text-align:left;margin:0 0 8px">已存在同名条目：${htmlEscape(preview)}</p>`
+      : `<p style="text-align:left;margin:0 0 8px">检测到 ${count} 个同名条目：${htmlEscape(preview)}</p>`;
+    wrap.innerHTML = `
+      ${head}
+      <p style="text-align:left;margin:0 0 10px;color:var(--sd-muted);font-size:.9em">覆盖将更新为导入内容，跳过则保留现有条目。</p>
+      <label style="display:flex;align-items:center;gap:6px;text-align:left;margin:0"><input type="checkbox" class="sd-conflict-all"${single ? '' : ' checked'}> 对${single ? '剩余' : '全部'}同名条目应用同一选择</label>`;
+    try {
+      const popup = new Popup(wrap, context.POPUP_TYPE.TEXT, '', {
+        okButton: '覆盖', cancelButton: '取消',
+        customButtons: [{ text: '跳过', result: 2 }],
+      });
+      const result = await popup.show();
+      const all = !!wrap.querySelector('.sd-conflict-all')?.checked;
+      if (result === 1 || result === true) return { action: 'overwrite', all };
+      if (result === 2) return { action: 'skip', all };
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+  const ok = globalThis.confirm(`${single ? '已存在同名条目' : `检测到 ${count} 个同名条目`}：${preview}\n\n确定=覆盖，取消=跳过`);
+  return { action: ok ? 'overwrite' : 'skip', all: true };
+}
+
+// 解析所有同名冲突：返回 Map<name, 'overwrite'|'skip'>；取消整次导入返回 null
+async function resolveImportConflicts(names) {
+  const decisions = new Map();
+  if (!names.length) return decisions;
+  // 先弹一次总览，勾选「全部应用」则一锤定音
+  const first = await importConflictDialog(names);
+  if (first === null) return null;
+  if (first.all) {
+    names.forEach((n) => decisions.set(n, first.action));
+    return decisions;
+  }
+  // 未勾选全部：第一项用本次选择，其余逐项询问（可中途勾选「剩余全部应用」）
+  decisions.set(names[0], first.action);
+  for (let i = 1; i < names.length; i++) {
+    const choice = await importConflictDialog(names.slice(i), true);
+    if (choice === null) return null;
+    if (choice.all) {
+      for (let j = i; j < names.length; j++) decisions.set(names[j], choice.action);
+      break;
+    }
+    decisions.set(names[i], choice.action);
+  }
+  return decisions;
+}
 const API_CONFIG_KEYS = ['apiUrl', 'apiKey', 'model', 'availableModels', 'apiProfiles', 'providerMode'];
 
 async function exportConfig() {
@@ -2775,7 +2843,7 @@ async function exportConfig() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `qianmu-config-${new Date().toISOString().slice(0, 10)}.json`;
+  a.download = `qianmu-config-${fileStamp()}.json`;
   document.body.appendChild(a);
   a.click();
   a.remove();
@@ -2825,7 +2893,7 @@ function exportTemplates(ids = null) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `qianmu-blueprints-${new Date().toISOString().slice(0, 10)}.json`;
+  a.download = `qianmu-blueprints-${fileStamp()}.json`;
   document.body.appendChild(a);
   a.click();
   a.remove();
@@ -2841,13 +2909,30 @@ async function importTemplates(event) {
     const data = JSON.parse(text);
     const incoming = Array.isArray(data) ? data : data.templates;
     if (!Array.isArray(incoming)) throw new Error('没有找到剧本数组。');
-    for (const item of incoming) {
-      if (!item?.content) continue;
-      const id = item.id && !(settings.templates || []).some((tpl) => tpl.id === item.id) ? item.id : uid('tpl');
-      settings.templates.push({ id, name: item.name || '导入剧本', folder: sanitizeFolder(item.folder || (Array.isArray(item.tags) ? item.tags[0] : '')), content: item.content, createdAt: item.createdAt || new Date().toISOString() });
+    const valid = incoming.filter((item) => item?.content);
+    settings.templates ||= [];
+    const byName = new Map((settings.templates).map((tpl) => [tpl.name, tpl]));
+    const conflictNames = [...new Set(valid.map((item) => item.name || '导入剧本').filter((n) => byName.has(n)))];
+    const decisions = await resolveImportConflicts(conflictNames);
+    if (decisions === null) { toast('已取消导入。', 'info'); return; }
+    let added = 0, updated = 0, skipped = 0;
+    for (const item of valid) {
+      const name = item.name || '导入剧本';
+      const existing = byName.get(name);
+      if (existing) {
+        if (decisions.get(name) === 'skip') { skipped++; continue; }
+        existing.folder = sanitizeFolder(item.folder || existing.folder || (Array.isArray(item.tags) ? item.tags[0] : ''));
+        existing.content = item.content;
+        updated++;
+        continue;
+      }
+      const tpl = { id: uid('tpl'), name, folder: sanitizeFolder(item.folder || (Array.isArray(item.tags) ? item.tags[0] : '')), content: item.content, createdAt: item.createdAt || new Date().toISOString() };
+      settings.templates.push(tpl);
+      byName.set(name, tpl);
+      added++;
     }
     saveSettings();
-    toast('剧本已导入。', 'success');
+    toast(`导入完成：新增 ${added}，覆盖 ${updated}，跳过 ${skipped}。`, 'success');
     renderModal();
   } catch (error) {
     toast(`导入失败：${error.message}`, 'error');
@@ -2891,11 +2976,11 @@ function seedBuiltinTheaters() {
   saveSettings();
 }
 
-// 上限只约束用户自建剧札（最多 50 条），内置项全部保留，不被裁掉
-function capUserScripts(scripts) {
+// 规整剧札顺序：用户自建项在前、内置项在后，不设数量上限（保留全部）
+function normalizeScripts(scripts) {
   const list = Array.isArray(scripts) ? scripts : [];
+  const user = list.filter((s) => !s.builtin);
   const builtins = list.filter((s) => s.builtin);
-  const user = list.filter((s) => !s.builtin).slice(0, 50);
   return [...user, ...builtins];
 }
 
@@ -3317,7 +3402,7 @@ function bindTheaterTabEvents(root) {
     if (!result.name) return toast('请为这一幕取个剧名。', 'warning');
     const t = getTheater();
     t.scripts.unshift({ id: uid('script'), title: result.name, folder: result.folder || '', instruction, createdAt: new Date().toISOString() });
-    t.scripts = capUserScripts(t.scripts);
+    t.scripts = normalizeScripts(t.scripts);
     saveSettings();
     toast('已存入剧札。', 'success');
     renderModal();
@@ -3347,6 +3432,15 @@ function bindTheaterTabEvents(root) {
       });
       if (edited === null) return;
       if (!edited.content) return toast('剧场指令不能为空。', 'warning');
+      if (s.builtin) {
+        // B 方案一致性：内置项不就地改（更新会还原），改成派生一份用户副本，内置保持原样
+        const fork = { id: uid('script'), title: edited.name || s.title, folder: sanitizeFolder(edited.folder), instruction: edited.content, createdAt: new Date().toISOString() };
+        t.scripts = normalizeScripts([fork, ...t.scripts]);
+        saveSettings();
+        toast('内置剧札不可直接修改，已另存为你的副本。', 'success');
+        renderModal();
+        return;
+      }
       s.title = edited.name || s.title;
       s.folder = edited.folder;
       s.instruction = edited.content;
@@ -3406,7 +3500,7 @@ function exportTheaterScripts(ids = null) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `qianmu-scripts-${new Date().toISOString().slice(0, 10)}.json`;
+  a.download = `qianmu-scripts-${fileStamp()}.json`;
   document.body.appendChild(a);
   a.click();
   a.remove();
@@ -3423,15 +3517,47 @@ async function importTheaterScripts(event) {
     const incoming = Array.isArray(data) ? data : (data.scripts || data.templates);
     if (!Array.isArray(incoming)) throw new Error('没有找到剧札数组。');
     const t = getTheater();
-    for (const item of incoming) {
-      const instruction = item?.instruction || item?.content;
-      if (!instruction) continue;
-      const id = item.id && !t.scripts.some((s) => s.id === item.id) ? item.id : uid('script');
-      t.scripts.unshift({ id, title: item.title || item.name || '导入剧札', folder: sanitizeFolder(item.folder), instruction, createdAt: item.createdAt || new Date().toISOString() });
+    const valid = incoming
+      .map((item) => ({ item, instruction: item?.instruction || item?.content, title: item?.title || item?.name || '导入剧札' }))
+      .filter((x) => x.instruction);
+    // B 方案：去重只认用户项；与内置同名只视作"撞名"，不覆盖内置，改存成可见的用户副本
+    const userByTitle = new Map((t.scripts || []).filter((s) => !s.builtin).map((s) => [s.title, s]));
+    const builtinTitles = new Set((t.scripts || []).filter((s) => s.builtin).map((s) => s.title));
+    const takenTitles = new Set([...userByTitle.keys(), ...builtinTitles]);
+    const uniqueCopyTitle = (base) => {
+      if (!takenTitles.has(base)) return base;
+      let n = 1;
+      while (takenTitles.has(`${base} (${n})`)) n++;
+      return `${base} (${n})`;
+    };
+    const conflictNames = [...new Set(valid.map((x) => x.title).filter((n) => userByTitle.has(n)))];
+    const decisions = await resolveImportConflicts(conflictNames);
+    if (decisions === null) { toast('已取消导入。', 'info'); return; }
+    let added = 0, updated = 0, skipped = 0, copied = 0;
+    const fresh = [];
+    for (const { item, instruction, title } of valid) {
+      const existing = userByTitle.get(title);
+      if (existing) {   // 命中用户项：按选择覆盖或跳过（覆盖保留原 id）
+        if (decisions.get(title) === 'skip') { skipped++; continue; }
+        existing.instruction = instruction;
+        existing.folder = sanitizeFolder(item.folder || existing.folder);
+        updated++;
+        continue;
+      }
+      // 未命中用户项：若与内置撞名则换个可见副本名，内置保持原样
+      const finalTitle = builtinTitles.has(title) ? uniqueCopyTitle(title) : title;
+      if (finalTitle !== title) copied++; else added++;
+      const script = { id: uid('script'), title: finalTitle, folder: sanitizeFolder(item.folder), instruction, createdAt: item.createdAt || new Date().toISOString() };
+      fresh.push(script);
+      userByTitle.set(finalTitle, script);
+      takenTitles.add(finalTitle);
     }
-    t.scripts = capUserScripts(t.scripts);
+    // 新条目作为用户剧札插到最前；normalizeScripts 只整顺序、不限数量
+    t.scripts = normalizeScripts([...fresh, ...(t.scripts || [])]);
     saveSettings();
-    toast('剧札已导入。', 'success');
+    const parts = [`新增 ${added}`, `覆盖 ${updated}`, `跳过 ${skipped}`];
+    if (copied) parts.push(`内置同名另存副本 ${copied}`);
+    toast(`导入完成：${parts.join('，')}。`, 'success');
     renderModal();
   } catch (error) {
     toast(`导入失败：${error.message}`, 'error');
