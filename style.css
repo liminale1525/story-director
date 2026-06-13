@@ -1511,6 +1511,8 @@ html body #zmer-universal-toast-theme-layer { z-index: 2147483646 !important; }
 }
 #story-director-modal .sd-lib-pick { display: inline-flex; align-items: center; margin: 0 !important; flex: 0 0 auto; }
 #story-director-modal .sd-lib-pick input { margin: 0; }
+#story-director-modal .sd-lib-folder-pick { display: inline-flex; align-items: center; margin: 0 !important; flex: 0 0 auto; }
+#story-director-modal .sd-lib-folder-pick input { margin: 0; cursor: pointer; }
 
 #story-director-modal .sd-icon-sm {
   width: 26px !important;
