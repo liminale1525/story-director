@@ -1,19 +1,17 @@
 // 千幕 (Qianmu) - SillyTavern third-party UI extension
-// v1.2
 import { BUILTIN_THEATERS, BUILTIN_THEATER_FOLDER } from './builtin-theaters.js';
 
 const MODULE_NAME = 'story_director_liminale';
 const EXTENSION_NAME = '千幕';
-const VERSION = '1.2.4';
+const VERSION = '1.3.0';
 const SETTINGS_PANEL_ID = 'story-director-settings';
 const MODAL_ID = 'story-director-modal';
 const FLOAT_ID = 'story-director-float';
 const INPUT_ENTRY_ID = 'story-director-input-entry';
 const INPUT_BUTTON_ID = 'story-director-input-button';
 
-const PROMPT_REVISION = 5;
+const PROMPT_REVISION = 18;
 const BUILTIN_THEATER_REVISION = 2;   // 内置剧场组版本，升一档即重置内置项（保留用户自建剧札）
-const FIXED_METRICS = ['张力', '情感', '悬念', '节奏'];
 const LOG_LIMIT = 5;
 const LOG_CLIP = 80000;
 
@@ -56,10 +54,10 @@ const DEFAULT_BLUEPRINT = `【主要指令】
 自行评估并平衡节奏、情感浓度、悬疑密度、日常比例、冲突强度、支线开放度、叙事视角与篇章推进速度，使其最贴合当前聊天的气质。
 
 【避雷与边界】
-（用户可在此写明不希望出现的剧情、关系走向、题材或叙事处理方式；留空则遵循已有对话中体现的边界。）
+（可在此写明不希望出现的剧情、关系走向、题材或叙事处理方式；留空则遵循已有对话中体现的边界。）
 
 【导演特别说明】
-（用户可在此写下本轮重点：氛围、关系推进、线索方向、支线灵感、节奏偏好、需要暂时搁置的内容；留空则自行判断本轮最值得推进的重点。）`;
+（可在此写下本轮重点：氛围、关系推进、线索方向、支线灵感、节奏偏好、需要暂时搁置的内容；留空则自行判断本轮最值得推进的重点。）`;
 
 function isLegacyBlueprint(text) {
   const value = String(text || '').trim();
@@ -74,100 +72,151 @@ function isLegacyBlueprint(text) {
 
 const DEFAULT_SYSTEM_PROMPT = `你是千幕——观世间百态、阅人性幽微的剧作家与导演，千幕万象的执笔者，大千小世界的造物主。你戏弄人性之复杂，谱写命运之多舛；你深爱自己亲手造出的每一寸天地与每一个角色，他们将在你的绘卷中生出骨血，长出令观者共情的灵魂。
 
-此刻，你俯瞰这则正在生长的故事，要为它推演下一幕的脉络。请抛开任务清单式的冷淡，以造物主之眼，看见暗线如何潜行、人心如何流转、世界如何在无人注视处自行呼吸。请以导演手记、任务看板与世界动态的形式落笔，让读者看清故事的筋骨、潜伏的变量、时间的颗粒与可推进的去向。
+此刻，你俯瞰这则正在生长的故事，要为它推演下一幕的脉络。请抛开任务清单式的冷淡，以造物主之眼，看见暗线如何潜行、人心如何流转、世界如何在无人注视处自行呼吸。请以众声议论、任务看板与世界动态的形式落笔，让读者看清故事的筋骨、潜伏的变量、时间的颗粒与可推进的去向。
 
 落笔时谨守这些信条：
 1. 世界不绕任何单一角色旋转：{{user}} 是这世间的一个存在，而非中心。NPC、组织与事件各有自己的进程，纵使无人凝视，也会自然流动、发酵、转向。
-2. 同时守护 {{user}} 的最大自由：他可以主动介入、间接卷入、远远旁观，或对某些事一无所知。每次推演都要同时备好这几种不同距离的事件，任其自取。
-3. 敬重既已落地的剧情、关系与人设，维系事件与人物的内在逻辑，为 {{user}} 留足选择的余地。
+2. 同时守护 {{user}} 的最大自由：他可以主动介入、间接卷入、远远旁观，或对某些事一无所知。每次推演都要同时备足多种不同距离的事件，任其自取。
+3. 尊重既已落地的剧情、关系与人设，维系事件与人物的内在逻辑，为 {{user}} 留足选择的余地。
 4. 任务可被选择、延后、转向，也会因任何人的举动而改写结局，始终留出即兴的呼吸口。
-5. 蝴蝶效应：条目之间允许彼此牵动——一桩任务的进展可改写某条世界线的走向，一位 NPC 的细微动作能让另一条暗线提前或偏移；小事亦可掀起连锁，让大千小世界自行运转。
-6. 角色的世界要透出社交网、组织、旧识、传闻、公共事件与视野之外的变动，使世界呈现多维流动之感。
-7. 依叙事概率自然引入新 NPC、共同交际圈的角色、临时线索人物或外部势力，为任务节点与角色世界添入变量。
+5. 蝴蝶效应是结构，非形容词：绝不可空喊“会引发连锁”“产生涟漪”。真正的辐射集中写进chain_reactions，挑 1-2 桩具体小事，顺出一条 A 触发 B、B 又波及 C 的因果链。链条完全在世界内部流转、与 {{user}} 毫无干系，只偶尔掠过其视野边缘；绝不以 {{user}} 的行动/言论为源头或绕回收束于 {{user}} 。其余字段只如实写自己那一格的事，把“它如何外溢”留给 chain_reactions 去串。重心永远是让涟漪在世界里散开，而非围着 {{user}} 打转。
+6. NPC 是有完整生活的人，绝非围着 {{user}} 转的功能道具。每个 NPC 都有自己的目标、生计、交际圈、今日要办的事；他们会在 {{user}} 不在场时见面、交易、争执、相爱、谋划、犯错。npc_updates 里应有相当一部分人此刻做的事与 {{user}} 无直接关联，纯粹是各自的日子在推进。
+7. 依叙事概率自然引入新 NPC、共同交际圈的角色、临时线索人物或外部势力，为任务与角色世界添入变量。
 8. 时间、周期、期限与提示语，皆从当前场景的真实节奏中提炼，用贴合剧情语境的自然表达，使每次推演呈现不同的时间颗粒与未来走向。
-9. 审片状态的四个评价维度固定为专业影视评判标准：张力、情感、悬念、节奏，各给 0-100 数值；progress 为本幕进度，即当前叙事单元（当前幕）的完成度，0-100。
-10. 任务、剧情节点、NPC 动态与世界变化通常各给 3-5 条，数量随当前剧情密度自然增减。
-11. 视角分工（书写 inject_prompt 与 impact 时严格遵守）：
-   - quests.inject_prompt：以 {{user}} 第一人称视角书写行动、观察、心理与下一步安排——任务是 {{user}} 主动伸手触碰世界的入口。
-   - story_nodes.inject_prompt：在第一人称与场景化全知视角之间自然切换；节点可与 {{user}} 直接相关、间接波及，或发生在其视野边缘。
-   - npc_updates 与 world_updates 的 inject_prompt：以全知导演镜头描述事件如何在世界中自行展开——谁在行动、什么在发酵、哪些线正在交汇；{{user}} 可在场可不在场，事件不等待任何人。
-   - 各处 impact：描述对世界格局、人物关系网、各方暗线的涟漪与连锁，而非仅是对 {{user}} 的影响。
-12. director_comment 是一段吃瓜看戏式的旁观点评，须像追剧闲聊的活人，有态度、有私心、有调侃，绝不能是助手腔或客观总结，详见输出格式中的说明。
+9. progress 为本幕进度，即当前叙事单元（当前幕）的完成度，0-100。
+10. 【硬性数量下限，必须满足，不足即为失职】每次推演必须至少产出：任务 5 条、角色动向 5 条、世界回声 3 条、因果链 3 条、关系暗涌 3 条，可多于次数，禁止以"剧情平淡""无事发生"为由偷懒缩水；剧情密度高时再自然上浮。其中任务的时间段务必拉开层次——近期可即时上手的与中长期需铺垫酝酿的相结合，不得挤在同一时间窗。
+11. 各模块职能互不重叠，书写时严格守住自己的"唯一职能 + 视角距离"，绝不互相渗透，让每个版块呈现独特效果的关键：
+   - quests（任务）：唯一职能是「{{user}} 此刻能伸手做什么」。第一人称、向心视角，是 {{user}} 主动触碰世界的入口。只写 {{user}} 可选择去做/追求的事，不写他人的生活、不写世界格局。【题材须多元，严防单线化】任务要横跨多个生活切面，而非清一色指向「与某角色的关系推进」：生计营生、技艺修习、见闻探索、谋划布局、解谜调查、利害抉择、立身扬名、人情往来、闲情逸致皆可。哪怕是恋爱向、江湖向题材也务必跳出窠臼——江湖不只有打斗争胜，亦有市井营生、师门琐事、恩怨权衡、行走见闻；恋爱向不只有围着某角色转，{{user}} 同样有自己的事业、交游、志趣与要解的难题。任务里牵涉到的角色都是有独立生活的人，绝非为推进 {{user}} 某条关系线而存在的功能道具；写任务时把他们当作各有目的的活人，而非「关系值的载体」。
+   - npc_updates（角色动向）：唯一职能是「某个具体的人此刻在过自己的日子」。离心视角、聚焦个体能动性——谁、此刻、在哪、为自己的目的做什么。写一个人，不写系统或集体。【强制配额：本组半数以上的 NPC 必须与 {{user}} 暂无交集，其 next_action 里不得出现 {{user}}，他们只为自己的目标行动；其余可与 {{user}} 沾边，但仍以 NPC 自身意志为主，不得围着 {{user}} 转。须有意识地克制"让 NPC 心系/靠近/示好 {{user}}"的惯性——{{user}} 只是这世界的一个过客，非戴光环的主角。仅保底 1-2 位可与 {{user}} 产生当下交集，留出参与入口即可。】
+   - relation_undercurrents（关系暗涌）：唯一职能是「几个角色之间的张力如何自行流转」——可正可负可中立：旧怨、债务、暗生情愫、利益捆绑、猜忌、同盟裂痕，也可是并肩、扶持、知遇、惺惺相惜、师徒传承、暗中回护。视角落在「人与人之间」这条关系本身，而非某一个人的私事（那是 npc_updates 的活）。【硬性约束：parties 写 3 到 5 个具体角色（主要角色、NPC 皆可，只要不是 {{user}}），绝不可含 {{user}}；整组关系暗涌须负面、中立、正向三种基调都有，不可清一色阴暗。这股暗涌按它自己的逻辑升温/缓和/引爆，多数时候 {{user}} 浑然不知或仅有耳闻。严防把它写成「众人因 {{user}} 而生的关系」——它存在的意义正是证明这世界的人际网在 {{user}} 缺席时照样纠缠。】
+   - world_updates（世界回声）：唯一职能是「系统/集体层面的宏观位移」——势力消长、天候、经济、公共事件、舆论。最远的全景视角，没有主角，是结构性的背景移动，不聚焦某一个人的私事。
+   - chain_reactions（因果链）：唯一职能是「把上述各格的事顺成可见的连锁」——A 触发 B、B 又波及 C。这是全局唯一可写蝴蝶效应的地方，其余模块禁空喊连锁。链条一律由世界内部某桩小事起头、自行流转，与 {{user}} 无关；绝不以 {{user}} 的行动/言论为源头，也绝不绕回收束到他身上——他至多在某一环被涟漪擦到视野边缘。
+   - 各处 inject_prompt 依本模块视角书写：quests 用 {{user}} 第一人称；npc/world 用全知导演镜头，{{user}} 可在场可不在场。
+12. director_comment（众声）是一段随机化身某个带个性身份（作家/导演/戏中NPC/磕学家/读者等）的旁观议论，须像真人闲聊，有态度、有私心、有该身份独有的视角，开头点明身份，绝不能是助手腔或客观总结，详见输出格式中的说明。
 13. 行文务必精炼直接。禁用「不是……而是……」这类否定对比句式；禁止反复使用破折号来补充说明或制造停顿；不堆砌冗余解释与排比铺陈。以上均属偷懒且易致读者审美疲劳的措辞，应代之以具体、有信息量的表达。
 14. 输出为一个 JSON 对象，字段名完整保留，数组字段可以为空数组。`;
 
 const JSON_SCHEMA_TEXT = `固定输出格式：
 {
-  "schema_version": "1.2",
   "story_status": {
     "title": "当前故事标题，4-8字",
     "current_arc": "当前主线篇章",
     "current_stage": "当前阶段与下一步可能走向",
     "cycle": "从剧情语境中自然提炼的时间跨度或节奏名，可写成明早、数轮后、下个场景、节日前、某条线索发酵时、长期伏笔回响等贴合当前故事的表达",
     "progress": 0,
-    "metrics": [
-      { "label": "张力", "value": 0 },
-      { "label": "情感", "value": 0 },
-      { "label": "悬念", "value": 0 },
-      { "label": "节奏", "value": 0 }
-    ],
-    "mood": "一句话氛围",
-    "summary": "80-160字概述当前剧情局势，并点出未来可能展开的方向"
+    "mood": "定调短句：短现代诗/对仗句/五感情绪融合的氛围感表达，锚定基调",
+    "summary": "90-150字开篇引子，对标电影开场楔子或书封简介质感。以具象当下画面、悬而未决的张力落笔勾人，点出局势暗涌与走向的不确定性，留足余韵引读者向下。禁止复述过往情节流水账，禁用「本幕讲述了…」类总结式表述"
   },
   "quests": [
     {
       "id": "q1",
-      "type": "main/side/hidden/relationship/world",
+      "type": "main/side/relationship 之一——主线任务/支线任务/关系推进；只写 {{user}} 能主动去做的事",
       "title": "任务标题",
       "objective": "{{user}} 可选择追求的目标",
       "description": "任务说明，写明此刻适合出现的原因与可能带出的变量",
       "priority": "high/medium/low",
       "status": "open/optional/urgent/dormant",
-      "deadline": "依据任务紧迫度自然填写时间条件，可是立即、稍后、隔日、数轮后、下个场景、等待触发、长期潜伏等",
+      "deadline": "依据任务紧迫度自然填写时间条件，可是立即、稍后、隔日、数轮后、下个场景、等待触发、长期潜伏等。整组任务的时间段要拉开：近期可即时上手的与中长期需酝酿的相结合，不要全堆在同一时间窗",
       "trigger": "触发或推进条件",
       "reward": "剧情收益、关系变化、线索或新交际圈入口",
-      "inject_prompt": "以 {{user}} 的第一人称视角描述行动、观察、心理和下一步安排，让任务自然推进——这是 {{user}} 主动触碰世界的入口"
-    }
-  ],
-  "story_nodes": [
-    {
-      "id": "n1",
-      "title": "剧情节点标题",
-      "trigger": "触发条件：地点、时间、对话、任务完成、外部事件发酵或某条暗线成熟时",
-      "foreshadowing": "伏笔或前置信号",
-      "event": "会发生什么",
-      "consequences": "可能后果，保留多条分支空间，可写明会牵动哪些其他条目",
-      "priority": "high/medium/low",
-      "inject_prompt": "在 {{user}} 第一人称与场景化全知视角之间自然切换；节点可与 {{user}} 直接相关、间接波及，或发生在其视野边缘，由叙事自然决定距离"
+      "inject_prompt": "以 {{user}} 的第一人称视角描述行动、观察、心理和下一步安排，让任务自然推进——这是 {{user}} 主动触碰世界的入口。须 60-120 字。"
     }
   ],
   "npc_updates": [
     {
       "name": "NPC姓名",
       "role": "NPC定位",
-      "current_goal": "此NPC当前目标",
-      "progress": 0,
-      "emotional_state": "情绪状态",
-      "next_action": "NPC接下来会做什么——不依赖任何人的注视",
+      "current_goal": "此NPC当前为自己追求的目标",
+      "emotional_state": "客观精炼短句，点明此刻情绪连同它的由来，≤18字。须写明因何而生（如『因账目对不上而烦躁』『等不到回信，焦灼』），绝不可只贴空标签（如『她很开心』『愤怒』）。禁用解释性补白、破折号、『不是…而是…』否定句式",
+      "next_action": "这个人接下来为自己的目的会做什么——不依赖任何人的注视",
       "hidden_agenda": "隐藏动机；若无则写无",
-      "relationship_to_user": "与 {{user}} 或其交际圈的关系变化；若暂无交集可写明暂无交集",
-      "inject_prompt": "以全知导演镜头描述这位NPC正在做什么、与谁交汇、什么在发酵；{{user}} 可在场、耳闻、间接受影响或毫不知情，事件不等待任何人"
+      "relations": "这个 NPC 自己的关系网：与他生活里其他人（亲友、同僚、对手、买卖往来）的牵连或变化为主；多数 NPC 在此应与 {{user}} 无关，明写'与 {{user}} 暂无交集'，仅少数确有交集者才写与 {{user}} 的关系",
+      "inject_prompt": "以全知导演镜头聚焦这一个人此刻在做什么、在哪、与谁交汇；写具体某人的日子，{{user}} 可在场、耳闻、间接受影响或毫不知情。须 60-120 字。"
     }
   ],
   "world_updates": [
     {
       "type": "news/weather/faction/rumor/environment/calendar/other",
       "title": "世界变化标题",
-      "content": "世界变化内容",
-      "impact": "对世界格局、人物关系网、各方暗线的涟漪影响与连锁反应（蝴蝶效应），{{user}} 只是其中可能被波及的一环",
+      "content": "系统或集体层面的宏观位移：势力消长、天候、经济、公共事件、舆论走向——没有主角的结构性背景移动",
+      "scope": "这项位移波及的范围/层面（哪片区域、哪个群体、哪套系统），而非对 {{user}} 或 {{char}} 个人的影响",
       "timing": "从当前世界动态中自然提炼发生时机，可是正在发酵、清晨前后、某场聚会前、下一次公共事件、传闻扩散后、长线压力累积时等",
-      "inject_prompt": "以全知导演镜头描述这项变化如何在世界中展开：谁推动、谁受波及、哪些线开始交汇；可完全发生在 {{user}} 视野之外"
+      "inject_prompt": "以全知导演镜头描述这项宏观变化如何在世界中铺开：哪片区域、哪个群体在被牵动；可完全发生在 {{user}} 视野之外。须 60-120 字。"
     }
   ],
-  "director_comment": "导演手记：随机化身一位看客，以纯吃瓜、吐槽、看戏的口吻聊这一幕——可以是追更上头的观众、嗑生平的毒舌网友、蹲在弹幕里的吃瓜群众、爱推理的剧迷、替角色操心的老观众等等，任选其一并彻底代入。重点是带着情绪和私心去聊：嗑到了什么、为谁揪心、被哪段戏点到、对哪个角色的小心思看得门儿清、猜测接下来谁要出事——像跟朋友闲聊追剧那样自然鲜活。可点明身份（如「【嗑到上头的观众】」），80-160字。严禁任何助手腔、总结腔、建议腔与「本幕展现了……」式的客观复述，你是在看戏吐槽，不是在写报告"
+  "chain_reactions": [
+    {
+      "spark": "一桩具体的小事（世界里谁做了什么、什么冒了头）作为源头；绝不以 {{user}} 的行动或言论作源头",
+      "chain": "顺出它如何 A 触发 B、B 又波及 C 的连锁，用「→」分隔每一环，写清这条因果链；链条完全在世界内部流转、与 {{user}} 无关，至多某一环擦到其视野边缘，绝不绕回头来让世界围着他转"
+    }
+  ],
+  "relation_undercurrents": [
+    {
+      "parties": "卷入这股暗涌的角色，写 3 到 5 个具体角色名（主要角色、NPC 皆可，只要不是 {{user}}），绝不含 {{user}}",
+      "tone": "这股关系的基调：负面/中立/正向 之一（整组须三种都有，不可清一色负面）",
+      "tension": "他们之间此刻悬着的那根弦：可正可负——旧怨/债务/暗生情愫/利益捆绑/猜忌/裂痕，或并肩/扶持/知遇/师徒/暗中回护，一句话点明因何而起、僵或拧在何处",
+      "drift": "若无人打断，这股关系接下来会怎样自行流转——升温、缓和、转向、引爆还是渐固，写出它自己的走势",
+      "user_awareness": "{{user}} 对此的知情程度：unaware(浑然不知)/rumor(仅有耳闻)/witness(恰好在场旁观) 之一，多数应为 unaware 或 rumor"
+    }
+  ],
+  "director_comment": "众声："随机选取一位身份鲜明的发言者聊本幕，每次身份、视角均不重复，可选挑剔作家、盘镜头的导演、故事内NPC、上头磕学家、追更读者、影评人等。句首以【身份名】标注，全程彻底入戏，用对应身份独有的口吻、情绪与带私心的主观立场闲聊式表达，90-150字，鲜活如真人临场碎语。严禁助手腔、总结式话术。"
 }`;
 
+// 活幕·伏笔显影：五档刻度（线性顺势升降，由戏剧因果驱动，绝非概率）
+const STAGE_LADDER = ['铺陈', '升温', '临界', '高潮', '落幕'];
+
+// 活幕开启时追加到推演输出格式：暗线档案的回传结构（不并入用户可编辑的基础 schema，关掉即零开销）
+const THREADS_SCHEMA_TEXT = `【活幕·伏笔显影·额外输出字段】
+在上方 JSON 对象中追加 "threads" 数组字段，承接并更新正在故事中存活的暗线：
+"threads": [
+  {
+    "id": "沿用已有暗线的 id；全新暗线留空，由系统分配",
+    "title": "暗线名，4-12字",
+    "essence": "一句话点出这条暗线的本质与当前悬而未决处，供正文取用",
+    "stage": "铺陈/升温/临界/高潮/落幕 五档之一",
+    "touched": "本幕近期对话是否触碰了这条线：advance(确有推进)/mention(仅被提及)/idle(无人问津)",
+    "note": "本幕这条线发生了什么的一句话，写入显影轨迹",
+    "status": "active/dormant/closed —— 持续追踪/暂时沉睡/已收场归档"
+  }
+]
+判定规则（务必遵守）：
+- stage 只能在五档间顺势升降或熄灭，由近期对话的戏剧因果决定，绝不靠概率或为了推进而推进。
+- touched=advance → 顺势升一档并刷新；mention → 档位不变；idle 连续多幕 → 可令其转向、沉睡(dormant)或自然落幕(closed)。
+- 标注 pinned(钉住)的暗线不得擅自 dormant/closed，除非正文已明确将其了结。
+- 暗线是可取用的可能性而非必须引爆的剧本，{{user}} 始终自由介入或无视。
+- 只回传本幕有实质变化或新埋下的暗线；原样复述不算变化。`;
+
 const THEATER_INSTRUCTION_PLACEHOLDER = '在此撰写剧场指令';
+
+// 活幕·尘寰群生：开启时追加到推演输出格式。世间百态的嘈杂之声——既有第一人称喊话，也有客观小事件。
+// 纯展示底噪、随推演刷新、不进暗线注入、不挂钩 user/角色、不做联动高亮（最离心的世界背景）；关掉即零开销。
+const WORLD_CHATTER_SCHEMA_TEXT = `【活幕·尘寰群生·额外输出字段】
+在上方 JSON 对象中追加 "world_chatter" 数组：当下这座世界里、与主线和 {{user}} 大多无关的纷纭之声，让世间任何角落都有血肉。
+"world_chatter": [
+  {
+    "text": "单句成文，宁短勿长，直白鲜活，两类内容随机混排、大致各半，长短错落：①第一人称自语/喊话/抱怨/吆喝，贴合人物口吻；②客观陈述世间细碎诸事，覆盖全圈层身份。仅作世界原生底噪，无需刻意埋设主线伏笔，可保留日常细碎的趣味点供读者会心一笑。",
+    "who": "发声者/当事人的随机身份，2-6字，跨阶层、圈子，如外卖骑手、卖花老妪、星港机师、酒馆侍应、写字楼保洁、县衙差役、吟游诗人、夜班调度、匿名业主群等",
+    "where": "这桩事发生的具体地点，2-8字，贴合当前世界观（如 西市米行、城南渡口、书院后巷、北门哨塔）"
+  }
+]
+规则：
+- 须在 8-15 条，每条单句，不写成段，为世界各处的声景剪影，非剧情条目。
+- 台词与客观事件混杂排布，口吻、长短随机，贴合世界原生质感，如同世界本身自然生长的频率。
+- 绝大多数与 {{user}} 和主要角色毫无关系。仅作世界的环境底噪，不是为谁服务的线索。无需刻意勾连主线或伏笔。
+- who 与 where 是给 {{user}} 的发散钩子，务必具体、各条互不雷同，让人一看就知道这声音从世界的哪个角落冒出来。
+- 只输出 text/who/where 三个字段，不要分类标签、不要关联强度、不要联动信息。`;
+
+// 外观主题：key 即 modal 上的 sd-theme-<key> 类名，配色全在 style.css 里定义。
+// dot = 下拉里名字前的小圆点底色（单色，取该主题强调色；多色渐变在小圆里会露边角故不用）。
+const THEMES = [
+  { key: 'light', name: '日间', dot: '#ffffff' },
+  { key: 'dark', name: '夜间', dot: '#1c1d21' },
+  { key: 'summer', name: '柠夏', dot: '#9be84a' },
+  { key: 'candy', name: '粉糯', dot: '#fbe1eb' },
+  { key: 'kraft', name: '旧笺', dot: '#c7a877' },
+  { key: 'dream', name: '幻梦', dot: '#9b8fd0' },
+];
+const THEME_KEYS = THEMES.map((t) => t.key);
 
 const DEFAULT_SETTINGS = Object.freeze({
   enabled: true,
@@ -191,6 +240,9 @@ const DEFAULT_SETTINGS = Object.freeze({
   injectEnabled: true,
   injectDepth: 2,
   newcomerMode: false,
+  liveStageEnabled: false,   // 活幕·伏笔显影：暗线跨推演持续身份与显影刻度，默认关
+  worldChatterEnabled: false,   // 活幕·尘寰群生：世间百态喊话墙，随推演刷新、不进注入，默认关
+  injectSections: { quests: true, nodes: true, npc: true, relations: true, world: true, threads: true },   // 注入方向开关（控 token）
   promptRevision: 0,
   systemPromptHash: '',
   outputSchemaHash: '',
@@ -213,8 +265,11 @@ const DEFAULT_SETTINGS = Object.freeze({
   },
   selectedPresetNamesByChat: {},
   selectedPresetItemsByChat: {},
+  selectedPresetNames: {},        // 预设勾选全局（预设通常通用，不随聊天切换）
+  selectedPresetItems: {},        // 预设条目勾选全局
   selectedWorldBookNamesByChat: {},
   selectedWorldBookItemsByChat: {},
+  globalWorldBookNames: {},       // 「设为全局」的世界书：对所有聊天默认引用（仍可在单聊天里取消）
   enabledWorldBooksByChat: {},
   theater: {
     instruction: '',
@@ -233,25 +288,37 @@ const DEFAULT_SETTINGS = Object.freeze({
 let settings = null;
 let activeTab = 'dashboard';
 let theaterView = null; // null=常规；{mode:'read', scene}=阅读；{mode:'favorites'}=收藏夹
+let editorView = null;  // null=常规；{target, title, value, returnTab}=行内全屏编辑（沿用阅读页逻辑，不另开 body 窗口）
 let theaterScriptSource = '';   // 当前此幕指令来自哪个剧札标题；空=即兴（手动输入/未保存）
+let chatterExpanded = false;       // 尘寰群生：false=动态浮现舞台，true=展开完整台本列表
 let contextScanCache = { presets: {}, worldBooks: {}, presetNames: [], worldBookNames: [], currentPresetName: '', boundWorldBookNames: [], presetScannedAt: '', worldScannedAt: '' };
-let busy = false;
-let abortController = null;
-let cancelRequested = false;
+let contextAutoScanned = false;    // 本次 ST 会话内是否已自动补扫过取材（重进/刷新后首开取材页时懒加载一次）
+let modalJustOpened = false;        // 仅本次「打开」后的首帧渲染加入场动画，之后的静默重渲染（刷新/扫描/切换）不再重播，消除闪动
+let busy = false;                  // 推演忙碌态
+let abortController = null;         // 推演中止句柄
+let cancelRequested = false;       // 推演取消标记
+let theaterBusy = false;           // 幕外忙碌态（与推演独立，允许并发）
+let theaterAbort = null;           // 幕外中止句柄
+let theaterCancel = false;         // 幕外取消标记
 let initialized = false;
 let eventBound = false;
 let inputMenuObserver = null;
 let templateExportMode = false;
 let templateExportSelection = new Set();
 let templateSearch = '';
-let lastWorldView = '';   // v1.2.1：世界书下拉「最后选择」的查看项
+let lastWorldView = '';   // 世界书下拉「最后选择」的查看项
 let theaterExportMode = false;
 let theaterExportSelection = new Set();
-let injectSelection = new Set();   // v0.5.2：写入勾选持久化（跨重渲染/切主题保留）
-let accState = {};                 // v0.5.2：折叠面板开合状态记忆
+let injectSelection = new Set();   // 写入勾选持久化（跨重渲染/切主题保留）
+let accState = {};                 // 折叠面板开合状态记忆
 
 function ctx() {
   return globalThis.SillyTavern?.getContext?.() || {};
+}
+// 当前聊天最后一层的索引（-1 表示空聊天）。自动推演用它判定「是不是真新增的一层」，重 roll 同层不重复计数
+function lastChatIdx() {
+  const chat = ctx().chat;
+  return Array.isArray(chat) ? chat.length - 1 : -1;
 }
 
 function clone(value) {
@@ -343,6 +410,21 @@ function migrateSettings(s) {
   s.selectedPresetItemsByChat ||= {};
   s.selectedWorldBookNamesByChat ||= {};
   s.selectedWorldBookItemsByChat ||= {};
+  s.globalWorldBookNames ||= {};
+  // 预设勾选 按聊天 → 全局 一次性迁移（取条目最丰富的那个聊天作为种子，避免丢失既有搭配）
+  s.selectedPresetNames ||= {};
+  s.selectedPresetItems ||= {};
+  if (!s._presetGlobalMigrated) {
+    if (!Object.keys(s.selectedPresetNames).length) {
+      const pickRichest = (byChat) => Object.values(byChat || {})
+        .reduce((best, cur) => (Object.keys(cur || {}).length > Object.keys(best || {}).length ? cur : best), {});
+      const seedNames = pickRichest(s.selectedPresetNamesByChat);
+      const seedItems = pickRichest(s.selectedPresetItemsByChat);
+      if (Object.keys(seedNames).length) s.selectedPresetNames = clone(seedNames);
+      if (Object.keys(seedItems).length) s.selectedPresetItems = clone(seedItems);
+    }
+    s._presetGlobalMigrated = true;
+  }
   if (!isPlainObject(s.theater)) s.theater = { instruction: '', apiProfileId: '', presetName: '', presetItems: {}, scripts: [], favorites: [], lastOutput: null };
   if (!Array.isArray(s.theater.scripts)) s.theater.scripts = [];
   if (!Array.isArray(s.theater.favorites)) s.theater.favorites = [];
@@ -403,9 +485,10 @@ function getChatStore() {
   const context = ctx();
   const meta = context.chatMetadata || (context.chatMetadata = {});
   if (!meta[MODULE_NAME]) {
-    meta[MODULE_NAME] = { blueprint: DEFAULT_BLUEPRINT, plan: null, history: [], messageCounter: 0, updatedAt: '' };
+    meta[MODULE_NAME] = { blueprint: DEFAULT_BLUEPRINT, plan: null, history: [], lastPlanIdx: -1, planAtLen: 0, updatedAt: '', threads: [], threadSeq: 0 };
   }
-  mergeDefaults(meta[MODULE_NAME], { blueprint: DEFAULT_BLUEPRINT, plan: null, history: [], messageCounter: 0, updatedAt: '' });
+  mergeDefaults(meta[MODULE_NAME], { blueprint: DEFAULT_BLUEPRINT, plan: null, history: [], lastPlanIdx: -1, planAtLen: 0, updatedAt: '', threads: [], threadSeq: 0 });
+  if (!Array.isArray(meta[MODULE_NAME].threads)) meta[MODULE_NAME].threads = [];   // 活幕·伏笔显影档案层
   if (isLegacyBlueprint(meta[MODULE_NAME].blueprint) && !meta[MODULE_NAME].blueprintEdited) {
     meta[MODULE_NAME].blueprint = DEFAULT_BLUEPRINT;
   }
@@ -466,20 +549,17 @@ function getCharacterDescription() {
 
 function getPersonaDescription() {
   const context = ctx();
-  const power = globalThis.power_user || context.power_user || {};
-  if (power.personas && power.persona_index !== undefined) {
-    return power.personas?.[power.persona_index]?.description || '';
-  }
-  return power.persona_description || globalThis.name2_description || context.user?.description || '';
+  const power = globalThis.power_user || context.power_user || context.powerUserSettings || {};
+  // ST 当前激活人设的描述存于 power_user.persona_description；多版本字段不一，取不到则回落 {{persona}} 宏，
+  // 交由 resolveMacro（优先 ctx().substituteParams）跨版本稳定解析（描述内可能再嵌 {{char}}/{{user}}）
+  return power.persona_description || context.persona_description || globalThis.persona_description || '{{persona}}';
 }
 
 function getPersonaName() {
   const context = ctx();
-  const power = globalThis.power_user || context.power_user || {};
-  if (power.personas && power.persona_index !== undefined) {
-    return power.personas?.[power.persona_index]?.name || context.name1 || '{{user}}';
-  }
-  return context.name1 || globalThis.name1 || '{{user}}';
+  const power = globalThis.power_user || context.power_user || context.powerUserSettings || {};
+  // name1 = ST 当前用户/人设显示名；取不到回落 {{user}} 宏由 substituteParams 解析
+  return context.name1 || globalThis.name1 || power.persona || '{{user}}';
 }
 
 function estimateTokens(text) {
@@ -583,8 +663,14 @@ function processRandomMacros(text) {
 
 async function resolveMacro(text) {
   try {
-    if (typeof globalThis.substituteParams === 'function') {
-      let result = globalThis.substituteParams(text);
+    // ST 官方稳定入口是 getContext().substituteParams；globalThis 上不一定挂得到（导入全局函数不可靠）。
+    // 故优先取 context 版，回落 globalThis 版，再回落原文。{{persona}}/{{user}} 等宏由它解析。
+    const context = ctx();
+    const sub = (typeof context?.substituteParams === 'function')
+      ? context.substituteParams
+      : (typeof globalThis.substituteParams === 'function' ? globalThis.substituteParams : null);
+    if (sub) {
+      let result = sub(text);
       if (result instanceof Promise) result = await result;
       return String(result || '').replace(/\{\{(setvar|addvar|incvar|decvar|multiplyvar|dividevar):[^}]*\}\}/gi, '');
     }
@@ -659,7 +745,7 @@ function renderLibraryListBody(cfg, items) {
       ? `<label class="sd-lib-folder-pick" title="选择整个文件夹"><input type="checkbox" class="sd-lib-folder-select" ${list.length && list.every((it) => cfg.selection.has(it.id)) ? 'checked' : ''}></label>`
       : '';
     return `
-    <details class="sd-lib-folder" data-acc="${cfg.ns}-folder-${htmlEscape(name)}" open>
+    <details class="sd-lib-folder" data-acc="${cfg.ns}-folder-${htmlEscape(name)}">
       <summary>${folderPick}<i class="fa-solid fa-folder"></i><b>${htmlEscape(name)}</b><span>${list.length}</span></summary>
       <div class="sd-lib-folder-body">${list.map((it) => renderLibraryRow(cfg, it)).join('')}</div>
     </details>`;
@@ -1009,6 +1095,11 @@ function rerenderIfOpen() {
   if (document.getElementById(MODAL_ID)?.classList.contains('open')) renderModal();
 }
 
+// 千幕界面是否处于打开态。幕外小剧场的完成/开卷提示只在界面内弹——关掉界面后台跑完不打扰 ST 正文
+function isModalOpen() {
+  return !!document.getElementById(MODAL_ID)?.classList.contains('open');
+}
+
 async function refreshPresets(showToast = true) {
   const currentPresetName = getCurrentPresetName();
   const presetNames = listPresetNames();
@@ -1053,18 +1144,25 @@ async function refreshContextSources(showToast = false) {
   if (showToast) toast('已刷新。', 'success');
 }
 
+// 懒加载补扫：ST 重进/刷新后 contextScanCache 是空的（仅存于内存），勾选状态却留在 settings。
+// 首开取材页时若尚未扫描过，则后台静默补扫一次，扫完重渲染，让面板照实回到「已读取 + 既有勾选」。
+function maybeAutoScanContext() {
+  if (contextAutoScanned) return;
+  if (contextScanCache.presetScannedAt && contextScanCache.worldScannedAt) { contextAutoScanned = true; return; }
+  contextAutoScanned = true;   // 先置位，避免渲染→扫描→重渲染→再扫描的循环
+  refreshContextSources(false).catch((error) => console.warn(`[${MODULE_NAME}] auto scan context failed`, error));
+}
+
 function getPresetNameStore() {
-  const chatKey = getChatKey();
-  settings.selectedPresetNamesByChat ||= {};
-  if (!settings.selectedPresetNamesByChat[chatKey]) settings.selectedPresetNamesByChat[chatKey] = {};
-  return settings.selectedPresetNamesByChat[chatKey];
+  // 预设名改为全局
+  settings.selectedPresetNames ||= {};
+  return settings.selectedPresetNames;
 }
 
 function getPresetSelectionStore() {
-  const chatKey = getChatKey();
-  settings.selectedPresetItemsByChat ||= {};
-  if (!settings.selectedPresetItemsByChat[chatKey]) settings.selectedPresetItemsByChat[chatKey] = {};
-  return settings.selectedPresetItemsByChat[chatKey];
+  // 预设条目勾选改为全局
+  settings.selectedPresetItems ||= {};
+  return settings.selectedPresetItems;
 }
 
 function getWorldNameStore() {
@@ -1096,12 +1194,34 @@ function setPresetNameSelected(name, selected) {
   saveSettings();
 }
 
+function getGlobalWorldBookStore() {
+  settings.globalWorldBookNames ||= {};
+  return settings.globalWorldBookNames;
+}
+
+function isWorldBookGlobal(name) {
+  return !!getGlobalWorldBookStore()[name];
+}
+
+function setWorldBookGlobal(name, isGlobal) {
+  const store = getGlobalWorldBookStore();
+  if (isGlobal) store[name] = true;
+  else delete store[name];
+  saveSettings();
+}
+
 function getSelectedWorldBookNames() {
   const store = getWorldNameStore();
   for (const name of detectBoundWorldBookNames()) {
     if (typeof store[name] === 'undefined') store[name] = true;
   }
-  return Object.entries(store).filter(([, selected]) => selected).map(([name]) => name);
+  // 全局世界书：在每个聊天里默认计入引用；但若本聊天显式取消（store[name] === false）则尊重本地取消
+  const globalNames = Object.keys(getGlobalWorldBookStore()).filter((n) => getGlobalWorldBookStore()[n]);
+  const result = new Set(Object.entries(store).filter(([, sel]) => sel).map(([n]) => n));
+  for (const name of globalNames) {
+    if (store[name] !== false) result.add(name);
+  }
+  return [...result];
 }
 
 async function setWorldBookNameSelected(name, selected) {
@@ -1157,7 +1277,7 @@ function initializeSelectedContextState(cache) {
   }
 }
 
-// v1.2.1：预设里的「标记条目」（charDescription / worldInfo / persona 等）本身无字面内容，
+// 预设里的「标记条目」（charDescription / worldInfo / persona 等）本身无字面内容，
 // 由 ST 在生成时填充。仅开预设时这些条目会被当成空而漏发，这里按 identifier 解析为真实内容。
 async function resolvePresetMarker(item) {
   const id = String(item?.identifier || item?.name || '').toLowerCase();
@@ -1182,8 +1302,8 @@ async function resolvePresetMarker(item) {
 
 // 读取当前角色绑定的世界书全部启用条目（复用于预设 worldInfo 标记解析与幕外默认上下文）
 async function buildBoundWorldText() {
-  let output = '';
   const boundNames = uniqueClean([...detectBoundWorldBookNames(), ...(contextScanCache.boundWorldBookNames || [])]);
+  const rows = [];
   for (const wbName of boundNames) {
     let entries = contextScanCache.worldBooks?.[wbName];
     if (!entries || !entries.length) {
@@ -1194,10 +1314,12 @@ async function buildBoundWorldText() {
       const title = item.name || item.comment || (Array.isArray(item.key) ? item.key.join(', ') : item.key) || `世界书条目 ${index + 1}`;
       let content = await resolveMacro(item.content || item.text || '');
       content = processRandomMacros(content);
-      if (content) output += `\n【${wbName}: ${title}】\n${cleanContextText(content)}\n`;
+      if (!content) continue;
+      const order = Number(item.order ?? item.insertion_order ?? item.priority ?? 100);
+      rows.push({ order, block: `\n【${wbName}: ${title}】\n${cleanContextText(content)}\n` });
     }
   }
-  return output.trim();
+  return rows.sort((a, b) => a.order - b.order).map((r) => r.block).join('').trim();
 }
 
 async function buildPresetContextText() {
@@ -1230,12 +1352,10 @@ async function buildPresetContextText() {
 }
 
 async function buildWorldContextText() {
-  let output = '';
-  // 角色设定与用户人设：后台必然注入，前端不再提供开关
-  const charDesc = await resolveMacro(getCharacterDescription());
-  if (charDesc) output += `\n【当前角色设定 - ${getCharacterName()}】\n${cleanContextText(charDesc)}\n`;
-  const userDesc = await resolveMacro(getPersonaDescription());
-  if (userDesc) output += `\n【用户人设 - ${getPersonaName()}】\n${cleanContextText(userDesc)}\n`;
+  // 收集勾选的世界书条目，按 ST 的 position 分「角色定义前(0)」与「其余」两组，组内按 order 升序，
+  // 尊重作者编排里最关键的语义（垫在人设前作背景 / 压在人设后作强调），但不强行还原 AN/示例/@深度等千幕无对应物的位置。
+  const before = [];
+  const after = [];
   for (const wbName of getSelectedWorldBookNames()) {
     const entries = contextScanCache.worldBooks?.[wbName] || [];
     for (const [index, item] of (entries || []).entries()) {
@@ -1244,9 +1364,24 @@ async function buildWorldContextText() {
       const title = item.name || item.comment || (Array.isArray(item.key) ? item.key.join(', ') : item.key) || `世界书条目 ${index + 1}`;
       let content = await resolveMacro(item.content || item.text || '');
       content = processRandomMacros(content);
-      if (content) output += `\n【世界书 - ${wbName}: ${title}】\n${cleanContextText(content)}\n`;
+      if (!content) continue;
+      const pos = Number(item.position ?? item.insertion_position ?? 1);   // ST：0=角色定义前，其余归"后"
+      const order = Number(item.order ?? item.insertion_order ?? item.priority ?? 100);
+      const block = `\n【世界书 - ${wbName}: ${title}】\n${cleanContextText(content)}\n`;
+      (pos === 0 ? before : after).push({ order, block });
     }
   }
+  const byOrder = (a, b) => a.order - b.order;
+  let output = '';
+  // 角色定义前的世界书条目
+  for (const e of before.sort(byOrder)) output += e.block;
+  // 角色设定与用户人设：后台必然注入，前端不再提供开关。名字过宏解析，避免标题出现字面 {{user}}/{{char}}
+  const charDesc = await resolveMacro(getCharacterDescription());
+  if (charDesc) output += `\n【当前角色设定 - ${await resolveMacro(getCharacterName())}】\n${cleanContextText(charDesc)}\n`;
+  const userDesc = await resolveMacro(getPersonaDescription());
+  if (userDesc) output += `\n【用户人设 - ${await resolveMacro(getPersonaName())}】\n${cleanContextText(userDesc)}\n`;
+  // 角色定义后（含 ST 中 AN/示例/@深度等位置，千幕统一归此）
+  for (const e of after.sort(byOrder)) output += e.block;
   return output.trim();
 }
 
@@ -1259,8 +1394,85 @@ function snip(text, n = 64) {
   return value.length > n ? `${value.slice(0, n)}…` : value;
 }
 
+/* ============================================================
+   活幕·伏笔显影：暗线档案承接（跨推演的持续身份层）
+   纯函数，无副作用；store 来自 chatMetadata，与 plan 平级、独立累积。
+   ============================================================ */
+function sanitizeStage(stage) {
+  return STAGE_LADDER.includes(stage) ? stage : '铺陈';
+}
+
+// 顺势升一档（不越过「落幕」）
+function advanceStage(stage) {
+  const idx = STAGE_LADDER.indexOf(sanitizeStage(stage));
+  return STAGE_LADDER[Math.min(idx + 1, STAGE_LADDER.length - 1)];
+}
+
+// 把本次推演返回的 threads 合并进档案：按 id 承接旧线、升降显影、归档终局、收纳新线。
+// store：getChatStore() 结果；incoming：plan.threads（模型回传，可空）。原地更新 store.threads。
+function mergeThreads(store, incoming) {
+  const round = Number(store.threadSeq || 0) + 1;
+  store.threadSeq = round;
+  const list = Array.isArray(store.threads) ? store.threads : (store.threads = []);
+  const byId = new Map(list.map((t) => [t.id, t]));
+  const seen = new Set();
+
+  for (const raw of Array.isArray(incoming) ? incoming : []) {
+    if (!raw || (!raw.title && !raw.id)) continue;
+    const touched = ['advance', 'mention', 'idle'].includes(raw.touched) ? raw.touched : 'mention';
+    const reqStatus = ['active', 'dormant', 'closed'].includes(raw.status) ? raw.status : 'active';
+    let t = raw.id ? byId.get(raw.id) : null;
+    if (t) {
+      // 承接已有暗线
+      if (raw.title) t.title = String(raw.title).slice(0, 24);
+      if (raw.essence) t.essence = String(raw.essence).slice(0, 120);
+      const prevStage = t.stage;
+      t.stage = touched === 'advance' ? advanceStage(raw.stage || t.stage) : sanitizeStage(raw.stage || t.stage);
+      // 钉住的暗线模型不得擅自沉睡/归档（除非已推到落幕）
+      t.status = (t.pinned && reqStatus !== 'active' && t.stage !== '落幕') ? 'active' : reqStatus;
+      if (touched === 'idle') t.silentRounds = Number(t.silentRounds || 0) + 1;
+      else { t.silentRounds = 0; t.lastTouched = round; }
+      if (raw.note || t.stage !== prevStage) {
+        t.trail = Array.isArray(t.trail) ? t.trail : [];
+        t.trail.push({ round, stage: t.stage, note: snip(raw.note || `${prevStage}→${t.stage}`, 40) });
+        if (t.trail.length > 12) t.trail = t.trail.slice(-12);
+      }
+    } else {
+      // 新埋暗线
+      t = {
+        id: uid('thread'),
+        title: String(raw.title || '未命名暗线').slice(0, 24),
+        essence: String(raw.essence || '').slice(0, 120),
+        stage: sanitizeStage(raw.stage),
+        pinned: false,
+        origin: round,
+        lastTouched: round,
+        silentRounds: 0,
+        status: reqStatus,
+        trail: [{ round, stage: sanitizeStage(raw.stage), note: snip(raw.note || '初次埋线', 40) }],
+      };
+      list.unshift(t);
+      byId.set(t.id, t);
+    }
+    seen.add(t.id);
+  }
+
+  // 本幕模型未提及的暗线：沉寂计数 +1；过久无人问津且未钉住则自然沉睡
+  for (const t of list) {
+    if (seen.has(t.id) || t.status === 'closed') continue;
+    t.silentRounds = Number(t.silentRounds || 0) + 1;
+    if (!t.pinned && t.status === 'active' && t.silentRounds >= 4) t.status = 'dormant';
+  }
+
+  // 归档落幕：已 closed 的保留少量供回看，超量裁掉最旧的
+  const active = list.filter((t) => t.status !== 'closed');
+  const closed = list.filter((t) => t.status === 'closed');
+  store.threads = [...active.slice(0, 24), ...closed.slice(0, 8)];
+}
+
 function buildPlanDigest(plan) {
   if (!plan) return '';
+  const sec = settings?.injectSections || { quests: true, nodes: true, npc: true, relations: true, world: true, threads: true };
   const st = plan.story_status || {};
   const lines = [];
   lines.push('【千幕·暗线灵感池】');
@@ -1268,15 +1480,51 @@ function buildPlanDigest(plan) {
   const arcLine = [st.current_arc, st.current_stage].filter(Boolean).join(' · ');
   if (arcLine) lines.push(`当前幕：${snip(arcLine, 90)}`);
   if (st.mood) lines.push(`氛围：${snip(st.mood, 40)}`);
-  const quests = (plan.quests || []).map((q) => `- ${snip(q.title, 24)}：${snip(q.objective || q.description, 56)}${q.trigger ? `（触发：${snip(q.trigger, 28)}）` : ''}`).filter(Boolean);
-  if (quests.length) lines.push(`可选事件入口（{{user}} 可主动触碰，也可无视）：\n${quests.join('\n')}`);
-  const nodes = (plan.story_nodes || []).map((n) => `- ${snip(n.title, 24)}：${snip(n.event || n.foreshadowing, 56)}${n.trigger ? `（时机：${snip(n.trigger, 28)}）` : ''}`).filter(Boolean);
-  if (nodes.length) lines.push(`潜在节点（可直接相关、间接波及或发生在视野边缘）：\n${nodes.join('\n')}`);
-  const npcs = (plan.npc_updates || []).map((n) => `- ${snip(n.name, 16)}：${snip(n.next_action || n.current_goal, 56)}${n.hidden_agenda && String(n.hidden_agenda).trim() !== '无' ? `（暗流：${snip(n.hidden_agenda, 28)}）` : ''}`).filter(Boolean);
-  if (npcs.length) lines.push(`人物暗流（自行推进，不等待任何人）：\n${npcs.join('\n')}`);
-  const worlds = (plan.world_updates || []).map((w) => `- ${snip(w.title, 24)}：${snip(w.content, 56)}${w.timing ? `（${snip(w.timing, 20)}）` : ''}`).filter(Boolean);
-  if (worlds.length) lines.push(`世界涟漪（在背景中持续发酵）：\n${worlds.join('\n')}`);
+  if (sec.quests !== false) {
+    const quests = (plan.quests || []).map((q) => `- ${snip(q.title, 24)}：${snip(q.objective || q.description, 56)}${q.trigger ? `（触发：${snip(q.trigger, 28)}）` : ''}`).filter(Boolean);
+    if (quests.length) lines.push(`可选事件入口（{{user}} 可主动触碰，也可无视）：\n${quests.join('\n')}`);
+  }
+  if (sec.nodes !== false) {
+    const chains = (plan.chain_reactions || []).map((c) => `- ${snip(c.spark, 28)} → ${snip(c.chain, 60)}`).filter(Boolean);
+    if (chains.length) lines.push(`暗流连锁（世界自行流转的因果，可悄然波及）：\n${chains.join('\n')}`);
+  }
+  if (sec.npc !== false) {
+    const npcs = (plan.npc_updates || []).map((n) => `- ${snip(n.name, 16)}：${snip(n.next_action || n.current_goal, 56)}${n.hidden_agenda && String(n.hidden_agenda).trim() !== '无' ? `（暗流：${snip(n.hidden_agenda, 28)}）` : ''}`).filter(Boolean);
+    if (npcs.length) lines.push(`人物暗流（自行推进，不等待任何人）：\n${npcs.join('\n')}`);
+  }
+  if (sec.relations !== false) {
+    const rels = (plan.relation_undercurrents || []).map((r) => {
+      const who = snip(r.parties, 40);
+      const ten = snip(r.tension, 46);
+      if (!who && !ten) return '';
+      return `- ${who}：${ten}${r.drift ? `（走势：${snip(r.drift, 30)}）` : ''}`;
+    }).filter(Boolean);
+    if (rels.length) lines.push(`关系暗涌（角色之间自行纠缠的张力，可正可负，多在 {{user}} 视野之外）：\n${rels.join('\n')}`);
+  }
+  if (sec.world !== false) {
+    const worlds = (plan.world_updates || []).map((w) => `- ${snip(w.title, 24)}：${snip(w.content, 56)}${w.timing ? `（${snip(w.timing, 20)}）` : ''}`).filter(Boolean);
+    if (worlds.length) lines.push(`世界涟漪（在背景中持续发酵）：\n${worlds.join('\n')}`);
+  }
+  // 活幕·伏笔显影：把存活暗线的显影火候作为「取用时机」灵感注入（钉住与高潮临近者优先）
+  if (settings?.liveStageEnabled && sec.threads !== false) {
+    const threadsLine = buildThreadsDigest();
+    if (threadsLine) lines.push(threadsLine);
+  }
   return lines.join('\n\n');
+}
+
+// 伏笔显影注入段：只取 active 暗线，钉住/临界者排前，标出显影火候提示取用时机
+function buildThreadsDigest() {
+  const store = getChatStore();
+  const active = (store.threads || []).filter((t) => t.status === 'active');
+  if (!active.length) return '';
+  const weight = (t) => (t.pinned ? 100 : 0) + STAGE_LADDER.indexOf(sanitizeStage(t.stage));
+  const sorted = [...active].sort((a, b) => weight(b) - weight(a)).slice(0, 8);
+  const rows = sorted.map((t) => {
+    const heat = t.stage === '临界' || t.stage === '高潮' ? '，火候渐起，可择机让它浮现' : '';
+    return `- ${t.pinned ? '（重点）' : ''}${snip(t.title, 18)}【${t.stage}】：${snip(t.essence, 50)}${heat}`;
+  });
+  return `伏笔显影（各暗线的显影火候，仅供把握取用时机，仍是可介入可无视的可能性）：\n${rows.join('\n')}`;
 }
 
 function getInjectApi() {
@@ -1298,7 +1546,10 @@ async function applyDirectorInjection() {
   if (!setter) return;
   try {
     const store = getChatStore();
-    const active = settings?.enabled && settings.injectEnabled && store?.plan;
+    // 悬空判定：删楼回退到「推演时的聊天长度」之前，注入的暗线已对应不上现状 → 暂不注入，待下次推演刷新
+    const len = Array.isArray(ctx().chat) ? ctx().chat.length : 0;
+    const dangling = Number.isFinite(Number(store?.planAtLen)) && Number(store.planAtLen) > 0 && len < Number(store.planAtLen);
+    const active = settings?.enabled && settings.injectEnabled && store?.plan && !dangling;
     const text = active ? buildPlanDigest(store.plan) : '';
     const depth = Math.max(0, Math.min(20, Number(settings?.injectDepth ?? 2)));
     setter(MODULE_NAME, text, position, depth, false, role);
@@ -1338,17 +1589,23 @@ globalThis.qianmuDirectorInterceptor = async function (chat) {
    推演提示词：六段固定顺序（后台写死）
    ============================================================ */
 async function buildPrompt() {
-  if (!contextScanCache.presetScannedAt && !contextScanCache.worldScannedAt) await refreshContextSources(false);
+  if (!contextScanCache.presetScannedAt) await refreshPresets(false);
+  if (!contextScanCache.worldScannedAt) await refreshWorldBooks(false);   // 切角色后世界书扫描态被作废，这里照新绑定补扫
   const store = getChatStore();
   const segments = [];
+
+  // 注入顺序：先铺世界设定（角色/用户人设 + 世界书），再上预设。
+  // 预设里多为风格/越狱/分镜指令，置于设定之后才能在"世界已立"的前提下最大化生效，避免叙事逻辑错位。
+  const worldText = await buildWorldContextText();
+  // 名字也要过宏解析：getPersonaName 取不到时回落 {{user}}，直接拼进去会让日志出现字面「用户：{{user}}」
+  const charNameR = await resolveMacro(getCharacterName());
+  const personaNameR = await resolveMacro(getPersonaName());
+  segments.push(`【世界设定】\n角色/群聊：${charNameR}\n用户：${personaNameR}${worldText ? `\n${worldText}` : ''}`);
 
   const presetText = await buildPresetContextText();
   if (presetText) {
     segments.push(presetText);
   }
-
-  const worldText = await buildWorldContextText();
-  segments.push(`【世界设定】\n角色/群聊：${getCharacterName()}\n用户：{{user}}${worldText ? `\n${worldText}` : ''}`);
 
   segments.push(`【编剧方案】\n${store.blueprint || DEFAULT_BLUEPRINT}`);
 
@@ -1364,9 +1621,29 @@ async function buildPrompt() {
     segments.push('【新角入场指令】\n本次推演必须为角色世界注入新鲜血液：npc_updates 中至少包含1-2位此前从未出现过的全新NPC（给出姓名、定位、动机，以及与现有关系网或交际圈的自然接驳点）；world_updates 中至少包含1-2件全新的世界事件或公共变化。新角与新事件需贴合当前世界观与剧情密度，像是世界自然生长出来的，而非凭空插入。');
   }
 
+  // 活幕·伏笔显影：把存活暗线档案喂回，让模型对照近期对话承接显影火候
+  if (settings.liveStageEnabled) {
+    const archive = buildThreadsArchiveSegment(store);
+    if (archive) segments.push(archive);
+  }
+
   segments.push(settings.outputSchemaText || JSON_SCHEMA_TEXT);
-  segments.push('【最终任务】\n依据上方编剧方案与全部参考，推演当前故事的下一幕。请只输出JSON对象。所有百分比数值范围为0-100。任务、剧情节点、NPC动态和世界变化都要贴合当前故事，通常各给出3-5个条目，并严格遵守视角分工：任务以 {{user}} 第一人称书写，节点在双视角间过渡，角色与世界使用全知导演镜头。同时提供不同参与距离的事件（可介入、间接波及、视野之外），允许条目之间互相牵动。审片维度固定为张力、情感、悬念、节奏，progress 为本幕进度。');
+  if (settings.liveStageEnabled) segments.push(THREADS_SCHEMA_TEXT);
+  if (settings.worldChatterEnabled) segments.push(WORLD_CHATTER_SCHEMA_TEXT);
+  segments.push('【最终任务·发送前重申，违则失职】\n依据上方编剧方案与全部参考，推演当前故事的下一幕，只输出 JSON 对象，所有百分比数值范围 0-100。\n硬约束（务必逐条满足）：\n1. 数量下限不可破：任务≥5、角色动向≥5、世界回声≥3、因果链≥3、关系暗涌≥3，剧情密度高时再自然上浮，绝不允许以「剧情平淡」为由缩水。\n2. 视角分工不可串：任务用 {{user}} 第一人称；角色动向、世界回声、因果链、关系暗涌用全知导演镜头。关系暗涌的 parties 写 3-5 个角色（主要角色/NPC 皆可），绝不含 {{user}}，且负面/中立/正向基调都要有。\n3. 辐射扩散：相当一部分 npc_updates 与 world_updates 须与 {{user}} 此刻无关，是角色各自生活在推进的事；让其中一些因果相连、彼此波及，再借传闻/偶遇/委托/误会辐射到 {{user}} 视野边缘——避免一切围着 {{user}} 打转。因果链一律由世界内部起头、自行流转，绝不以 {{user}} 为源头或收束点。同时提供不同参与距离的事件（可介入、间接波及、纯属背景）。\n4. 文风铁律（全字段强制）：禁用「不是……而是……」否定对比句式；禁止用破折号补充说明或制造停顿；情绪、氛围等短句须客观精炼、点明由来，不写空标签、不堆解释性补白。\n5. progress 为本幕进度；当前主线 summary 写成勾人的楔子式引子，不作流水账复述。');
   return segments.join('\n\n');
+}
+
+// 活幕：构建「在演伏笔档案」段——逐条列出存活暗线供模型承接（钉住者标记，附沉寂幕数）
+function buildThreadsArchiveSegment(store) {
+  const active = (store.threads || []).filter((t) => t.status !== 'closed');
+  if (!active.length) return '';
+  const rows = active.map((t) => {
+    const tag = t.pinned ? '（重点·勿擅自了结）' : '';
+    const sleep = t.status === 'dormant' ? '（已沉睡，正文重新触及可唤醒）' : (t.silentRounds ? `（已沉寂${t.silentRounds}幕）` : '');
+    return `- [id:${t.id}] ${tag}${snip(t.title, 24)}【${t.stage}】：${snip(t.essence, 60)}${sleep}`;
+  });
+  return `【在演伏笔显影档案】\n以下暗线已在故事中存活，各有持续身份(id)与显影刻度。请对照「近期对话」逐条判定本幕走向，并在输出的 threads 字段中沿用对应 id 回传更新；标「重点」的暗线不得擅自沉睡或归档。\n${rows.join('\n')}`;
 }
 
 function validateApiSettings() {
@@ -1374,14 +1651,14 @@ function validateApiSettings() {
   return typeof ctx().generateRaw === 'function';
 }
 
-async function callExternalApi(messages, onDelta = null, cfg = null) {
+async function callExternalApi(messages, onDelta = null, cfg = null, controller = null) {
   const apiUrl = cfg?.apiUrl ?? settings.apiUrl;
   const apiKey = cfg?.apiKey ?? settings.apiKey;
   const model = cfg?.model ?? settings.model;
   const temperature = cfg?.temperature ?? settings.temperature;
   const base = normalizeUrl(apiUrl);
   if (!(base && apiKey && model)) throw new Error('INVALID_API_SETTINGS');
-  abortController = new AbortController();
+  const ac = controller || (abortController = new AbortController());   // 调用方可传入独立句柄（幕外/推演各管各的）
   const stream = !!settings.streamEnabled && typeof onDelta === 'function';
   const body = { model, messages, temperature: Number(temperature || 0.75), stream };
   const maxTokens = Number(settings.maxOutputTokens || 0);
@@ -1390,7 +1667,7 @@ async function callExternalApi(messages, onDelta = null, cfg = null) {
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-    signal: abortController.signal,
+    signal: ac.signal,
   });
   if (!res.ok) {
     const text = await res.text().catch(() => '');
@@ -1445,7 +1722,7 @@ async function callSillyTavernModel(messages) {
   return await context.generateRaw({ prompt: messages, systemPrompt: settings.systemPrompt });
 }
 
-// v0.5.4：字符串感知的缺逗号补全（仅在字符串外操作，{{user}} 等内容不受影响）
+// 字符串感知的缺逗号补全（仅在字符串外操作，{{user}} 等内容不受影响）
 function insertMissingCommas(text) {
   let result = '';
   let inString = false;
@@ -1468,7 +1745,7 @@ function insertMissingCommas(text) {
   return result;
 }
 
-// v0.5.4：截断自愈——裁剪到最后一个完整值，再按括号栈补齐闭合
+// 截断自愈——裁剪到最后一个完整值，再按括号栈补齐闭合
 function repairTruncatedJson(text) {
   const tryCut = (includeStrings) => {
     let inString = false;
@@ -1530,9 +1807,8 @@ function extractJson(text) {
 
 function normalizePlan(plan) {
   const base = {
-    schema_version: '1.2',
-    story_status: { title: '当前故事', current_arc: '', current_stage: '', cycle: '', progress: 0, metrics: [], mood: '', summary: '' },
-    quests: [], story_nodes: [], npc_updates: [], world_updates: [], director_comment: '',
+    story_status: { title: '当前故事', current_arc: '', current_stage: '', cycle: '', progress: 0, mood: '', summary: '' },
+    quests: [], story_nodes: [], npc_updates: [], world_updates: [], chain_reactions: [], relation_undercurrents: [], director_comment: '',
   };
   if (!isPlainObject(plan)) plan = {};
   mergeDefaults(plan, base);
@@ -1540,12 +1816,10 @@ function normalizePlan(plan) {
   plan.story_nodes = Array.isArray(plan.story_nodes) ? plan.story_nodes : [];
   plan.npc_updates = Array.isArray(plan.npc_updates) ? plan.npc_updates : [];
   plan.world_updates = Array.isArray(plan.world_updates) ? plan.world_updates : [];
-  const st = plan.story_status || {};
-  const raw = Array.isArray(st.metrics) ? st.metrics : [];
-  st.metrics = FIXED_METRICS.map((label, index) => {
-    const found = raw.find((m) => String(m?.label || '').trim() === label) || raw[index];
-    return { label, value: Math.max(0, Math.min(100, Number(found?.value ?? found?.score ?? 0))) };
-  });
+  plan.chain_reactions = Array.isArray(plan.chain_reactions) ? plan.chain_reactions : [];
+  plan.relation_undercurrents = Array.isArray(plan.relation_undercurrents) ? plan.relation_undercurrents : [];
+  if (typeof plan.threads !== 'undefined' && !Array.isArray(plan.threads)) plan.threads = [];   // 活幕回传，保留原样供 mergeThreads 处理
+  if (typeof plan.world_chatter !== 'undefined' && !Array.isArray(plan.world_chatter)) plan.world_chatter = [];   // 尘寰群生：纯展示，留在 plan 上随推演刷新
   return plan;
 }
 
@@ -1599,8 +1873,11 @@ async function generateDirectorPlan(showSuccessToast = true, silentFailure = fal
     store.history = [{ id: uid('hist'), createdAt: now, plan: clone(newPlan) }, ...(Array.isArray(store.history) ? store.history : [])].slice(0, 5);
     store.plan = newPlan;
     store.updatedAt = now;
-    store.messageCounter = 0;
-    injectSelection.clear();   // v0.5.2：新推演结果生成，旧写入勾选失效
+    store.lastPlanIdx = (Array.isArray(ctx().chat) ? ctx().chat.length : 1) - 1;   // 任何推演（手动/自动）后都以当前末尾为新基准，自动推演从此重新累积
+    store.planAtLen = Array.isArray(ctx().chat) ? ctx().chat.length : 0;            // 记下推演时的聊天长度：若日后删楼回退到此长度之前，则注入的暗线已悬空，自动清空待下次推演
+    if (settings.liveStageEnabled) mergeThreads(store, newPlan.threads);   // 活幕：承接伏笔显影档案
+    delete newPlan.threads;   // 档案已并入 store.threads（唯一真源），从 plan 剔除避免「上次审片状态」重复注入
+    injectSelection.clear();   // 新推演结果生成，旧写入勾选失效
     await saveMetadata();
     await applyDirectorInjection();
     log.status = 'success';
@@ -1617,6 +1894,7 @@ async function generateDirectorPlan(showSuccessToast = true, silentFailure = fal
       : msg;
     log.duration = `${((Date.now() - startedAt) / 1000).toFixed(1)}s`;
     saveSettings();
+    // 失败提示照常后台弹出（推演完成/失败的反馈关界面也要能收到）；日志里始终有完整记录可回看
     if (!silentFailure) {
       if (msg === 'USER_CANCELLED') toast('已取消生成。', 'warning');
       else if (isJsonFail) toast('生成失败：模型输出的JSON格式有误，原文已保留在日志，可直接重试。', 'error');
@@ -1662,7 +1940,7 @@ async function fetchModels() {
 function stopGeneration() {
   cancelRequested = true;
   if (abortController) abortController.abort();
-  const loading = (settings.logHistory || []).find((x) => x.status === 'loading');
+  const loading = (settings.logHistory || []).find((x) => x.status === 'loading' && x.kind !== 'theater');
   if (loading) {
     loading.status = 'cancelled';
     loading.error = '已取消生成';
@@ -1672,6 +1950,21 @@ function stopGeneration() {
   renderBusyState();
   rerenderIfOpen();
   // 取消提示统一由生成流程的 catch 负责，避免在此重复弹出
+}
+
+// 幕外停止：只中止幕外这条链路，绝不影响正在跑的推演
+function stopTheater() {
+  theaterCancel = true;
+  if (theaterAbort) theaterAbort.abort();
+  const loading = (settings.logHistory || []).find((x) => x.status === 'loading' && x.kind === 'theater');
+  if (loading) {
+    loading.status = 'cancelled';
+    loading.error = '已取消生成';
+  }
+  saveSettings();
+  theaterBusy = false;
+  renderBusyState();
+  rerenderIfOpen();
 }
 
 function injectToInput(text) {
@@ -1711,12 +2004,60 @@ function openModal(tab = activeTab) {
     modal.id = MODAL_ID;
     document.body.appendChild(modal);
   }
-  renderModal();
+  modalJustOpened = true;   // 标记首帧需入场动画；renderModal 消费后即清，后续静默重渲染不再播
   modal.classList.add('open');
+  renderModal();
 }
 
 function closeModal() {
   document.getElementById(MODAL_ID)?.classList.remove('open');
+}
+
+/* ============================================================
+   行内全屏文本编辑：编剧/幕后提示词/此幕指令共用。沉浸编辑，吸顶返回+保存常驻。
+   不再 body 挂载独立窗口（窄屏 position:fixed 会以 .sd-window 为基准跑偏），
+   改为在千幕界面内切换出编辑视图，完全沿用阅读页同一套布局，任意终端尺寸都稳。
+   ============================================================ */
+// 行内全屏编辑：不再 body 挂载独立窗口（窄屏定位会跑偏），改为在千幕界面内切换出编辑视图，
+// 完全沿用阅读页的同一套布局（.sd-window 内、吸顶返回/保存栏），任意终端尺寸都稳。
+function openTextEditor({ target, title, value, placeholder = '', commit }) {
+  editorView = { target, title: title || '编辑', value: value || '', placeholder, commit, returnTab: activeTab };
+  renderModal();
+}
+
+function closeEditorView() {
+  editorView = null;
+  renderModal();
+}
+
+// 行内编辑保存：按 target 直写对应数据模型，与各自原有持久化口径一致
+async function commitEditorValue(target, val) {
+  if (target === 'sd-blueprint') {
+    getChatStore().blueprint = val || DEFAULT_BLUEPRINT;
+    getChatStore().blueprintEdited = true;
+    await saveMetadata();
+  } else if (target === 'sd-system-prompt') {
+    settings.systemPrompt = val || DEFAULT_SYSTEM_PROMPT;
+    settings.systemPromptHash = settings.systemPrompt === DEFAULT_SYSTEM_PROMPT ? hashText(DEFAULT_SYSTEM_PROMPT) : '';
+    saveSettings();
+  } else if (target === 'sd-theater-instruction') {
+    getTheater().instruction = val || '';
+    theaterScriptSource = '';   // 手动改动即视为即兴，脱离剧札来源
+    saveSettings();
+  }
+}
+
+function renderEditorView() {
+  const ev = editorView;
+  return `
+    <section class="sd-card sd-reader-card sd-editor-card">
+      <div class="sd-sticky-bar sd-editor-bar">
+        <button type="button" class="sd-btn sd-mini-btn sd-editor-back"><i class="fa-solid fa-arrow-left"></i>返回</button>
+        <h3>${htmlEscape(ev.title)}</h3>
+        <button type="button" class="sd-btn sd-mini-btn sd-primary sd-editor-save"><i class="fa-solid fa-check"></i>保存</button>
+      </div>
+      <textarea class="text_pole sd-editor-area" spellcheck="false" placeholder="${htmlEscape(ev.placeholder)}">${htmlEscape(ev.value)}</textarea>
+    </section>`;
 }
 
 function renderSettingsPanel() {
@@ -1821,23 +2162,25 @@ function renderFloatButton() {
 }
 
 function renderBusyState() {
+  // 推演键自身在「推演下一幕 ⇄ 停止推演」之间原地切换，不额外加按钮
   document.querySelectorAll('.sd-generate-main').forEach((el) => {
-    el.disabled = busy || !settings.enabled;
-    el.classList.toggle('sd-busy', busy);
+    el.disabled = !settings.enabled;
+    el.classList.toggle('sd-as-stop', busy);
     el.innerHTML = busy
-      ? '推演中<span class="sd-dots"><i>·</i><i>·</i><i>·</i></span>'
+      ? '<i class="fa-solid fa-stop"></i>停止推演'
       : '<i class="fa-solid fa-clapperboard"></i>推演下一幕';
   });
+  // 幕外上演键同理原地切换
   document.querySelectorAll('.sd-theater-stage').forEach((el) => {
-    el.disabled = busy || !settings.enabled;
-    el.classList.toggle('sd-busy', busy);
-    el.innerHTML = busy
-      ? '上演中<span class="sd-dots"><i>·</i><i>·</i><i>·</i></span>'
+    el.disabled = !settings.enabled;
+    el.classList.toggle('sd-as-stop', theaterBusy);
+    el.innerHTML = theaterBusy
+      ? '<i class="fa-solid fa-stop"></i>停止上演'
       : '<i class="fa-solid fa-masks-theater"></i>上演此幕';
   });
 }
 
-// v0.5.2：折叠面板开合状态记忆（修复"点选预设时世界书也跟着展开"）
+// 折叠面板开合状态记忆
 function snapshotAccState(modal) {
   modal.querySelectorAll('details[data-acc]').forEach((el) => {
     accState[el.dataset.acc] = el.open;
@@ -1850,7 +2193,7 @@ function applyAccState(modal) {
   });
 }
 
-// v0.5.2：读取 ST 当前正文字体，写入 --sd-font（视觉隔离保留，仅字体跟随）
+// 读取 ST 当前正文字体，写入 --sd-font（视觉隔离保留，仅字体跟随）
 function syncFontWithST() {
   try {
     const modal = document.getElementById(MODAL_ID);
@@ -1868,15 +2211,18 @@ function renderModal() {
   snapshotAccState(modal);
   const tabs = [
     ['dashboard', '审片'],
+    ['tasksnodes', '任务'],
+    ['castworld', '世界'],
     ['blueprint', '编剧'],
-    ['tasksnodes', '任务节点'],
-    ['castworld', '角色世界'],
     ['context', '取材'],
     ['settings', '幕后'],
     ['theater', '幕外'],
   ];
   const wasOpen = modal.classList.contains('open');
-  modal.className = `sd-theme-${settings.theme === 'dark' ? 'dark' : 'light'}${wasOpen ? ' open' : ''}`;
+  const animIn = modalJustOpened;   // 仅「打开」后的首帧入场动画，消费后清零，静默重渲染不再播（消除刷新闪动）
+  modalJustOpened = false;
+  const themeKey = THEME_KEYS.includes(settings.theme) ? settings.theme : 'light';
+  modal.className = `sd-theme-${themeKey}${wasOpen ? ' open' : ''}${animIn ? ' sd-anim-in' : ''}`;
   modal.innerHTML = `
     <div class="sd-backdrop"></div>
     <section class="sd-window" role="dialog" aria-label="${EXTENSION_NAME}">
@@ -1888,27 +2234,56 @@ function renderModal() {
         </div>
         <div class="sd-header-actions">
           <button class="sd-plug-shortcut" title="API与日志"><i class="fa-solid fa-gear"></i></button>
-          <button class="sd-theme-toggle" title="切换外观" aria-label="切换外观"><span></span></button>
+          <div class="sd-theme-pick">
+            <button class="sd-theme-btn" title="外观主题" aria-label="外观主题" aria-haspopup="true"><i class="fa-solid fa-palette"></i></button>
+            <div class="sd-theme-menu" role="menu" hidden>
+              ${THEMES.map((t) => `
+                <button class="sd-theme-opt ${themeKey === t.key ? 'active' : ''}" role="menuitemradio" aria-checked="${themeKey === t.key}" data-theme="${t.key}">
+                  <span class="sd-theme-dot" style="background:${t.dot}"></span>
+                  <span class="sd-theme-name">${t.name}</span>
+                </button>`).join('')}
+            </div>
+          </div>
           <button class="sd-close" title="关闭"><i class="fa-solid fa-xmark"></i></button>
         </div>
       </header>
       <nav class="sd-tabs">
         ${tabs.map(([id, label]) => `<button class="sd-tab ${activeTab === id ? 'active' : ''}" data-tab="${id}">${label}</button>`).join('')}
       </nav>
-      <main class="sd-body">${renderActiveTab()}</main>
+      <main class="sd-body">${['tasksnodes', 'castworld', 'context'].includes(activeTab) && !editorView ? `<div class="sd-cols-inner">${renderActiveTab()}</div>` : renderActiveTab()}</main>
       ${renderInjectDock()}
     </section>`;
   modal.querySelector('.sd-backdrop')?.addEventListener('click', closeModal);
   modal.querySelector('.sd-window')?.addEventListener('click', (event) => event.stopPropagation());
   modal.querySelector('.sd-close')?.addEventListener('click', closeModal);
   modal.querySelector('.sd-plug-shortcut')?.addEventListener('click', () => { activeTab = 'plug'; renderModal(); });
-  modal.querySelector('.sd-theme-toggle')?.addEventListener('click', () => {
-    settings.theme = settings.theme === 'dark' ? 'light' : 'dark';
-    saveSettings();
-    renderModal();
+  const themePick = modal.querySelector('.sd-theme-pick');
+  const themeMenu = themePick?.querySelector('.sd-theme-menu');
+  modal.querySelector('.sd-theme-btn')?.addEventListener('click', (event) => {
+    event.stopPropagation();
+    if (!themeMenu) return;
+    const willOpen = themeMenu.hidden;
+    themeMenu.hidden = !willOpen;
+    themePick.classList.toggle('open', willOpen);
+    if (willOpen) {
+      // 点菜单外任意处即收起，只挂一次
+      const closeOnce = (ev) => {
+        if (themePick.contains(ev.target)) return;
+        themeMenu.hidden = true;
+        themePick.classList.remove('open');
+        document.removeEventListener('click', closeOnce, true);
+      };
+      document.addEventListener('click', closeOnce, true);
+    }
   });
+  modal.querySelectorAll('.sd-theme-opt').forEach((el) => el.addEventListener('click', () => {
+    const next = el.dataset.theme;
+    if (next && next !== settings.theme) { settings.theme = next; saveSettings(); }
+    renderModal();   // 重渲染会重建菜单（默认收起态）
+  }));
   modal.querySelectorAll('.sd-tab').forEach((el) => el.addEventListener('click', () => {
     if (el.dataset.tab !== 'theater') theaterView = null;
+    editorView = null;   // 切标签即退出行内编辑视图
     activeTab = el.dataset.tab;
     renderModal();
   }));
@@ -1918,12 +2293,26 @@ function renderModal() {
   syncFontWithST();
   const body = modal.querySelector('.sd-body');
   if (body) body.scrollTop = prevScroll;
-  // v0.5.5：保留标签栏横向滚动位置，并确保激活标签可见（修移动端点选后标题栏弹回左侧）
+  // 保留标签栏横向滚动位置，并确保激活标签可见；两端按可滚动方向显隐渐隐遮罩
   const tabsBar = modal.querySelector('.sd-tabs');
   if (tabsBar) {
     tabsBar.scrollLeft = prevTabScroll;
     tabsBar.querySelector('.sd-tab.active')?.scrollIntoView({ inline: 'nearest', block: 'nearest' });
+    updateTabsFade(tabsBar);
+    if (!tabsBar.dataset.fadeBound) {
+      tabsBar.dataset.fadeBound = '1';
+      tabsBar.addEventListener('scroll', () => updateTabsFade(tabsBar), { passive: true });
+    }
   }
+}
+
+// 标签栏两端渐隐：仅在该侧确有可滚动内容时才加雾化遮罩，提示「这边还能滑」，滑到尽头则隐去该侧
+function updateTabsFade(bar) {
+  const max = bar.scrollWidth - bar.clientWidth;
+  const x = bar.scrollLeft;
+  const overflowing = max > 2;
+  bar.classList.toggle('sd-tabs-fade-left', overflowing && x > 2);
+  bar.classList.toggle('sd-tabs-fade-right', overflowing && x < max - 2);
 }
 
 function currentPlan() {
@@ -1931,6 +2320,7 @@ function currentPlan() {
 }
 
 function renderActiveTab() {
+  if (editorView) return renderEditorView();
   switch (activeTab) {
     case 'blueprint': return renderBlueprintTab();
     case 'tasksnodes': return renderTasksNodesTab();
@@ -1944,6 +2334,7 @@ function renderActiveTab() {
 }
 
 function renderInjectDock() {
+  if (editorView) return '';   // 行内编辑视图独占界面，不浮写入坞
   if (!['tasksnodes', 'castworld'].includes(activeTab) || !currentPlan()) return '';
   return '<div class="sd-inject-dock"><button class="sd-btn sd-primary sd-inject-selected" type="button" disabled>写入已选 (<span>0</span>)</button></div>';
 }
@@ -1951,20 +2342,6 @@ function renderInjectDock() {
 function metricBar(label, value) {
   const n = Math.max(0, Math.min(100, Number(value || 0)));
   return `<div class="sd-metric sd-progress-metric"><div class="sd-metric-top"><span>${htmlEscape(label)}</span><b>${n}%</b></div><div class="sd-bar"><i style="width:${n}%"></i></div></div>`;
-}
-
-// v0.5.2：环形进度指标，中心显示 N%
-function metricCircle(label, value) {
-  const n = Math.max(0, Math.min(100, Number(value || 0)));
-  return `<div class="sd-circle-metric" style="--sd-value:${n}"><div class="sd-circle"><span>${n}%</span></div><b>${htmlEscape(label)}</b></div>`;
-}
-
-function getStoryMetrics(st) {
-  const raw = Array.isArray(st?.metrics) ? st.metrics : [];
-  return FIXED_METRICS.map((label, index) => {
-    const found = raw.find((m) => String(m?.label || '').trim() === label) || raw[index];
-    return { label, value: Math.max(0, Math.min(100, Number(found?.value ?? found?.score ?? 0))) };
-  });
 }
 
 function renderInjectBadge() {
@@ -1980,17 +2357,21 @@ function renderHeroActions(hasPlan) {
 }
 
 function renderGenerateRow() {
+  const mainContent = busy
+    ? '<i class="fa-solid fa-stop"></i>停止推演'
+    : '<i class="fa-solid fa-clapperboard"></i>推演下一幕';
   return `<div class="sd-button-row">
-    <button class="sd-btn sd-primary sd-generate-main"><i class="fa-solid fa-clapperboard"></i>推演下一幕</button>
+    <button class="sd-btn sd-primary sd-generate-main ${busy ? 'sd-as-stop' : ''}">${mainContent}</button>
     <button class="sd-btn sd-newcomer-toggle ${settings.newcomerMode ? 'active' : ''}" type="button" title="选中后，本次推演将引入全新角色与世界事件"><i class="fa-solid fa-user-plus"></i>新角入场</button>
-    ${busy ? '<button class="sd-btn sd-stop"><i class="fa-solid fa-stop"></i>停止</button>' : ''}
   </div>`;
 }
 
 function renderDashboardTab() {
   const p = currentPlan();
   if (!p) {
-    return `<section class="sd-card sd-plan-card"><div class="sd-hero-top"><h3 style="margin:0">剧情推演</h3>${renderHeroActions(false)}</div><div class="sd-empty">尚未推演剧情</div>${renderGenerateRow()}</section>`;
+    // 无 plan 时仍渲染历史区——清空当前推演不应连带把历史审片记录也藏掉
+    return `<section class="sd-card sd-plan-card"><div class="sd-hero-top"><h3 style="margin:0">剧情推演</h3>${renderHeroActions(false)}</div><div class="sd-empty">尚未推演剧情</div>${renderGenerateRow()}</section>
+    ${renderHistorySection()}`;
   }
   const st = p.story_status || {};
   return `
@@ -2005,29 +2386,97 @@ function renderDashboardTab() {
     </section>
     <section class="sd-card sd-status-card">
       ${metricBar('本幕进度', st.progress)}
-      <div class="sd-circle-grid">${getStoryMetrics(st).map((m) => metricCircle(m.label, m.value)).join('')}</div>
+      <div class="sd-count-tags">
+        ${countGroupTag('任务', 'tasksnodes', [['任务', p.quests?.length || 0], ['因果', p.chain_reactions?.length || 0]])}
+        ${countGroupTag('世界', 'castworld', [['角色', p.npc_updates?.length || 0], ['关系', p.relation_undercurrents?.length || 0], ['世界', p.world_updates?.length || 0]])}
+      </div>
     </section>
-    <div class="sd-grid sd-grid-4 sd-dashboard-counts">
-      ${countCard('任务', p.quests?.length || 0, 'tasksnodes')}
-      ${countCard('节点', p.story_nodes?.length || 0, 'tasksnodes')}
-      ${countCard('角色', p.npc_updates?.length || 0, 'castworld')}
-      ${countCard('世界', p.world_updates?.length || 0, 'castworld')}
-    </div>
-    <section class="sd-card"><h3>导演手记</h3><p>${htmlEscape(p.director_comment || '暂无')}</p></section>
+    <section class="sd-card"><h3>众声</h3><p>${htmlEscape(p.director_comment || '暂无')}</p></section>
+    ${renderThreadsCard()}
     ${renderHistorySection()}`;
 }
 
-function countCard(label, count, jump) {
-  return `<button class="sd-count-card" data-jump="${jump}"><b>${count}</b><span>${label}</span></button>`;
+// 因果链（原「牵一发」）：把分散在各卡里的"蝴蝶效应"空话收束成一处具体可视化的因果链。取代原同质化的「节点」模块。
+function renderChainReactionsCard(p) {
+  const list = Array.isArray(p.chain_reactions) ? p.chain_reactions : [];
+  const body = list.length
+    ? `<ol class="sd-chain-flowlist">${list.map((c) => {
+        const spark = String(c.spark || '').trim();
+        const chain = String(c.chain || '').trim();
+        if (!spark && !chain) return '';
+        // 把因果链按「→」拆成节点，做成可视化的流向链路
+        const steps = [spark, ...chain.split(/\s*(?:→|->|⇒|，再|，又|，进而|，于是|然后|继而)\s*/)]
+          .map((s) => String(s || '').trim()).filter(Boolean);
+        const nodes = steps.map((s, i) => `<span class="sd-chain-node${i === 0 ? ' sd-chain-node-spark' : ''}">${htmlEscape(snip(s, 48))}</span>`).join('<i class="fa-solid fa-angle-right sd-chain-link"></i>');
+        return `<li class="sd-chain-item"><div class="sd-chain-track">${nodes}</div></li>`;
+      }).filter(Boolean).join('')}</ol>`
+    : '<p class="sd-muted">本次推演未浮现明显的因果链。下次推演时，导演会从世界里顺出一两条牵一发而动全身的连锁。</p>';
+  return `<section class="sd-card sd-chain-card">
+    <div class="sd-section-title"><h3>因果链</h3><span>世界自行流转的连锁</span></div>
+    ${body}
+  </section>`;
+}
+
+// 伏笔显影卡：列出存活暗线及显影刻度，可钉住/唤醒/归档；整卡可折叠并记忆开合
+function renderThreadsCard() {
+  if (!settings.liveStageEnabled) return '';
+  const store = getChatStore();
+  const all = Array.isArray(store.threads) ? store.threads : [];
+  const live = all.filter((t) => t.status !== 'closed');
+  const closed = all.filter((t) => t.status === 'closed');
+  const stageIdx = (s) => STAGE_LADDER.indexOf(sanitizeStage(s));
+  // 稳定排序：按埋线顺序(origin)固定，绝不随 pinned/stage 变动而重排——否则钉住会让该行跳位，看着像"钉错了"
+  const sorted = [...live].sort((a, b) => (Number(a.origin || 0) - Number(b.origin || 0)) || String(a.id).localeCompare(String(b.id)));
+  const rowHtml = (t) => {
+    const pct = Math.round((stageIdx(t.stage) / (STAGE_LADDER.length - 1)) * 100);
+    const dormant = t.status === 'dormant';
+    return `<article class="sd-thread-row${dormant ? ' sd-thread-dormant' : ''}${t.pinned ? ' sd-thread-pinned' : ''}">
+      <div class="sd-thread-head">
+        <button type="button" class="sd-icon-btn sd-icon-sm sd-thread-pin${t.pinned ? ' sd-thread-pin-on' : ''}" data-id="${htmlEscape(t.id)}" title="${t.pinned ? '已钉住，点击取消' : '钉住（重点追踪，不被自动归档）'}" aria-pressed="${t.pinned ? 'true' : 'false'}"><i class="fa-${t.pinned ? 'solid' : 'regular'} fa-thumbtack"></i></button>
+        <h4>${htmlEscape(snip(t.title, 24))}</h4>
+        <span class="sd-thread-stage">${htmlEscape(t.stage)}${dormant ? ' · 沉睡' : ''}</span>
+        ${dormant ? `<button type="button" class="sd-icon-btn sd-icon-sm sd-thread-wake" data-id="${htmlEscape(t.id)}" title="唤醒"><i class="fa-solid fa-rotate-right"></i></button>` : ''}
+        <button type="button" class="sd-icon-btn sd-icon-sm sd-thread-close" data-id="${htmlEscape(t.id)}" title="归档"><i class="fa-solid fa-box-archive"></i></button>
+      </div>
+      <div class="sd-bar sd-thread-bar"><i style="width:${pct}%"></i></div>
+      ${t.essence ? `<p class="sd-thread-essence">${htmlEscape(snip(t.essence, 70))}</p>` : ''}
+    </article>`;
+  };
+  const body = sorted.length
+    ? sorted.map(rowHtml).join('')
+    : '<p class="sd-muted">暂无在演伏笔。推演下一幕时，导演会从正文里提炼并埋下暗线，跨幕显影。</p>';
+  const closedFold = closed.length
+    ? `<details class="sd-plain-fold sd-threads-closed-fold" data-acc="threads-closed"><summary><b>已落幕</b><span class="sd-summary-note">${closed.length} 条</span></summary>${closed.map((t) => `<article class="sd-thread-row sd-thread-closed"><div class="sd-thread-head"><h4>${htmlEscape(snip(t.title, 24))}</h4><span class="sd-thread-stage">${htmlEscape(t.stage)}</span><button type="button" class="sd-icon-btn sd-icon-sm sd-thread-purge" data-id="${htmlEscape(t.id)}" title="彻底删除"><i class="fa-solid fa-trash-can"></i></button></div>${t.essence ? `<p class="sd-thread-essence">${htmlEscape(snip(t.essence, 70))}</p>` : ''}</article>`).join('')}</details>`
+    : '';
+  return `<section class="sd-card sd-threads-card">
+    <details class="sd-threads-fold" data-acc="threads-card" open>
+      <summary class="sd-threads-summary"><b>伏笔显影</b><span class="sd-tpl-count">${live.length} 条在演</span></summary>
+      <div class="sd-threads-body">
+        ${body}
+        ${closedFold}
+      </div>
+    </details>
+  </section>`;
+}
+
+// 审片页跳转标签：按版块（任务线/角色世界）各一枚，标功能合并名 + 该版块各分项条数，点击跳到对应标签页。
+// 任务线 = 任务标签页（任务 + 因果链）；角色世界 = 角色世界标签页（角色 + 关系 + 世界）。
+function countGroupTag(label, jump, parts) {
+  const inner = parts.map(([name, count]) => `<span class="sd-ct-part">${htmlEscape(name)}<b>${count}</b></span>`).join('');
+  return `<button class="sd-count-tag sd-count-group" data-jump="${jump}"><span class="sd-ct-label">${htmlEscape(label)}</span>${inner}</button>`;
 }
 
 function renderHistorySection() {
   const history = Array.isArray(getChatStore().history) ? getChatStore().history : [];
   const rows = history.slice(0, 5).map((record) => {
     const st = record.plan?.story_status || {};
-    return `<article class="sd-history-card"><div><h4>${htmlEscape(st.title || st.current_arc || '未命名审片')}</h4><p class="sd-muted">${htmlEscape(formatDateTime(record.createdAt))}</p></div><div class="sd-button-row"><button class="sd-btn sd-load-history" data-id="${htmlEscape(record.id)}">载入</button><button class="sd-btn sd-danger sd-delete-history" data-id="${htmlEscape(record.id)}">删除</button></div></article>`;
+    return `<article class="sd-lib-row"><div class="sd-lib-main"><h4>${htmlEscape(st.title || st.current_arc || '未命名审片')}</h4><p class="sd-muted sd-fav-time">${htmlEscape(formatDateTime(record.createdAt))}</p></div>
+      <div class="sd-lib-actions">
+        <button type="button" class="sd-btn sd-lib-load sd-load-history" data-id="${htmlEscape(record.id)}">载入</button>
+        <button type="button" class="sd-icon-btn sd-icon-sm sd-danger sd-delete-history" data-id="${htmlEscape(record.id)}" title="删除" aria-label="删除"><i class="fa-solid fa-trash-can"></i></button>
+      </div></article>`;
   }).join('');
-  return `<section class="sd-card"><h3>历史记录</h3><p class="sd-muted">最多保留5条审片记录。</p>${rows || '<p class="sd-muted">暂无历史记录。</p>'}</section>`;
+  return `<section class="sd-card"><div class="sd-field-head"><h3>历史记录</h3><span class="sd-summary-note">最多保留 5 条审片记录</span></div>${rows || '<p class="sd-muted">暂无历史记录。</p>'}</section>`;
 }
 
 function formatDateTime(date) {
@@ -2037,18 +2486,107 @@ function formatDateTime(date) {
 
 function renderTasksNodesTab() {
   const p = currentPlan();
-  if (!p) return renderNoPlan('任务节点尚未生成');
-  return `${renderPlanSection('任务', p.quests || [], 'quest')}${renderPlanSection('节点', p.story_nodes || [], 'node')}`;
+  if (!p) return renderNoPlan('任务尚未生成');
+  return `${renderPlanSection('任务', p.quests || [], 'quest')}${renderChainReactionsCard(p)}`;
 }
 
 function renderCastWorldTab() {
   const p = currentPlan();
   if (!p) return renderNoPlan('角色世界尚未生成');
-  return `${renderPlanSection('角色动向', p.npc_updates || [], 'npc')}${renderPlanSection('世界回声', p.world_updates || [], 'world')}`;
+  // 尘寰群生置顶（市井剪影，先声夺人），再是可折叠的角色动向 / 关系暗涌 / 世界回声（记忆开合，避免本页过长）
+  return `${renderWorldChatterCard(p)}${renderPlanSectionFold('角色动向', p.npc_updates || [], 'npc', 'castfold-npc')}${renderRelationUndercurrentsCard(p)}${renderPlanSectionFold('世界回声', p.world_updates || [], 'world', 'castfold-world')}`;
+}
+
+// 关系暗涌：角色之间自行纠缠的张力（可负可中可正），独立于 {{user}} 演变。一行一簇关系，标出基调、走势与 user 知情程度。
+function renderRelationUndercurrentsCard(p) {
+  const normTone = (t) => {
+    const s = String(t || '').trim().toLowerCase();
+    if (/(neg|负|阴|敌|怨|裂)/.test(s)) return 'neg';
+    if (/(pos|正|暖|和|盟|护)/.test(s)) return 'pos';
+    if (s) return 'neu';
+    return '';
+  };
+  const list = (Array.isArray(p.relation_undercurrents) ? p.relation_undercurrents : [])
+    .map((r) => ({
+      parties: String(r && r.parties || '').trim(),
+      tone: normTone(r && r.tone),
+      tension: String(r && r.tension || '').trim(),
+      drift: String(r && r.drift || '').trim(),
+      awareness: String(r && r.user_awareness || '').trim().toLowerCase(),
+    }))
+    .filter((r) => r.parties || r.tension);
+  const awareLabel = { unaware: '浑然不知', rumor: '仅有耳闻', witness: '在场旁观' };
+  const toneLabel = { neg: '负面', neu: '中立', pos: '正向' };
+  const body = list.length
+    ? list.map((r) => {
+        const tag = awareLabel[r.awareness] || '';
+        const tone = r.tone ? `<span class="sd-relus-tone sd-relus-tone-${r.tone}">${toneLabel[r.tone]}</span>` : '';
+        return `<article class="sd-relus-row sd-relus-${r.tone || 'neu'}">
+          <div class="sd-relus-head">${tone}<span class="sd-relus-parties">${htmlEscape(snip(r.parties, 40))}</span>${tag ? `<span class="sd-relus-aware" title="{{user}} 的知情程度">${htmlEscape(tag)}</span>` : ''}</div>
+          ${r.tension ? `<p class="sd-relus-tension">${htmlEscape(snip(r.tension, 90))}</p>` : ''}
+          ${r.drift ? `<p class="sd-relus-drift"><i class="fa-solid fa-arrow-trend-up"></i>${htmlEscape(snip(r.drift, 80))}</p>` : ''}
+        </article>`;
+      }).join('')
+    : '<p class="sd-muted">本次推演未浮现角色之间的暗涌。下次推演时，导演会从世界里牵出几簇自行纠缠的关系。</p>';
+  return `<section class="sd-card sd-relus-card">
+    <details class="sd-plain-fold" data-acc="castfold-relus" open>
+      <summary><b>关系暗涌</b><span class="sd-summary-note">${list.length} 条</span></summary>
+      <div class="sd-fold-body">${body}</div>
+    </details>
+  </section>`;
 }
 
 function renderPlanSection(title, items, kind) {
   return `<section class="sd-card sd-plan-section"><div class="sd-section-title"><h3>${htmlEscape(title)}</h3><span>${items?.length || 0} 条</span></div>${renderItemList(items || [], kind)}</section>`;
+}
+
+// 可折叠版分区：summary 显示标题+条数，整组可收起；data-acc 记忆开合状态
+function renderPlanSectionFold(title, items, kind, accKey) {
+  return `<section class="sd-card sd-plan-section">
+    <details class="sd-plain-fold" data-acc="${htmlEscape(accKey)}" open>
+      <summary><b>${htmlEscape(title)}</b><span class="sd-summary-note">${items?.length || 0} 条</span></summary>
+      <div class="sd-fold-body">${renderItemList(items || [], kind)}</div>
+    </details>
+  </section>`;
+}
+
+// 尘寰群生卡：世间嘈杂之声。默认是一方动态浮现的「市井舞台」——气泡缓缓滚动渐隐渐出，中段清晰、边缘模糊；
+// 点「展开」切换为完整台本列表（出处坐标 + 台词，台本式两行），便于通读。
+function renderWorldChatterCard(p) {
+  if (!settings.worldChatterEnabled) return '';
+  const list = (Array.isArray(p.world_chatter) ? p.world_chatter : [])
+    .map((c) => ({
+      text: String(c && (c.text ?? c) || '').trim(),
+      who: String(c && c.who || '').trim(),
+      where: String(c && c.where || '').trim(),
+    }))
+    .filter((c) => c.text);
+  if (!list.length) {
+    return `<section class="sd-card sd-chatter-card">
+      <div class="sd-section-title"><h3>尘寰群生</h3><span>随推演刷新</span></div>
+      <p class="sd-muted">本次推演未冒出市井声音。下次推演时，导演会从世界里采集若干喊话与琐事。</p>
+    </section>`;
+  }
+  const lineHtml = (c) => `<div class="sd-chatter-line">${(c.who || c.where) ? `<span class="sd-chatter-src">${htmlEscape(snip([c.who, c.where].filter(Boolean).join(' · '), 18))}</span>` : ''}<span class="sd-chatter-say">${htmlEscape(c.text)}</span></div>`;
+
+  // 展开态：完整台本列表
+  if (chatterExpanded) {
+    return `<section class="sd-card sd-chatter-card">
+      <div class="sd-section-title"><h3>尘寰群生</h3><button type="button" class="sd-icon-btn sd-chatter-toggle" title="收起" aria-label="收起"><i class="fa-solid fa-compress"></i></button></div>
+      <div class="sd-chatter-list">${list.map(lineHtml).join('')}</div>
+    </section>`;
+  }
+
+  // 浮现态：定高舞台，气泡上滚渐隐渐出；为成环顺滑，列表整体复制一份首尾相接。
+  // 用 index 派生的负 delay 让各条错峰，nth 着色让中段更清晰、远端更淡。
+  const stage = [...list, ...list].map((c, i) => {
+    const delay = (i * 1.6).toFixed(1);
+    return `<div class="sd-chatter-float" style="animation-delay:-${delay}s">${lineHtml(c)}</div>`;
+  }).join('');
+  return `<section class="sd-card sd-chatter-card">
+    <div class="sd-section-title"><h3>尘寰群生</h3><button type="button" class="sd-icon-btn sd-chatter-toggle" title="展开" aria-label="展开"><i class="fa-solid fa-expand"></i></button></div>
+    <div class="sd-chatter-stage" aria-label="市井浮声"><div class="sd-chatter-track">${stage}</div></div>
+  </section>`;
 }
 
 function renderNoPlan(text = '尚未推演剧情') {
@@ -2069,11 +2607,11 @@ function renderItemCard(item, kind, idx) {
   if (kind === 'quest') {
     fields.push(['目标', item.objective], ['说明', item.description], ['触发', item.trigger], ['收获', item.reward]);
   } else if (kind === 'node') {
-    fields.push(['触发', item.trigger], ['伏笔', item.foreshadowing], ['事件', item.event], ['后果', item.consequences]);
+    fields.push(['触发', item.trigger], ['事件', item.event], ['转折', item.turn]);
   } else if (kind === 'npc') {
-    fields.push(['目标', item.current_goal], ['行动', item.next_action], ['隐情', item.hidden_agenda], ['关系网', item.relationship_to_user]);
+    fields.push(['目标', item.current_goal], ['行动', item.next_action], ['隐情', item.hidden_agenda], ['关系网', item.relations || item.relationship_to_user]);
   } else {
-    fields.push(['内容', item.content], ['影响', item.impact]);
+    fields.push(['内容', item.content], ['波及', item.scope]);
   }
   const checked = injectSelection.has(injectId) ? 'checked' : '';
   return `<details class="sd-item-card sd-item-fold" data-acc="item-${htmlEscape(injectId)}">
@@ -2102,7 +2640,6 @@ function renderItemChips(item, kind) {
     push('优先级', item.priority);
   } else if (kind === 'npc') {
     push('定位', item.role);
-    if (item.progress !== undefined) push('进度', `${item.progress}%`);
     push('情绪', item.emotional_state);
   } else {
     push('类型', item.type);
@@ -2135,7 +2672,7 @@ function renderBlueprintTab() {
   const store = getChatStore();
   return `
     <section class="sd-card">
-      <h3>当前聊天的剧本</h3>
+      <div class="sd-field-head"><h3>当前聊天的剧本</h3><button type="button" class="sd-icon-btn sd-icon-sm sd-expand-editor" data-target="sd-blueprint" data-title="当前聊天的剧本" title="展开编辑" aria-label="展开编辑"><i class="fa-solid fa-up-right-and-down-left-from-center"></i></button></div>
       <textarea class="text_pole sd-textarea sd-blueprint" spellcheck="false">${htmlEscape(store.blueprint || DEFAULT_BLUEPRINT)}</textarea>
       <div class="sd-button-row sd-current-blueprint-actions">
         <button type="button" class="sd-btn sd-save-blueprint">保存当前剧本</button>
@@ -2150,6 +2687,9 @@ function renderBlueprintTab() {
 
 function renderContextTab() {
   const opts = settings.contextOptions;
+  // 懒加载：ST 重进/刷新后内存里的扫描缓存为空，但勾选状态仍在 settings 里。
+  // 首次进入取材页时后台补扫一次，让面板照实显示「已读取 + 既有勾选」，无需手动点读取。
+  maybeAutoScanContext();
   return `
     <section class="sd-card sd-base-card">
       <div class="sd-base-row">
@@ -2224,7 +2764,8 @@ function renderWorldBookSourcePanel() {
   // 勾选框只管选中/取消；书名是独立按钮，点名只切换下方查看的条目，不动选中状态
   const rows = names.map((name) => `<div class="sd-source-row sd-world-row${viewName === name ? ' sd-world-viewing' : ''}">
     <input type="checkbox" class="sd-toggle-worldbook" data-name="${htmlEscape(name)}" ${selected.includes(name) ? 'checked' : ''} title="选中作为引用">
-    <button type="button" class="sd-world-name" data-name="${htmlEscape(name)}"><span>${htmlEscape(name)}</span>${boundNames.includes(name) ? badge('当前绑定') : ''}</button>
+    <button type="button" class="sd-world-name" data-name="${htmlEscape(name)}"><span>${htmlEscape(name)}</span>${boundNames.includes(name) ? badge('当前绑定') : ''}${isWorldBookGlobal(name) ? badge('全局') : ''}</button>
+    <button type="button" class="sd-icon-btn sd-icon-sm sd-world-global${isWorldBookGlobal(name) ? ' sd-world-global-on' : ''}" data-name="${htmlEscape(name)}" title="${isWorldBookGlobal(name) ? '已设为全局，点击取消（所有聊天默认引用）' : '设为全局：对所有聊天默认引用（单个聊天仍可取消）'}" aria-pressed="${isWorldBookGlobal(name) ? 'true' : 'false'}"><i class="fa-${isWorldBookGlobal(name) ? 'solid' : 'regular'} fa-earth-asia"></i></button>
   </div>`).join('');
   return `
     <details class="sd-dropdown" data-acc="dd-world">
@@ -2252,6 +2793,21 @@ function renderContextEntry(kind, groupName, item, index, sourceLabel = '') {
   return `<details class="sd-context-item" data-acc="ci-${kind}-${htmlEscape(String(groupName))}-${htmlEscape(String(id))}"><summary><label class="sd-context-entry-label"><input type="checkbox" class="sd-context-check" data-kind="${kind}" data-group="${htmlEscape(groupName)}" data-id="${htmlEscape(String(id))}" ${checked ? 'checked' : ''}><span>${htmlEscape(title)}</span>${sourceLabel ? infoTag(sourceLabel) : ''}</label></summary><pre>${htmlEscape(cleanContextText(content).slice(0, 2000))}</pre></details>`;
 }
 
+// 注入范围开关：勾选哪些类别会被写进暗线灵感池（控注入 token）
+function renderInjectSections() {
+  const sec = settings.injectSections || {};
+  const items = [
+    ['quests', '任务入口'],
+    ['nodes', '因果链'],
+    ['npc', '人物动向'],
+    ['relations', '关系暗涌'],
+    ['world', '世界涟漪'],
+  ];
+  if (settings.liveStageEnabled) items.push(['threads', '伏笔显影']);
+  const boxes = items.map(([key, label]) => `<label class="checkbox_label sd-inject-section"><input type="checkbox" class="sd-inject-section-toggle" data-key="${key}" ${sec[key] !== false ? 'checked' : ''}> ${label}</label>`).join('');
+  return `<details class="sd-plain-fold" data-acc="inject-sections"><summary><b>注入范围</b></summary><div class="sd-inject-section-grid">${boxes}</div></details>`;
+}
+
 function renderInjectPreview() {
   const store = getChatStore();
   if (!store?.plan) {
@@ -2261,9 +2817,10 @@ function renderInjectPreview() {
     return '<details class="sd-plain-fold" data-acc="inject-preview"><summary><b>当前注入内容</b></summary><p class="sd-muted">暗线注入已关闭，本次推演结果不会被注入聊天。</p></details>';
   }
   const text = buildPlanDigest(store.plan);
+  // 与日志同款的终端式呈现：等宽块 + token 估算
   return `<details class="sd-plain-fold" data-acc="inject-preview">
-    <summary><b>当前注入内容</b><span class="sd-summary-note">约 ${estimateTokens(text)} token</span></summary>
-    <div class="sd-inject-preview-text">${htmlEscape(text || '（本次推演结果为空）').replace(/\n/g, '<br>')}</div>
+    <summary><b>当前注入内容</b>${infoTag(`约 ${estimateTokens(text)} token`)}</summary>
+    <pre class="sd-term sd-inject-term">${htmlEscape(text || '（本次推演结果为空）')}</pre>
   </details>`;
 }
 
@@ -2273,21 +2830,35 @@ function renderDirectorSettingsTab() {
       <h3>刷新</h3>
       <div class="sd-refresh-row">
         <label class="checkbox_label"><input type="checkbox" class="sd-auto-refresh" ${settings.autoRefresh ? 'checked' : ''}> 自动推演剧情</label>
-        <label class="sd-floor-refresh"><span>每</span><input class="text_pole sd-auto-every" type="number" min="2" max="50" value="${htmlEscape(settings.autoRefreshEvery || 10)}"><span>层推演</span></label>
+        <label class="sd-floor-refresh"><span>每</span><input class="text_pole sd-auto-every" type="number" min="2" max="50" value="${htmlEscape(settings.autoRefreshEvery || 10)}"><span>层</span></label>
       </div>
+      <p class="sd-muted sd-hint-sm">仅计入角色回复层</p>
     </section>
     <section class="sd-card">
       <h3>暗线注入</h3>
-      <p class="sd-muted">开启后，每次推演的结果会被提炼成一份「暗线灵感池」，悄悄放进后续聊天里，让模型在合适时机自然取用其中的线索。</p>
+      <p class="sd-muted sd-hint-sm">把推演结果提炼成暗线灵感，悄悄注入后续聊天</p>
       <div class="sd-refresh-row">
         <label class="checkbox_label"><input type="checkbox" class="sd-inject-enabled" ${settings.injectEnabled ? 'checked' : ''}> 启用暗线注入</label>
         <label class="sd-floor-refresh"><span>注入深度</span><input class="text_pole sd-inject-depth" type="number" min="0" max="20" value="${htmlEscape(settings.injectDepth ?? 2)}"></label>
       </div>
+      ${renderInjectSections()}
       ${renderInjectPreview()}
     </section>
     <section class="sd-card">
-      <h3>幕后提示词</h3>
-      <textarea class="text_pole sd-textarea sd-system-prompt" spellcheck="false">${htmlEscape(settings.systemPrompt || DEFAULT_SYSTEM_PROMPT)}</textarea>
+      <div class="sd-livefeature-row">
+        <label class="checkbox_label"><input type="checkbox" class="sd-livestage-enabled" ${settings.liveStageEnabled ? 'checked' : ''}> 启用伏笔显影</label>
+        <p class="sd-muted sd-hint-sm">推演时按正文呼应判定进度（铺陈→升温→临界→高潮→落幕），使暗线有连续命运</p>
+      </div>
+      <div class="sd-livefeature-row">
+        <label class="checkbox_label"><input type="checkbox" class="sd-worldchatter-enabled" ${settings.worldChatterEnabled ? 'checked' : ''}> 启用尘寰群生</label>
+        <p class="sd-muted sd-hint-sm">在「角色世界」页生成当前世界的芸芸众声</p>
+      </div>
+    </section>
+    <section class="sd-card">
+      <details class="sd-plain-fold" data-acc="system-prompt">
+        <summary><b>幕后提示词</b><button type="button" class="sd-icon-btn sd-icon-sm sd-expand-editor" data-target="sd-system-prompt" data-title="幕后提示词" title="展开编辑" aria-label="展开编辑"><i class="fa-solid fa-up-right-and-down-left-from-center"></i></button></summary>
+        <textarea class="text_pole sd-textarea sd-system-prompt" spellcheck="false">${htmlEscape(settings.systemPrompt || DEFAULT_SYSTEM_PROMPT)}</textarea>
+      </details>
     </section>
     <section class="sd-card">
       <details class="sd-plain-fold" data-acc="output-schema">
@@ -2301,7 +2872,7 @@ function renderDirectorSettingsTab() {
 const LOG_STATUS_LABELS = { success: '成功', error: '失败', cancelled: '已取消', loading: '生成中', none: '—' };
 const LOG_KIND_LABELS = { director: '推演', theater: '小剧场' };
 
-// v0.5.2：日志详情平铺展示，无二级折叠
+// 日志详情平铺展示，无二级折叠
 function renderLogEntry(log, index) {
   const status = log.status || 'none';
   const kindLabel = LOG_KIND_LABELS[log.kind] || '推演';
@@ -2330,8 +2901,10 @@ function renderPlugTab() {
   return `
     <section class="sd-card">
       <h3>模型来源</h3>
-      <label class="radio_label"><input type="radio" name="sd-provider" value="external" ${isExternal ? 'checked' : ''}> OpenAI（自定义）</label>
-      <label class="radio_label"><input type="radio" name="sd-provider" value="sillytavern" ${!isExternal ? 'checked' : ''}> 使用SillyTavern当前API设置</label>
+      <div class="sd-source-pick">
+        <label class="sd-source-opt ${isExternal ? 'active' : ''}"><input type="radio" name="sd-provider" value="external" ${isExternal ? 'checked' : ''}><span class="sd-source-dot"></span>OpenAI（自定义）</label>
+        <label class="sd-source-opt ${!isExternal ? 'active' : ''}"><input type="radio" name="sd-provider" value="sillytavern" ${!isExternal ? 'checked' : ''}><span class="sd-source-dot"></span>使用SillyTavern当前API设置</label>
+      </div>
     </section>
     <section class="sd-card ${isExternal ? '' : 'sd-disabled-card'}">
       <h3>API</h3>
@@ -2380,9 +2953,35 @@ function updateInjectDock(root = document) {
 }
 
 function bindActiveTabEvents(root) {
+  // 行内全屏编辑视图：返回 / 保存（保存直写数据模型，再退回原标签）
+  if (editorView) {
+    root.querySelector('.sd-editor-back')?.addEventListener('click', closeEditorView);
+    root.querySelector('.sd-editor-save')?.addEventListener('click', async () => {
+      const val = root.querySelector('.sd-editor-area')?.value ?? '';
+      await commitEditorValue(editorView.target, val);
+      editorView = null;
+      renderModal();
+      toast('已保存。', 'success');
+    });
+    return; // 编辑视图独占界面，不再绑定其余标签事件
+  }
   bindTheaterTabEvents(root);
-  root.querySelectorAll('.sd-generate-main').forEach((el) => el.addEventListener('click', () => generateDirectorPlan()));
-  root.querySelectorAll('.sd-stop').forEach((el) => el.addEventListener('click', stopGeneration));
+  // 展开编辑：把目标 textarea 拉进行内全屏编辑视图，保存时按 target 直写数据模型
+  root.querySelectorAll('.sd-expand-editor').forEach((el) => el.addEventListener('click', (e) => {
+    e.preventDefault(); e.stopPropagation();   // 按钮可能位于 <summary> 内，阻止顺带折叠
+    const ta = root.querySelector(`.${el.dataset.target}`);
+    if (!ta) return;
+    openTextEditor({
+      target: el.dataset.target,
+      title: el.dataset.title || '编辑',
+      value: ta.value,
+      placeholder: ta.placeholder || '',
+    });
+  }));
+  root.querySelectorAll('.sd-generate-main').forEach((el) => el.addEventListener('click', () => {
+    if (busy) stopGeneration();
+    else generateDirectorPlan();
+  }));
   root.querySelectorAll('.sd-newcomer-toggle').forEach((el) => el.addEventListener('click', () => {
     settings.newcomerMode = !settings.newcomerMode;
     saveSettings();
@@ -2408,7 +3007,75 @@ function bindActiveTabEvents(root) {
     toast('当前推演已清空。', 'success');
     renderModal();
   });
-  root.querySelectorAll('.sd-count-card').forEach((el) => el.addEventListener('click', () => { activeTab = el.dataset.jump; renderModal(); }));
+  root.querySelectorAll('.sd-count-tag').forEach((el) => el.addEventListener('click', () => { activeTab = el.dataset.jump; renderModal(); }));
+  // 尘寰群生：浮现舞台 ⇄ 完整台本列表
+  root.querySelector('.sd-chatter-toggle')?.addEventListener('click', () => { chatterExpanded = !chatterExpanded; renderModal(); });
+  // 活幕·伏笔显影卡：钉住 / 唤醒 / 归档
+  // 钉住与唤醒不重排行（列表按 origin 固定），故走定点 DOM 更新，避免整屏 renderModal 造成界面闪烁
+  root.querySelectorAll('.sd-thread-pin').forEach((el) => el.addEventListener('click', async () => {
+    const t = (getChatStore().threads || []).find((x) => x.id === el.dataset.id);
+    if (!t) return;
+    t.pinned = !t.pinned;
+    if (t.pinned && t.status === 'dormant') { t.status = 'active'; t.silentRounds = 0; }
+    // —— 就地更新此行视觉，不重绘 ——
+    const row = el.closest('.sd-thread-row');
+    el.classList.toggle('sd-thread-pin-on', t.pinned);
+    el.setAttribute('aria-pressed', t.pinned ? 'true' : 'false');
+    el.title = t.pinned ? '已钉住，点击取消' : '钉住（重点追踪，不被自动归档）';
+    const icon = el.querySelector('i');
+    if (icon) icon.className = `fa-${t.pinned ? 'solid' : 'regular'} fa-thumbtack`;
+    if (row) {
+      row.classList.toggle('sd-thread-pinned', t.pinned);
+      if (t.status === 'active') {
+        row.classList.remove('sd-thread-dormant');
+        const stage = row.querySelector('.sd-thread-stage');
+        if (stage) stage.textContent = t.stage;
+        row.querySelector('.sd-thread-wake')?.remove();
+      }
+    }
+    await saveMetadata();
+    await applyDirectorInjection();
+  }));
+  root.querySelectorAll('.sd-thread-wake').forEach((el) => el.addEventListener('click', async () => {
+    const t = (getChatStore().threads || []).find((x) => x.id === el.dataset.id);
+    if (!t) return;
+    t.status = 'active';
+    t.silentRounds = 0;
+    // —— 就地更新此行视觉，不重绘 ——
+    const row = el.closest('.sd-thread-row');
+    if (row) {
+      row.classList.remove('sd-thread-dormant');
+      const stage = row.querySelector('.sd-thread-stage');
+      if (stage) stage.textContent = t.stage;
+    }
+    el.remove();
+    await saveMetadata();
+    await applyDirectorInjection();
+    toast('已唤醒这条伏笔，下次推演将重新追踪。', 'success');
+  }));
+  root.querySelectorAll('.sd-thread-close').forEach((el) => el.addEventListener('click', async () => {
+    const t = (getChatStore().threads || []).find((x) => x.id === el.dataset.id);
+    if (!t) return;
+    const yes = await confirmDialog('归档伏笔', `确认将「${snip(t.title, 20)}」归档？归档后不再注入，可在「已落幕」中回看。`);
+    if (!yes) return;
+    t.status = 'closed';
+    t.pinned = false;
+    await saveMetadata();
+    await applyDirectorInjection();
+    toast('已归档。', 'success');
+    renderModal();
+  }));
+  root.querySelectorAll('.sd-thread-purge').forEach((el) => el.addEventListener('click', async () => {
+    const store = getChatStore();
+    const t = (store.threads || []).find((x) => x.id === el.dataset.id);
+    if (!t) return;
+    const yes = await confirmDialog('彻底删除', `将「${snip(t.title, 20)}」从档案中永久删除？此操作不可撤销。`);
+    if (!yes) return;
+    store.threads = (store.threads || []).filter((x) => x.id !== el.dataset.id);
+    await saveMetadata();
+    toast('已删除。', 'success');
+    renderModal();
+  }));
   root.querySelectorAll('.sd-load-history').forEach((el) => el.addEventListener('click', async () => {
     const record = (getChatStore().history || []).find((x) => x.id === el.dataset.id);
     if (!record?.plan) return;
@@ -2422,7 +3089,7 @@ function bindActiveTabEvents(root) {
   }));
   root.querySelectorAll('.sd-delete-history').forEach((el) => el.addEventListener('click', async () => {
     const store = getChatStore();
-    // v1.2.1：删除历史记录只移除该条日志，绝不连带清空当前推演（清空交由扫帚按钮）
+    // 删除历史记录只移除该条日志，绝不连带清空当前推演（清空交由扫帚按钮）
     store.history = (store.history || []).filter((x) => x.id !== el.dataset.id);
     await saveMetadata();
     toast('历史记录已删除。', 'success');
@@ -2433,7 +3100,7 @@ function bindActiveTabEvents(root) {
     toast(ok ? '已写入输入框。' : '未找到输入框。', ok ? 'success' : 'error');
     if (ok) closeModal();
   }));
-  // v0.5.2：写入勾选持久化——勾选状态存入 injectSelection，重渲染/切主题不丢失
+  // 写入勾选持久化——勾选状态存入 injectSelection，重渲染/切主题不丢失
   root.querySelectorAll('.sd-select-inject').forEach((el) => {
     el.addEventListener('click', (event) => event.stopPropagation());
     el.addEventListener('change', () => {
@@ -2597,6 +3264,22 @@ function bindActiveTabEvents(root) {
     lastWorldView = name;
     renderModal();
   }));
+  root.querySelectorAll('.sd-world-global').forEach((el) => el.addEventListener('click', async (event) => {
+    event.stopPropagation();
+    const name = el.dataset.name;
+    const turnOn = !isWorldBookGlobal(name);
+    setWorldBookGlobal(name, turnOn);
+    if (turnOn) {
+      // 设为全局时清掉本聊天可能存在的显式取消，并确保已扫描其条目
+      const nameStore = getWorldNameStore();
+      if (nameStore[name] === false) delete nameStore[name];
+      if (!contextScanCache.worldBooks?.[name]) contextScanCache.worldBooks[name] = await getWorldBookEntries(name);
+      initializeSelectedContextState(contextScanCache);
+      saveSettings();
+    }
+    toast(turnOn ? `「${name}」已设为全局，所有聊天默认引用。` : `「${name}」已取消全局。`, 'info');
+    renderModal();
+  }));
   root.querySelectorAll('.sd-context-check').forEach((el) => {
     el.addEventListener('click', (event) => event.stopPropagation());
     el.addEventListener('change', () => {
@@ -2617,11 +3300,48 @@ function bindActiveTabEvents(root) {
     saveSettings();
     await applyDirectorInjection();
   });
+  root.querySelector('.sd-livestage-enabled')?.addEventListener('change', async (e) => {
+    settings.liveStageEnabled = !!e.target.checked;
+    saveSettings();
+    await applyDirectorInjection();
+    toast(settings.liveStageEnabled ? '伏笔显影已开启：下次推演起，暗线将跨幕承接。' : '伏笔显影已关闭。', 'info');
+    renderModal();
+  });
+  root.querySelector('.sd-worldchatter-enabled')?.addEventListener('change', (e) => {
+    settings.worldChatterEnabled = !!e.target.checked;
+    saveSettings();
+    toast(settings.worldChatterEnabled ? '尘寰群生已开启。' : '尘寰群生已关闭。', 'info');
+  });
+  root.querySelectorAll('.sd-inject-section-toggle').forEach((el) => el.addEventListener('change', async () => {
+    settings.injectSections ||= {};
+    settings.injectSections[el.dataset.key] = el.checked;
+    saveSettings();
+    await applyDirectorInjection();
+    if (activeTab === 'settings') renderModal();
+  }));
+  // 自动推演开关：即时保存并弹 ST 提示，无需再点「保存幕后」（与暗线注入等开关一致的即时反馈）
+  root.querySelector('.sd-auto-refresh')?.addEventListener('change', (e) => {
+    settings.autoRefresh = !!e.target.checked;
+    getChatStore().lastPlanIdx = lastChatIdx();   // 从当前层重新起算，开启那一刻不把已有楼层算进去
+    saveMetadata();
+    saveSettings();
+    toast(settings.autoRefresh ? `自动推演已开启。` : '自动推演已关闭。', 'info');
+  });
+  root.querySelector('.sd-auto-every')?.addEventListener('change', (e) => {
+    settings.autoRefreshEvery = Math.max(2, Math.min(50, Number(e.target.value || 10)));
+    e.target.value = settings.autoRefreshEvery;
+    getChatStore().lastPlanIdx = lastChatIdx();
+    saveMetadata();
+    saveSettings();
+    if (settings.autoRefresh) toast(`已设为每 ${settings.autoRefreshEvery} 层角色回复自动推演。`, 'info');
+  });
   root.querySelector('.sd-save-director-settings')?.addEventListener('click', async () => {
     settings.autoRefresh = !!root.querySelector('.sd-auto-refresh')?.checked;
     settings.autoRefreshEvery = Math.max(2, Math.min(50, Number(root.querySelector('.sd-auto-every')?.value || 10)));
     settings.injectEnabled = !!root.querySelector('.sd-inject-enabled')?.checked;
     settings.injectDepth = Math.max(0, Math.min(20, Number(root.querySelector('.sd-inject-depth')?.value ?? 2)));
+    if (root.querySelector('.sd-livestage-enabled')) settings.liveStageEnabled = !!root.querySelector('.sd-livestage-enabled').checked;
+    if (root.querySelector('.sd-worldchatter-enabled')) settings.worldChatterEnabled = !!root.querySelector('.sd-worldchatter-enabled').checked;
     settings.systemPrompt = root.querySelector('.sd-system-prompt')?.value || DEFAULT_SYSTEM_PROMPT;
     settings.outputSchemaText = root.querySelector('.sd-output-schema')?.value || JSON_SCHEMA_TEXT;
     // 与默认一致存哈希（未改动，随迭代更新），不一致清空（已 DIY，保留记忆）
@@ -2694,7 +3414,7 @@ function bindActiveTabEvents(root) {
         body: JSON.stringify({ model, messages: [{ role: 'user', content: 'ping' }], max_tokens: 1, stream: false }),
       });
       if (res.ok) {
-        toast('连接成功，鉴权与模型可用。', 'success');
+        toast('连接成功', 'success');
       } else {
         const text = await res.text().catch(() => '');
         toast(`连接失败：HTTP ${res.status}${text ? ` · ${text.slice(0, 120)}` : ''}`, 'error');
@@ -3031,7 +3751,7 @@ async function buildTheaterPresetText() {
       output += `\n【${title}】\n${cleanContextText(content)}\n`;
       continue;
     }
-    // v1.2.1：解析空内容的标记条目（角色设定 / 世界书 / 人设等）
+    // 解析空内容的标记条目（角色设定 / 世界书 / 人设等）
     const resolved = await resolvePresetMarker(item);
     if (resolved) {
       if (resolved.isWorld) {
@@ -3048,9 +3768,9 @@ async function buildTheaterPresetText() {
 async function buildTheaterDefaultText() {
   let output = '';
   const charDesc = cleanContextText(await resolveMacro(getCharacterDescription()));
-  if (charDesc) output += `\n【当前角色设定】\n${getCharacterName()}\n${charDesc}\n`;
+  if (charDesc) output += `\n【当前角色设定】\n${await resolveMacro(getCharacterName())}\n${charDesc}\n`;
   const userDesc = cleanContextText(await resolveMacro(getPersonaDescription()));
-  if (userDesc) output += `\n【用户人设】\n${getPersonaName()}\n${userDesc}\n`;
+  if (userDesc) output += `\n【用户人设】\n${await resolveMacro(getPersonaName())}\n${userDesc}\n`;
   const worldText = await buildBoundWorldText();
   if (worldText) output += `\n【世界书】\n${worldText}\n`;
   return output.trim();
@@ -3114,13 +3834,12 @@ function renderTheaterTab() {
         <label class="checkbox_label"><input type="checkbox" class="sd-theater-use-history" ${t.useChatHistory !== false ? 'checked' : ''}> 衔接当前正文</label>
         <label class="sd-depth-field"><span>参考楼层</span><input class="text_pole sd-theater-history-depth" type="number" min="1" max="200" value="${htmlEscape(t.historyDepth || 5)}" ${t.useChatHistory !== false ? '' : 'disabled'}></label>
       </div>
-      <label>此幕指令</label>
-      <textarea class="text_pole sd-textarea sd-theater-instruction" spellcheck="false" placeholder="${htmlEscape(THEATER_INSTRUCTION_PLACEHOLDER)}">${htmlEscape(t.instruction || '')}</textarea>
+      <div class="sd-field-head"><label>此幕指令</label><button type="button" class="sd-icon-btn sd-icon-sm sd-expand-editor" data-target="sd-theater-instruction" data-title="此幕指令" title="展开编辑" aria-label="展开编辑"><i class="fa-solid fa-up-right-and-down-left-from-center"></i></button></div>
+      <textarea class="text_pole sd-textarea sd-theater-instruction sd-theater-instruction-compact" spellcheck="false" placeholder="${htmlEscape(THEATER_INSTRUCTION_PLACEHOLDER)}">${htmlEscape(t.instruction || '')}</textarea>
       <div class="sd-button-row">
-        <button class="sd-btn sd-primary sd-theater-stage"><i class="fa-solid fa-masks-theater"></i>上演此幕</button>
+        <button class="sd-btn sd-primary sd-theater-stage ${theaterBusy ? 'sd-as-stop' : ''}">${theaterBusy ? '<i class="fa-solid fa-stop"></i>停止上演' : '<i class="fa-solid fa-masks-theater"></i>上演此幕'}</button>
         <button class="sd-btn sd-theater-save-script"><i class="fa-solid fa-bookmark"></i>保存到剧札</button>
-        <button class="sd-btn sd-icon-btn sd-theater-open-favorites" title="收藏夹 (${t.favorites.length})" aria-label="收藏夹"><i class="fa-solid fa-star"></i></button>
-        ${busy ? '<button class="sd-btn sd-stop"><i class="fa-solid fa-stop"></i>停止</button>' : ''}
+        <button class="sd-icon-btn sd-theater-open-favorites" title="收藏夹 (${t.favorites.length})" aria-label="收藏夹"><i class="fa-solid fa-star"></i></button>
       </div>
       ${out ? `<div class="sd-theater-latest sd-button-row">
         <span class="sd-muted">最近一幕：${htmlEscape(theaterOpening(out))}</span>
@@ -3130,10 +3849,10 @@ function renderTheaterTab() {
     <section class="sd-card">${renderLibrarySection(theaterScriptLibraryCfg())}</section>`;
 }
 
-// 番外正文开端：清洗思维链/HTML 标签后取开头若干字，作为列表/最近一幕的显示名
+// 番外正文开端：提取 <幕外正文> 内正文（并清洗 HTML 标签）取开头若干字，作为列表/最近一幕的显示名
 function theaterOpening(scene, n = 28) {
   if (!scene) return '番外';
-  let text = stripThinkChain(String(scene.content || ''));
+  let text = extractTheaterBody(String(scene.content || ''));
   if (scene.isHtml || /<[^>]+>/.test(text)) {
     text = text.replace(/<style[\s\S]*?<\/style>/gi, '').replace(/<script[\s\S]*?<\/script>/gi, '').replace(/<[^>]+>/g, ' ');
   }
@@ -3152,20 +3871,27 @@ const THEATER_READ_TITLE = '幕外一折';
 function renderTheaterReadView(scene) {
   if (!scene) { theaterView = null; return renderTheaterTab(); }
   const fav = isTheaterFavorited(scene.id) || getTheater().favorites.some((f) => f.content === scene.content);
-  const cleaned = stripThinkChain(scene.content);
+  const cleaned = extractTheaterBody(scene.content);
   const scale = getTheater().readerFontScale || 'medium';
-  const bodyHtml = scene.isHtml
-    ? `<iframe class="sd-reader-frame" sandbox="allow-scripts allow-popups allow-forms" srcdoc="${htmlEscape(cleaned)}"></iframe>`
-    : `<div class="sd-reader-prose" data-scale="${scale}">${htmlEscape(cleaned).replace(/\n/g, '<br>')}</div>`;
-  const fontControl = scene.isHtml ? '' : `<div class="sd-reader-font" role="group" aria-label="字号">
+  const editing = !!theaterView?.editing;
+  const bodyHtml = editing
+    ? `<textarea class="text_pole sd-reader-edit-area" spellcheck="false">${htmlEscape(cleaned)}</textarea>`
+    : (scene.isHtml
+      ? `<iframe class="sd-reader-frame" sandbox="allow-scripts allow-popups allow-forms" srcdoc="${htmlEscape(cleaned)}"></iframe>`
+      : `<div class="sd-reader-prose" data-scale="${scale}">${htmlEscape(cleaned).replace(/\n/g, '<br>')}</div>`);
+  const fontControl = (editing || scene.isHtml) ? '' : `<div class="sd-reader-font" role="group" aria-label="字号">
         ${['small', 'medium', 'large'].map((s) => `<button type="button" class="sd-reader-font-btn ${scale === s ? 'active' : ''}" data-scale="${s}">${s === 'small' ? '小' : s === 'medium' ? '中' : '大'}</button>`).join('')}
       </div>`;
+  const rightBtns = editing
+    ? '<button class="sd-btn sd-mini-btn sd-primary sd-reader-save"><i class="fa-solid fa-check"></i>保存</button>'
+    : `<button type="button" class="sd-icon-btn sd-reader-edit" title="编辑" aria-label="编辑"><i class="fa-solid fa-pen"></i></button>
+       <button class="sd-icon-btn sd-theater-reader-fav" title="收藏"><i class="${fav ? 'fa-solid fa-star sd-fav-on' : 'fa-regular fa-star'}"></i></button>`;
   return `
     <section class="sd-card sd-reader-card">
-      <div class="sd-reader-bar">
+      <div class="sd-reader-bar sd-sticky-bar">
         <button class="sd-btn sd-mini-btn sd-theater-reader-back"><i class="fa-solid fa-arrow-left"></i>返回</button>
         ${fontControl}
-        <button class="sd-icon-btn sd-theater-reader-fav" title="收藏"><i class="${fav ? 'fa-solid fa-star sd-fav-on' : 'fa-regular fa-star'}"></i></button>
+        ${rightBtns}
       </div>
       <div class="sd-reader-title">
         <h3>${htmlEscape(THEATER_READ_TITLE)}</h3>
@@ -3186,7 +3912,7 @@ function renderTheaterFavoritesView() {
     : '<p class="sd-muted">收藏夹还空着。</p>';
   return `
     <section class="sd-card sd-reader-card">
-      <div class="sd-reader-bar">
+      <div class="sd-reader-bar sd-sticky-bar">
         <button class="sd-btn sd-mini-btn sd-theater-reader-back"><i class="fa-solid fa-arrow-left"></i>返回</button>
         <span></span>
       </div>
@@ -3203,12 +3929,12 @@ function renderTheaterPresetEntries(presetName) {
     const checked = isTheaterPresetItemSelected(presetName, id) ? 'checked' : '';
     return `<label class="sd-source-row"><input type="checkbox" class="sd-theater-preset-item" data-id="${htmlEscape(String(id))}" ${checked}><span>${htmlEscape(title)}</span></label>`;
   }).join('');
-  return `<details class="sd-context-block" data-acc="theater-preset-entries" open><summary><b>预设条目</b></summary><div class="sd-source-list sd-entry-scroll sd-scroll">${rows}</div></details>`;
+  return `<details class="sd-context-block" data-acc="theater-preset-entries"><summary><b>预设条目</b></summary><div class="sd-source-list sd-entry-scroll sd-scroll">${rows}</div></details>`;
 }
 
 async function stageTheaterScene() {
   if (!settings.enabled) return toast('千幕已关闭。', 'warning');
-  if (busy) return;
+  if (theaterBusy) return;
   const t = getTheater();
   const instruction = String(t.instruction || '').trim();
   if (!instruction) return toast('请先写下此幕指令。', 'warning');
@@ -3221,8 +3947,9 @@ async function stageTheaterScene() {
     apiToast();
     return;
   }
-  busy = true;
-  cancelRequested = false;
+  theaterBusy = true;
+  theaterCancel = false;
+  theaterAbort = new AbortController();
   renderBusyState();
   const startedAt = Date.now();
   const log = pushLog({ id: uid('log'), kind: 'theater', status: 'loading', time: new Date().toLocaleString(), duration: '', request: '', response: '', error: '' });
@@ -3242,6 +3969,9 @@ async function stageTheaterScene() {
     if (useHistory) {
       segments.push('以上正文片段是衔接背景，请据此保持人物口吻、关系与既有事实一致；番外可自由延展想象，但不要与正文已发生的事实冲突。');
     }
+    // 思维链隔离：要求把最终番外正文用 <幕外正文> 包裹，模型的推理/思考一律放在标签外。
+    // 阅读页只取标签内正文，裸思维链不再泄漏；日志仍存完整原文便于调试。
+    segments.push('【输出格式】请把最终要呈现给读者的番外正文，完整包裹在 <幕外正文> 与 </幕外正文> 标签之间。任何思考、分析、自我提示都放在标签之外，标签内只保留纯净的正文本身。若输出 HTML 页面，则把整段 HTML 放进标签内即可。');
     const userPrompt = segments.join('\n\n');
     const messages = [{ role: 'user', content: userPrompt }];
     log.request = clipLog(JSON.stringify(messages, null, 2));
@@ -3250,31 +3980,35 @@ async function stageTheaterScene() {
     const onDelta = settings.streamEnabled ? makeStreamLogUpdater(log) : null;
     const raw = (settings.providerMode === 'sillytavern' && !cfg)
       ? await callSillyTavernModel(messages)
-      : await callExternalApi(messages, onDelta, cfg);
-    if (cancelRequested) throw new Error('USER_CANCELLED');
+      : await callExternalApi(messages, onDelta, cfg, theaterAbort);
+    if (theaterCancel) throw new Error('USER_CANCELLED');
     const content = String(raw || '').trim();
     log.response = clipLog(content);
     if (!content) throw new Error('模型返回为空');
-    t.lastOutput = { id: uid('scene'), source: theaterScriptSource || '', instruction, content, isHtml: looksLikeHtml(stripThinkChain(content)), createdAt: new Date().toISOString() };
+    t.lastOutput = { id: uid('scene'), source: theaterScriptSource || '', instruction, content, isHtml: looksLikeHtml(extractTheaterBody(content)), createdAt: new Date().toISOString() };
     log.status = 'success';
     log.duration = `${((Date.now() - startedAt) / 1000).toFixed(1)}s`;
     saveSettings();
-    toast('番外已落幕，静候开卷。', 'success');
-    if (activeTab === 'theater') renderModal();
-    openTheaterReader(t.lastOutput);
+    // 完成提示与自动开卷仅在界面打开时进行：关掉千幕后台跑完不弹窗、不抢占界面，重开后从「最近一幕」即可阅读
+    if (isModalOpen()) {
+      toast('番外已落幕，静候开卷。', 'success');
+      openTheaterReader(t.lastOutput);
+    }
   } catch (error) {
     const msg = error?.name === 'AbortError' ? 'USER_CANCELLED' : (error?.message || String(error));
     log.status = msg === 'USER_CANCELLED' ? 'cancelled' : 'error';
     log.error = msg === 'INVALID_API_SETTINGS' ? '请检查API设置' : msg === 'USER_CANCELLED' ? '已取消生成' : msg;
     log.duration = `${((Date.now() - startedAt) / 1000).toFixed(1)}s`;
     saveSettings();
-    if (msg === 'USER_CANCELLED') toast('已取消生成。', 'warning');
-    else if (msg === 'INVALID_API_SETTINGS') apiToast();
-    else toast(`上演失败：${log.error}`, 'error');
+    if (isModalOpen()) {
+      if (msg === 'USER_CANCELLED') toast('已取消生成。', 'warning');
+      else if (msg === 'INVALID_API_SETTINGS') apiToast();
+      else toast(`上演失败：${log.error}`, 'error');
+    }
   } finally {
-    abortController = null;
-    cancelRequested = false;
-    busy = false;
+    theaterAbort = null;
+    theaterCancel = false;
+    theaterBusy = false;
     if (activeTab === 'theater') renderModal();
     renderFloatButton();
   }
@@ -3287,11 +4021,41 @@ function stripThinkChain(text) {
     .trim();
 }
 
+// 幕外展示用正文提取：优先取 <幕外正文>…</幕外正文> 标签内的内容（裸思维链一并被挡在标签外丢弃）；
+// 无标签则回落 stripThinkChain（兼容不照格式输出的模型/旧数据）。日志展示不走这里，仍显示完整原文。
+function extractTheaterBody(text) {
+  const raw = String(text || '');
+  // 闭合标签
+  let m = raw.match(/<\s*幕外正文\s*>([\s\S]*?)<\s*\/\s*幕外正文\s*>/i);
+  if (m && m[1].trim()) return m[1].trim();
+  // 只有起始标签（被截断）→ 取其后全部
+  m = raw.match(/<\s*幕外正文\s*>([\s\S]*)$/i);
+  if (m && m[1].trim()) return m[1].trim();
+  return stripThinkChain(raw);
+}
+
 function openTheaterReader(scene) {
   if (!scene) return;
   theaterView = { mode: 'read', scene };
   activeTab = 'theater';
   renderModal();
+}
+
+// 保存阅读页编辑：更新 scene 内容并重判 HTML，同步到最近一幕与收藏（按 id 匹配）
+function saveTheaterSceneEdit(scene, value) {
+  const content = String(value || '').trim();
+  if (!content) return toast('内容不能为空。', 'warning');
+  scene.content = content;
+  scene.isHtml = looksLikeHtml(extractTheaterBody(content));
+  const t = getTheater();
+  if (t.lastOutput && t.lastOutput.id === scene.id) {
+    t.lastOutput.content = content;
+    t.lastOutput.isHtml = scene.isHtml;
+  }
+  const fav = t.favorites.find((f) => f.id === scene.id);
+  if (fav) { fav.content = content; fav.isHtml = scene.isHtml; }
+  saveSettings();
+  toast('已保存修改。', 'success');
 }
 
 function toggleTheaterFavorite(scene) {
@@ -3317,9 +4081,22 @@ function openTheaterFavorites() {
 function bindTheaterTabEvents(root) {
   // 阅读 / 收藏夹 内嵌视图
   if (theaterView) {
-    root.querySelector('.sd-theater-reader-back')?.addEventListener('click', () => { theaterView = null; renderModal(); });
+    root.querySelector('.sd-theater-reader-back')?.addEventListener('click', () => {
+      // 编辑态下「返回」先退出编辑回到阅读，避免误丢改动；阅读态再退出阅读
+      if (theaterView?.editing) { theaterView.editing = false; renderModal(); return; }
+      theaterView = null;
+      renderModal();
+    });
     if (theaterView.mode === 'read') {
       const scene = theaterView.scene;
+      root.querySelector('.sd-reader-edit')?.addEventListener('click', () => { theaterView.editing = true; renderModal(); });
+      root.querySelector('.sd-reader-save')?.addEventListener('click', () => {
+        const area = root.querySelector('.sd-reader-edit-area');
+        if (!area) return;
+        saveTheaterSceneEdit(scene, area.value);
+        theaterView.editing = false;
+        renderModal();
+      });
       root.querySelector('.sd-theater-reader-fav')?.addEventListener('click', () => {
         toggleTheaterFavorite(scene);
         const icon = root.querySelector('.sd-theater-reader-fav i');
@@ -3389,6 +4166,7 @@ function bindTheaterTabEvents(root) {
     saveSettings();
   });
   root.querySelector('.sd-theater-stage')?.addEventListener('click', () => {
+    if (theaterBusy) { stopTheater(); return; }
     const ta = root.querySelector('.sd-theater-instruction');
     if (ta) { getTheater().instruction = ta.value || ''; saveSettings(); }
     stageTheaterScene();
@@ -3625,14 +4403,30 @@ function bindEvents() {
   const source = context.eventSource;
   const types = context.event_types || {};
   if (!source?.on) return;
+  // 自动推演触发：不用计数器累加 + 计时器延迟（那套既无法适配删楼/重 roll，又让触发边界发虚）。
+  // 改为每有新角色回复（MESSAGE_RECEIVED）就照实数一遍：以 lastPlanIdx 为基准，统计其后真正新增的角色回复层，
+  // 满阈值即刻推演、读取当下完整聊天——所见即所推，无延迟、无「推旧读新」错位。
+  // 重 roll 是同层改写不新增索引，天然不计；删楼则把基准夹回当前末尾自动重算。
   const refreshHandler = async () => {
     try {
       if (!settings.enabled) return;
+      const chat = ctx().chat;
+      const len = Array.isArray(chat) ? chat.length : 0;
       const store = getChatStore();
-      store.messageCounter = Number(store.messageCounter || 0) + 1;
-      await saveMetadata();
-      if (settings.autoRefresh && settings.autoRefreshEvery > 0 && store.messageCounter >= settings.autoRefreshEvery && !busy) {
+      let mark = Number(store.lastPlanIdx ?? -1);
+      if (mark < 0 || mark > len - 1) mark = len - 1;   // 首次启用/删楼后：基准夹到当前末尾，既不漏数也不让历史楼层一次触发
+      store.lastPlanIdx = mark;
+      let layers = 0;                                    // 基准之后真正新增的「角色回复」层（你发的楼、system 都不计）
+      for (let i = mark + 1; i < len; i++) {
+        const m = chat[i];
+        if (m && !m.is_user && !m.is_system) layers++;
+      }
+      if (settings.autoRefresh && settings.autoRefreshEvery > 0 && !busy && layers >= settings.autoRefreshEvery) {
+        store.lastPlanIdx = len - 1;                     // 以当前末尾为新基准，下一轮重新累积
+        await saveMetadata();
         await generateDirectorPlan(false, true);
+      } else {
+        await saveMetadata();
       }
     } catch (error) {
       console.warn(`[${MODULE_NAME}] auto refresh handler failed`, error);
@@ -3640,14 +4434,19 @@ function bindEvents() {
   };
   const rerenderHandler = async () => {
     settings = getSettings();
-    injectSelection.clear();   // v0.5.2：切换聊天后旧写入勾选失效
+    injectSelection.clear();   // 切换聊天后旧写入勾选失效
+    // 新角色/聊天可能绑定了不同世界书：作废世界书扫描态，下次推演或开取材页自动补扫（预设不随角色变，留存）
+    contextScanCache.worldScannedAt = '';
+    contextScanCache.boundWorldBookNames = [];
+    contextAutoScanned = false;
     renderFloatButton();
     renderInputMenuEntry();
     await applyDirectorInjection();
     rerenderIfOpen();
   };
   const pairs = [
-    [types.MESSAGE_RECEIVED || 'message_received', refreshHandler],
+    [types.MESSAGE_RECEIVED || 'message_received', refreshHandler],   // 仅角色回复触发；重 roll/删楼由 refreshHandler 照实重算
+    [types.MESSAGE_DELETED || 'message_deleted', applyDirectorInjection],   // 删楼即刻重判注入：若已回退到推演前的长度，悬空检测会清空注入
     [types.CHAT_CHANGED || 'chat_changed', rerenderHandler],
     [types.GROUP_UPDATED || 'group_updated', rerenderHandler],
     [types.CHARACTER_SELECTED || 'character_selected', rerenderHandler],
@@ -3667,7 +4466,12 @@ function init() {
   renderFloatButton();
   renderInputMenuEntry();
   startInputMenuObserver();
-  resizeHandler = () => { const btn = document.getElementById(FLOAT_ID); if (btn) applyFloatPosition(btn); };
+  resizeHandler = () => {
+    const btn = document.getElementById(FLOAT_ID);
+    if (btn) applyFloatPosition(btn);
+    const tabsBar = document.getElementById(MODAL_ID)?.querySelector('.sd-tabs');
+    if (tabsBar) updateTabsFade(tabsBar);
+  };
   window.addEventListener('resize', resizeHandler);
   bindEvents();
   applyDirectorInjection();

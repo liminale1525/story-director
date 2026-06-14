@@ -1,6 +1,4 @@
 // 千幕 (Qianmu) 内置剧场组「吱吱小剧场」
-// 由 剧场.json 规整生成；更新时替换本文件即可。顺序即显示顺序。
-// 仅做空白规整，未改动任何文本内容。
 
 export const BUILTIN_THEATER_FOLDER = '吱吱小剧场';
 
