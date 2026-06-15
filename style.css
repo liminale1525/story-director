@@ -526,7 +526,8 @@ html body #zmer-universal-toast-theme-layer { z-index: 2147483646 !important; }
   top: calc(100% + 8px);
   right: 0;
   z-index: 30;
-  width: 138px;
+  width: max-content;             /* 刚好塞下「小圆点＋主题名」，不留多余宽度 */
+  min-width: 96px;
   padding: 6px;
   display: flex;
   flex-direction: column;
@@ -731,7 +732,7 @@ html body #zmer-universal-toast-theme-layer { z-index: 2147483646 !important; }
   outline-offset: 2px;
 }
 
-/* 模型来源：固定浅底 + 深色选择点的分段控件，不跟随 ST/主题变化，任何主题下勾选状态都清晰 */
+/* 模型来源：分段控件。配色全用主题变量（自适配六套主题），自绘 dot 隔绝 ST 原生 radio 干扰 */
 #story-director-modal .sd-source-pick {
   display: flex;
   flex-direction: column;
@@ -744,16 +745,16 @@ html body #zmer-universal-toast-theme-layer { z-index: 2147483646 !important; }
   gap: 9px;
   margin: 0 !important;
   padding: 9px 12px;
-  border: 1px solid #d9d4cb;
+  border: 1px solid var(--sd-border);
   border-radius: 11px;
-  background: #f6f4ef;                  /* 固定浅底 */
-  color: #2c2a26;
+  background: var(--sd-glass-weak);
+  color: var(--sd-text);
   cursor: pointer;
   line-height: 1.35;
   transition: border-color .12s ease, background .12s ease;
 }
-#story-director-modal .sd-source-opt:hover { background: #efece5; }
-#story-director-modal .sd-source-opt.active { border-color: #8a8276; background: #eceae3; }
+#story-director-modal .sd-source-opt:hover { background: var(--sd-glass); }
+#story-director-modal .sd-source-opt.active { border-color: var(--sd-accent); background: var(--sd-pre); }
 /* 隐藏原生 radio，仅用自绘 dot；避免它再受 ST 全局或主题色影响 */
 #story-director-modal .sd-source-opt input[type="radio"] {
   position: absolute;
@@ -765,11 +766,11 @@ html body #zmer-universal-toast-theme-layer { z-index: 2147483646 !important; }
   width: 15px;
   height: 15px;
   border-radius: 50%;
-  border: 1.5px solid #9a9286;
-  background: #fff;
+  border: 1.5px solid var(--sd-muted);
+  background: var(--sd-input-bg);
   position: relative;
 }
-#story-director-modal .sd-source-opt.active .sd-source-dot { border-color: #3a372f; }
+#story-director-modal .sd-source-opt.active .sd-source-dot { border-color: var(--sd-accent); }
 #story-director-modal .sd-source-opt.active .sd-source-dot::after {
   content: "";
   position: absolute;
@@ -778,7 +779,7 @@ html body #zmer-universal-toast-theme-layer { z-index: 2147483646 !important; }
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: #3a372f;                  /* 深色选择点 */
+  background: var(--sd-accent);
   transform: translate(-50%, -50%);
 }
 
@@ -1870,9 +1871,12 @@ html body #zmer-universal-toast-theme-layer { z-index: 2147483646 !important; }
   gap: 8px;
 }
 #story-director-modal .sd-thread-head h4 { margin: 0; flex: 1 1 auto; font-size: .96em; }
-/* 钉子选中态：实心 + 主题强调色 + 轻微旋转，与未选中拉开差异 */
-#story-director-modal .sd-thread-pin { color: var(--sd-muted) !important; }
-#story-director-modal .sd-thread-pin-on { color: var(--sd-accent, var(--sd-primary)) !important; }
+/* 钉子选中态：实心 + 主题强调色 + 轻微旋转，与未选中拉开差异（连同 <i> 一起着色，压过 .sd-icon-btn 的 text 色与 FA 默认色） */
+#story-director-modal .sd-thread-pin,
+#story-director-modal .sd-thread-pin i { color: var(--sd-muted) !important; }
+#story-director-modal .sd-thread-pin-on,
+#story-director-modal .sd-thread-pin-on i { color: var(--sd-accent) !important; }
+#story-director-modal .sd-thread-pin-on { border-color: var(--sd-accent) !important; background: var(--sd-pre) !important; }
 #story-director-modal .sd-thread-pin-on i { transform: rotate(-30deg); }
 #story-director-modal .sd-thread-stage {
   flex: 0 0 auto;
@@ -1976,7 +1980,7 @@ html body #zmer-universal-toast-theme-layer { z-index: 2147483646 !important; }
   #story-director-modal .sd-chatter-stage { height: auto; max-height: 260px; overflow-y: auto; -webkit-mask: none; mask: none; }
 }
 
-/* 因果链（原牵一发）：可视化的连锁链路，逐环以箭头串联 */
+/* 因果链：可视化的连锁链路，逐环以箭头串联 */
 #story-director-modal .sd-chain-flowlist { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
 #story-director-modal .sd-chain-item {
   border: 1px solid var(--sd-border);
