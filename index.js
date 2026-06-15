@@ -10,6 +10,10 @@ const FLOAT_ID = 'story-director-float';
 const INPUT_ENTRY_ID = 'story-director-input-entry';
 const INPUT_BUTTON_ID = 'story-director-input-button';
 
+// 悬浮球图标：扩展自带的本地透明 PNG（96px、与 index.js 同源），不依赖外部字体/网络，
+// 根治「幕」字因字体加载失败而失效的问题。换图标只改这一行。
+const FLOAT_LOGO_URL = new URL('./qianmulogo.png', import.meta.url).href;
+
 const PROMPT_REVISION = 19;
 const BUILTIN_THEATER_REVISION = 2;   // 内置剧场组版本，升一档即重置内置项（保留用户自建剧札）
 const LOG_LIMIT = 5;
@@ -2148,7 +2152,8 @@ function renderFloatButton() {
     document.body.appendChild(btn);
     bindFloatDrag(btn);
   }
-  btn.textContent = '幕';
+  // 本地 logo 铺满圆形悬浮球（object-fit:cover 由 CSS 控）；img 不拦指针，拖拽/点击仍落在按钮上
+  btn.innerHTML = `<img src="${FLOAT_LOGO_URL}" alt="${EXTENSION_NAME}" draggable="false">`;
   btn.title = EXTENSION_NAME;
   bindFloatDrag(btn);
   applyFloatPosition(btn);
