@@ -1728,8 +1728,8 @@ function getGenerateRaw() {
 
 // 跟随 ST 当前 API：按官方 generateRaw 文档约定调用——prompt 传用户内容、systemPrompt 单独传（可空）。
 // systemPrompt 由调用方显式传入：推演传导演系统提示词；幕外不传，保持与推演链路隔离，避免被灌入推演系统提示词。
-// onDelta：开启流式时的实时预览回调。generateRaw 本身不暴露流式回调，借 ST 的 STREAM_TOKEN_RECEIVED 事件喂日志预览；
-// 是否真流式由 ST 自身的流式开关决定，最终结果仍以 generateRaw 返回值为准（事件仅作预览）。
+// onDelta：开启流式时的实时预览回调。generateRaw 不暴露流式回调，仅能借 ST 的 STREAM_TOKEN_RECEIVED 事件尽力预览
+// （部分构建/raw 生成不发此事件，则无逐字预览，但最终结果仍以 generateRaw 返回值为准、完全正确）。
 async function callSillyTavernModel(userPrompt, systemPrompt = '', onDelta = null) {
   const generateRaw = getGenerateRaw();
   if (!generateRaw) throw new Error('INVALID_API_SETTINGS');
@@ -1740,7 +1740,15 @@ async function callSillyTavernModel(userPrompt, systemPrompt = '', onDelta = nul
   const streamType = context.event_types?.STREAM_TOKEN_RECEIVED || 'stream_token_received';
   let streamHandler = null;
   if (onDelta && source?.on && source?.off) {
-    streamHandler = (text) => { try { onDelta(String(text ?? '')); } catch (_) {} };
+    let acc = '';
+    streamHandler = (payload) => {
+      // 兼容两种事件载荷：累积文本（以 acc 开头且更长）或单 token 增量（追加）
+      const s = typeof payload === 'string' ? payload : String(payload?.text ?? payload ?? '');
+      if (!s) return;
+      if (s.length >= acc.length && s.startsWith(acc)) acc = s;
+      else acc += s;
+      try { onDelta(acc); } catch (_) {}
+    };
     source.on(streamType, streamHandler);
   }
   try {
@@ -2942,8 +2950,11 @@ function renderPlugTab() {
       <div class="sd-button-row"><button class="sd-btn sd-test-api"><i class="fa-solid fa-plug-circle-check"></i>测试连接</button><button class="sd-btn sd-save-api">保存API</button><button class="sd-btn sd-save-api-profile">保存为预设</button></div>
     </section>
     <section class="sd-card">
-      <label class="checkbox_label"><input type="checkbox" class="sd-stream-toggle" ${settings.streamEnabled ? 'checked' : ''}> 流式传输</label>
-      <label class="checkbox_label"><input type="checkbox" class="sd-float-toggle" ${settings.floatingButton ? 'checked' : ''}> 显示悬浮球</label>
+      <div class="sd-toggle-row">
+        <label class="checkbox_label"><input type="checkbox" class="sd-stream-toggle" ${settings.streamEnabled ? 'checked' : ''}> 流式传输</label>
+        <label class="checkbox_label"><input type="checkbox" class="sd-float-toggle" ${settings.floatingButton ? 'checked' : ''}> 显示悬浮球</label>
+      </div>
+      <p class="sd-muted sd-hint-sm">仅支持自定义API</p>
     </section>
     <section class="sd-card">
       <h3>日志</h3>
@@ -3886,6 +3897,25 @@ function theaterSubtitle(scene) {
 
 const THEATER_READ_TITLE = '幕外一折';
 
+// 番外正文按 Markdown 渲染：用 ST 自带 showdown 转 HTML、DOMPurify 消毒（安全）。
+// 取不到库时回落为转义纯文本 + 换行（与旧行为一致，绝不直出未消毒 HTML）。
+function renderTheaterMarkdown(text) {
+  const raw = String(text || '');
+  try {
+    const libs = globalThis.SillyTavern?.libs;
+    const showdown = libs?.showdown;
+    const DOMPurify = libs?.DOMPurify;
+    if (showdown && DOMPurify) {
+      const conv = new showdown.Converter({
+        simpleLineBreaks: true, tables: true, strikethrough: true,
+        literalMidWordUnderscores: true, emoji: true, openLinksInNewWindow: true,
+      });
+      return DOMPurify.sanitize(conv.makeHtml(raw));
+    }
+  } catch (_) {}
+  return htmlEscape(raw).replace(/\n/g, '<br>');
+}
+
 function renderTheaterReadView(scene) {
   if (!scene) { theaterView = null; return renderTheaterTab(); }
   const fav = isTheaterFavorited(scene.id) || getTheater().favorites.some((f) => f.content === scene.content);
@@ -3896,7 +3926,7 @@ function renderTheaterReadView(scene) {
     ? `<textarea class="text_pole sd-reader-edit-area" spellcheck="false">${htmlEscape(cleaned)}</textarea>`
     : (scene.isHtml
       ? `<iframe class="sd-reader-frame" sandbox="allow-scripts allow-popups allow-forms" srcdoc="${htmlEscape(cleaned)}"></iframe>`
-      : `<div class="sd-reader-prose" data-scale="${scale}">${htmlEscape(cleaned).replace(/\n/g, '<br>')}</div>`);
+      : `<div class="sd-reader-prose" data-scale="${scale}">${renderTheaterMarkdown(cleaned)}</div>`);
   const fontControl = (editing || scene.isHtml) ? '' : `<div class="sd-reader-font" role="group" aria-label="字号">
         ${['small', 'medium', 'large'].map((s) => `<button type="button" class="sd-reader-font-btn ${scale === s ? 'active' : ''}" data-scale="${s}">${s === 'small' ? '小' : s === 'medium' ? '中' : '大'}</button>`).join('')}
       </div>`;

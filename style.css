@@ -1427,6 +1427,15 @@ html body #zmer-universal-toast-theme-layer { z-index: 2147483646 !important; }
 
 #story-director-modal .sd-refresh-row .checkbox_label { margin: 0 !important; }
 
+/* 流式传输 / 显示悬浮球：并排一行 */
+#story-director-modal .sd-toggle-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 24px;
+}
+#story-director-modal .sd-toggle-row .checkbox_label { margin: 0 !important; }
+
 #story-director-modal .sd-floor-refresh {
   display: inline-flex !important;
   align-items: center;
@@ -1797,6 +1806,48 @@ html body #zmer-universal-toast-theme-layer { z-index: 2147483646 !important; }
 #story-director-modal .sd-reader-card .sd-reader-prose[data-scale="small"] { font-size: 13px; line-height: 1.5; }
 #story-director-modal .sd-reader-card .sd-reader-prose[data-scale="medium"] { font-size: 15px; line-height: 1.6; }
 #story-director-modal .sd-reader-card .sd-reader-prose[data-scale="large"] { font-size: 18px; line-height: 1.7; }
+/* 阅读页 Markdown 元素排版 */
+#story-director-modal .sd-reader-prose h1,
+#story-director-modal .sd-reader-prose h2,
+#story-director-modal .sd-reader-prose h3,
+#story-director-modal .sd-reader-prose h4 { margin: 1em 0 .5em; line-height: 1.35; font-weight: 700; }
+#story-director-modal .sd-reader-prose h1 { font-size: 1.5em; }
+#story-director-modal .sd-reader-prose h2 { font-size: 1.3em; }
+#story-director-modal .sd-reader-prose h3 { font-size: 1.15em; }
+#story-director-modal .sd-reader-prose h4 { font-size: 1.05em; }
+#story-director-modal .sd-reader-prose p { margin: .7em 0; }
+#story-director-modal .sd-reader-prose ul,
+#story-director-modal .sd-reader-prose ol { margin: .7em 0; padding-left: 1.6em; }
+#story-director-modal .sd-reader-prose li { margin: .25em 0; }
+#story-director-modal .sd-reader-prose strong { font-weight: 700; }
+#story-director-modal .sd-reader-prose em { font-style: italic; }
+#story-director-modal .sd-reader-prose a { color: var(--sd-accent); text-decoration: underline; }
+#story-director-modal .sd-reader-prose blockquote {
+  margin: .8em 0;
+  padding: .2em 0 .2em 1em;
+  border-left: 3px solid var(--sd-border);
+  color: var(--sd-muted);
+}
+#story-director-modal .sd-reader-prose code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: .9em;
+  padding: .1em .35em;
+  border-radius: 5px;
+  background: var(--sd-pre);
+}
+#story-director-modal .sd-reader-prose pre {
+  margin: .8em 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--sd-pre);
+  overflow-x: auto;
+}
+#story-director-modal .sd-reader-prose pre code { padding: 0; background: none; }
+#story-director-modal .sd-reader-prose hr { border: none; border-top: 1px solid var(--sd-border); margin: 1.2em 0; }
+#story-director-modal .sd-reader-prose img { max-width: 100%; height: auto; border-radius: 8px; }
+#story-director-modal .sd-reader-prose table { border-collapse: collapse; margin: .8em 0; width: 100%; }
+#story-director-modal .sd-reader-prose th,
+#story-director-modal .sd-reader-prose td { border: 1px solid var(--sd-border); padding: 5px 9px; text-align: left; }
 #story-director-modal .sd-reader-font { flex: 0 0 auto; display: inline-flex; gap: 2px; }
 #story-director-modal .sd-reader-font-btn {
   min-width: 26px;
