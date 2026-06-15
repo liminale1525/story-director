@@ -1728,12 +1728,26 @@ function getGenerateRaw() {
 
 // 跟随 ST 当前 API：按官方 generateRaw 文档约定调用——prompt 传用户内容、systemPrompt 单独传（可空）。
 // systemPrompt 由调用方显式传入：推演传导演系统提示词；幕外不传，保持与推演链路隔离，避免被灌入推演系统提示词。
-async function callSillyTavernModel(userPrompt, systemPrompt = '') {
+// onDelta：开启流式时的实时预览回调。generateRaw 本身不暴露流式回调，借 ST 的 STREAM_TOKEN_RECEIVED 事件喂日志预览；
+// 是否真流式由 ST 自身的流式开关决定，最终结果仍以 generateRaw 返回值为准（事件仅作预览）。
+async function callSillyTavernModel(userPrompt, systemPrompt = '', onDelta = null) {
   const generateRaw = getGenerateRaw();
   if (!generateRaw) throw new Error('INVALID_API_SETTINGS');
   const args = { prompt: userPrompt };
   if (systemPrompt) args.systemPrompt = systemPrompt;
-  return await generateRaw(args);
+  const context = ctx();
+  const source = context.eventSource;
+  const streamType = context.event_types?.STREAM_TOKEN_RECEIVED || 'stream_token_received';
+  let streamHandler = null;
+  if (onDelta && source?.on && source?.off) {
+    streamHandler = (text) => { try { onDelta(String(text ?? '')); } catch (_) {} };
+    source.on(streamType, streamHandler);
+  }
+  try {
+    return await generateRaw(args);
+  } finally {
+    if (streamHandler) source.off(streamType, streamHandler);
+  }
 }
 
 // 字符串感知的缺逗号补全（仅在字符串外操作，{{user}} 等内容不受影响）
@@ -1878,7 +1892,7 @@ async function generateDirectorPlan(showSuccessToast = true, silentFailure = fal
 
     const onDelta = settings.streamEnabled ? makeStreamLogUpdater(log) : null;
     const raw = settings.providerMode === 'sillytavern'
-      ? await callSillyTavernModel(userPrompt, settings.systemPrompt || DEFAULT_SYSTEM_PROMPT)
+      ? await callSillyTavernModel(userPrompt, settings.systemPrompt || DEFAULT_SYSTEM_PROMPT, onDelta)
       : await callExternalApi(messages, onDelta);
     if (cancelRequested) throw new Error('USER_CANCELLED');
     log.response = clipLog(raw);
@@ -3983,7 +3997,7 @@ async function stageTheaterScene() {
 
     const onDelta = settings.streamEnabled ? makeStreamLogUpdater(log) : null;
     const raw = (settings.providerMode === 'sillytavern' && !cfg)
-      ? await callSillyTavernModel(userPrompt)
+      ? await callSillyTavernModel(userPrompt, '', onDelta)
       : await callExternalApi(messages, onDelta, cfg, theaterAbort);
     if (theaterCancel) throw new Error('USER_CANCELLED');
     const content = String(raw || '').trim();
