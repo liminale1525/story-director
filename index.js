@@ -3,7 +3,7 @@ import { BUILTIN_THEATERS, BUILTIN_THEATER_FOLDER } from './builtin-theaters.js'
 
 const MODULE_NAME = 'story_director_liminale';
 const EXTENSION_NAME = '千幕';
-const VERSION = '1.5.0';
+const VERSION = '1.5.1';
 const SETTINGS_PANEL_ID = 'story-director-settings';
 const MODAL_ID = 'story-director-modal';
 const FLOAT_ID = 'story-director-float';
@@ -1651,7 +1651,7 @@ function buildThreadsArchiveSegment(store) {
 
 function validateApiSettings() {
   if (settings.providerMode === 'external') return !!(normalizeUrl(settings.apiUrl) && settings.apiKey && settings.model);
-  return typeof ctx().generateRaw === 'function';
+  return !!getGenerateRaw();
 }
 
 async function callExternalApi(messages, onDelta = null, cfg = null, controller = null) {
@@ -1719,10 +1719,21 @@ async function readSseStream(stream, onDelta) {
   return full;
 }
 
-async function callSillyTavernModel(messages) {
+function getGenerateRaw() {
   const context = ctx();
-  if (typeof context.generateRaw !== 'function') throw new Error('INVALID_API_SETTINGS');
-  return await context.generateRaw({ prompt: messages, systemPrompt: settings.systemPrompt });
+  if (typeof context.generateRaw === 'function') return context.generateRaw.bind(context);
+  if (typeof globalThis.generateRaw === 'function') return globalThis.generateRaw;
+  return null;
+}
+
+// 跟随 ST 当前 API：按官方 generateRaw 文档约定调用——prompt 传用户内容、systemPrompt 单独传（可空）。
+// systemPrompt 由调用方显式传入：推演传导演系统提示词；幕外不传，保持与推演链路隔离，避免被灌入推演系统提示词。
+async function callSillyTavernModel(userPrompt, systemPrompt = '') {
+  const generateRaw = getGenerateRaw();
+  if (!generateRaw) throw new Error('INVALID_API_SETTINGS');
+  const args = { prompt: userPrompt };
+  if (systemPrompt) args.systemPrompt = systemPrompt;
+  return await generateRaw(args);
 }
 
 // 字符串感知的缺逗号补全（仅在字符串外操作，{{user}} 等内容不受影响）
@@ -1866,7 +1877,9 @@ async function generateDirectorPlan(showSuccessToast = true, silentFailure = fal
     saveSettings();
 
     const onDelta = settings.streamEnabled ? makeStreamLogUpdater(log) : null;
-    const raw = settings.providerMode === 'sillytavern' ? await callSillyTavernModel(messages) : await callExternalApi(messages, onDelta);
+    const raw = settings.providerMode === 'sillytavern'
+      ? await callSillyTavernModel(userPrompt, settings.systemPrompt || DEFAULT_SYSTEM_PROMPT)
+      : await callExternalApi(messages, onDelta);
     if (cancelRequested) throw new Error('USER_CANCELLED');
     log.response = clipLog(raw);
     const newPlan = normalizePlan(extractJson(raw));
@@ -2879,7 +2892,7 @@ function renderLogEntry(log, index) {
       <div class="sd-log-cap"><i class="fa-solid fa-arrow-up"></i>发送${log.request ? infoTag(`约 ${estimateTokens(log.request)} token`) : ''}</div>
       <pre class="sd-term">${htmlEscape(log.request || '暂无')}</pre>
       <div class="sd-log-cap"><i class="fa-solid fa-arrow-down"></i>返回${log.response ? infoTag(`约 ${estimateTokens(log.response)} token`) : ''}</div>
-      <pre class="sd-term">${htmlEscape(log.status === 'success' ? (stripThinkChain(log.response) || (log.response ? '（仅含思维链，已折除）' : '暂无')) : (log.response || '暂无'))}</pre>
+      <pre class="sd-term">${htmlEscape(log.response || '暂无')}</pre>
     </div>
   </details>`;
 }
@@ -3934,7 +3947,7 @@ async function stageTheaterScene() {
   if (useExternal) {
     const eff = cfg || { apiUrl: settings.apiUrl, apiKey: settings.apiKey, model: settings.model };
     if (!(normalizeUrl(eff.apiUrl) && eff.apiKey && eff.model)) { apiToast(); return; }
-  } else if (typeof ctx().generateRaw !== 'function') {
+  } else if (!getGenerateRaw()) {
     apiToast();
     return;
   }
@@ -3970,7 +3983,7 @@ async function stageTheaterScene() {
 
     const onDelta = settings.streamEnabled ? makeStreamLogUpdater(log) : null;
     const raw = (settings.providerMode === 'sillytavern' && !cfg)
-      ? await callSillyTavernModel(messages)
+      ? await callSillyTavernModel(userPrompt)
       : await callExternalApi(messages, onDelta, cfg, theaterAbort);
     if (theaterCancel) throw new Error('USER_CANCELLED');
     const content = String(raw || '').trim();
