@@ -836,6 +836,9 @@ html body #zmer-universal-toast-theme-layer { z-index: 2147483646 !important; }
   line-height: 1.5;
   color: var(--sd-text);
 }
+/* 压掉 ST 全局给 pre 渲染的装饰符号（左上角 ❈），仅作用于千幕面板内，不影响 ST 本身 */
+#story-director-modal pre::before,
+#story-director-modal pre::after { content: none !important; display: none !important; }
 
 #story-director-modal .sd-textarea {
   min-height: 280px;
