@@ -1601,9 +1601,9 @@ function mergeGeopolitics(store, plan) {
     let f = raw.id ? fById.get(raw.id) : (raw.name ? fByName.get(String(raw.name).trim()) : null);
     const trend = FACTION_TRENDS.includes(raw.trend) ? raw.trend : 'stable';
     const scale = FACTION_SCALES.includes(raw.scale) ? raw.scale : '区域性';
-    // 线索点：每条 6-18 字短句，最多 5 条，缠在势力周围的星屑
+    // 线索点：schema 引导 6-15 字短句、最多 5 条。slice 上限放宽到 30 作防御，模型偶尔超长也完整保留、靠气泡换行显示，不半截截断
     const clues = Array.isArray(raw.clues)
-      ? raw.clues.map((c) => String(c || '').trim().slice(0, 18)).filter(Boolean).slice(0, 5)
+      ? raw.clues.map((c) => String(c || '').trim().slice(0, 30)).filter(Boolean).slice(0, 5)
       : null;
     if (f) {
       if (raw.name) f.name = String(raw.name).slice(0, 16);
