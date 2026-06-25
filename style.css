@@ -725,8 +725,9 @@ html body #zmer-universal-toast-theme-layer { z-index: 2147483646 !important; }
 #story-director-modal input[type="checkbox"] { border-radius: 4px; }
 #story-director-modal input[type="radio"] { border-radius: 50%; }
 /* 压掉 ST 全局给 :checked 渲染的 FontAwesome 对勾（::before），只留本扩展自绘的 ::after，消除双色重叠 */
-#story-director-modal input[type="checkbox"]::before,
-#story-director-modal input[type="radio"]::before { content: none !important; display: none !important; }
+/* 双 ID 提特异性：ST 移动端用 :not(#x) 链拿到 ID 级权重，单 ID 压不住，会冒出叠加的美化勾。这里盖过它 */
+#story-director-modal#story-director-modal input[type="checkbox"]::before,
+#story-director-modal#story-director-modal input[type="radio"]::before { content: none !important; display: none !important; background: none !important; }
 #story-director-modal input[type="checkbox"]:checked,
 #story-director-modal input[type="radio"]:checked {
   background: var(--sd-accent);
