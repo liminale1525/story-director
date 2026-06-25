@@ -4895,16 +4895,23 @@ function stripThinkChain(text) {
 }
 
 // 幕外展示用正文提取：优先取 <幕外正文>…</幕外正文> 标签内的内容（裸思维链一并被挡在标签外丢弃）；
-// 无标签则回落 stripThinkChain（兼容不照格式输出的模型/旧数据）。日志展示不走这里，仍显示完整原文。
+// 对模型偶发的标签残缺（漏闭合/漏起始/无标签/碎片）全部免疫，绝不因格式问题导致正文取空、连累「最近一幕」与按钮布局。
+// 日志展示不走这里，仍显示完整原文。
 function extractTheaterBody(text) {
   const raw = String(text || '');
-  // 闭合标签
+  let body = '';
+  // ① 完整标签对：取中间正文
   let m = raw.match(/<\s*幕外正文\s*>([\s\S]*?)<\s*\/\s*幕外正文\s*>/i);
-  if (m && m[1].trim()) return m[1].trim();
-  // 只有起始标签（被截断）→ 取其后全部
-  m = raw.match(/<\s*幕外正文\s*>([\s\S]*)$/i);
-  if (m && m[1].trim()) return m[1].trim();
-  return stripThinkChain(raw);
+  if (m && m[1].trim()) body = m[1];
+  // ② 只有起始标签（漏闭合/被截断）：取其后全部
+  if (!body) { m = raw.match(/<\s*幕外正文\s*>([\s\S]*)$/i); if (m && m[1].trim()) body = m[1]; }
+  // ③ 只有闭合标签（漏起始）：取其前全部
+  if (!body) { m = raw.match(/^([\s\S]*?)<\s*\/\s*幕外正文\s*>/i); if (m && m[1].trim()) body = m[1]; }
+  // ④ 完全无标签：用全文回落
+  if (!body) body = raw;
+  // 防御：剥掉残留的「幕外正文」起始/闭合标签碎片，再剥裸思维链，杜绝碎片混入显示
+  body = body.replace(/<\s*\/?\s*幕外正文\s*>/gi, '');
+  return stripThinkChain(body).trim();
 }
 
 function openTheaterReader(scene) {
