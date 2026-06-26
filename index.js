@@ -5355,7 +5355,14 @@ function bindEvents() {
     await applyDirectorInjection();
     rerenderIfOpen();
   };
+  // APP_READY：ST 注水 extensionSettings 完成的信号。init 经 setTimeout 抢跑可能早于注水，
+  // 此时读到的 floatPosition 仍是默认 → 悬浮球落默认中位。注水后重读 settings 并按保存位重绘，根治「重载后球回默认位」偶发。
+  const appReadyHandler = () => {
+    settings = getSettings();
+    renderFloatButton();
+  };
   const pairs = [
+    [types.APP_READY || 'app_ready', appReadyHandler],   // 注水后把悬浮球挪回上次拖动的位置（修偶发回默认位）
     [types.MESSAGE_RECEIVED || 'message_received', refreshHandler],   // 仅角色回复触发；重 roll/删楼由 refreshHandler 照实重算
     [types.MESSAGE_DELETED || 'message_deleted', applyDirectorInjection],   // 删楼即刻重判注入：若已回退到推演前的长度，悬空检测会清空注入
     [types.CHAT_CHANGED || 'chat_changed', rerenderHandler],

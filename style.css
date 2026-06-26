@@ -160,7 +160,7 @@ html body #zmer-universal-toast-theme-layer { z-index: 2147483646 !important; }
   backdrop-filter: blur(14px) saturate(1.4) !important;
   -webkit-backdrop-filter: blur(14px) saturate(1.4) !important;
   color: #f5f1e8 !important;
-  z-index: 2147483000;
+  z-index: 1000;   /* 压在 ST 顶栏抽屉/菜单（约 3000+）之下、聊天内容之上：菜单展开时不被悬浮球遮挡；弹窗自身仍保最高层 */
   cursor: pointer;
   box-shadow: 0 6px 20px rgba(0, 0, 0, .18) !important;
   font-family: Georgia, 'Times New Roman', serif !important;
