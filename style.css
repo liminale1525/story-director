@@ -123,6 +123,8 @@ html body #zmer-universal-toast-theme-layer { z-index: 2147483646 !important; }
 #story-director-modal .sd-icon-btn.sd-danger i { color: inherit; }
 
 #story-director-modal .sd-file-label { position: relative; overflow: hidden; }
+/* 导入缓存按钮是 <label>：清掉 ST 给 label 的默认 margin，与同行 button 垂直对齐、不下沉 */
+#story-director-modal .sd-tts-cache-import-label { margin: 0 !important; align-self: stretch; }
 
 #story-director-modal .sd-file-label input {
   position: absolute;
@@ -612,6 +614,8 @@ html body #zmer-universal-toast-theme-layer { z-index: 2147483646 !important; }
   mask: linear-gradient(to right, transparent 0, #000 var(--sd-fade-l), #000 calc(100% - var(--sd-fade-r)), transparent 100%);
 }
 #story-director-modal .sd-tabs::-webkit-scrollbar { height: 0; display: none; }
+#story-director-modal .sd-tabs.sd-tabs-dragging { cursor: grabbing; user-select: none; }
+#story-director-modal .sd-tabs.sd-tabs-dragging .sd-tab { cursor: grabbing; }
 #story-director-modal .sd-tabs.sd-tabs-fade-left { --sd-fade-l: 28px; }
 #story-director-modal .sd-tabs.sd-tabs-fade-right { --sd-fade-r: 28px; }
 
@@ -708,32 +712,33 @@ html body #zmer-universal-toast-theme-layer { z-index: 2147483646 !important; }
 }
 
 /* 自绘勾选框/单选：显式控制底色与对勾色，五套主题都清晰（不再依赖原生 accent-color 在浅底上糊白勾） */
-#story-director-modal input[type="checkbox"],
-#story-director-modal input[type="radio"] {
-  appearance: none;
-  -webkit-appearance: none;
+/* 双 ID 提特异性 + !important：ST 移动端用 :not(#x) 链拿到 ID 级权重，单 ID 的 appearance/底色压不住——
+   PC 端 ST 没注入这套，单 ID 即可，故此前移动端勾选会回落成原生外观（浅主题糊成浅色、深主题糊成深色看不清）。 */
+#story-director-modal#story-director-modal input[type="checkbox"],
+#story-director-modal#story-director-modal input[type="radio"] {
+  appearance: none !important;
+  -webkit-appearance: none !important;
   width: 16px;
   height: 16px;
   flex: 0 0 auto;
   margin: 0;
-  border: 1.5px solid var(--sd-accent);
-  background: var(--sd-input-bg);
+  border: 1.5px solid var(--sd-accent) !important;
+  background: var(--sd-input-bg) !important;
   cursor: pointer;
   position: relative;
   transition: background .12s ease, border-color .12s ease;
 }
-#story-director-modal input[type="checkbox"] { border-radius: 4px; }
-#story-director-modal input[type="radio"] { border-radius: 50%; }
+#story-director-modal#story-director-modal input[type="checkbox"] { border-radius: 4px; }
+#story-director-modal#story-director-modal input[type="radio"] { border-radius: 50%; }
 /* 压掉 ST 全局给 :checked 渲染的 FontAwesome 对勾（::before），只留本扩展自绘的 ::after，消除双色重叠 */
-/* 双 ID 提特异性：ST 移动端用 :not(#x) 链拿到 ID 级权重，单 ID 压不住，会冒出叠加的美化勾。这里盖过它 */
 #story-director-modal#story-director-modal input[type="checkbox"]::before,
 #story-director-modal#story-director-modal input[type="radio"]::before { content: none !important; display: none !important; background: none !important; }
-#story-director-modal input[type="checkbox"]:checked,
-#story-director-modal input[type="radio"]:checked {
-  background: var(--sd-accent);
-  border-color: var(--sd-accent);
+#story-director-modal#story-director-modal input[type="checkbox"]:checked,
+#story-director-modal#story-director-modal input[type="radio"]:checked {
+  background: var(--sd-accent) !important;
+  border-color: var(--sd-accent) !important;
 }
-#story-director-modal input[type="checkbox"]:checked::after {
+#story-director-modal#story-director-modal input[type="checkbox"]:checked::after {
   content: "";
   position: absolute;
   left: 50%;
@@ -744,7 +749,7 @@ html body #zmer-universal-toast-theme-layer { z-index: 2147483646 !important; }
   border-width: 0 2px 2px 0;
   transform: translate(-50%, -50%) rotate(45deg);
 }
-#story-director-modal input[type="radio"]:checked::after {
+#story-director-modal#story-director-modal input[type="radio"]:checked::after {
   content: "";
   position: absolute;
   left: 50%;
@@ -967,6 +972,21 @@ html body #zmer-universal-toast-theme-layer { z-index: 2147483646 !important; }
 #story-director-modal .sd-plain-fold > summary::-webkit-details-marker { display: none; }
 #story-director-modal .sd-plain-fold > summary b { font-weight: 600; }
 #story-director-modal .sd-plain-fold > .sd-textarea { margin-top: 8px; }
+
+/* 有声各版块折叠标题：左对齐、紧凑（折叠态高度收敛、标题垂直居中；展开内容不受影响） */
+#story-director-modal .sd-plain-fold[data-acc^="tts-"] { margin-top: 0; }
+#story-director-modal .sd-plain-fold[data-acc^="tts-"] > summary {
+  justify-content: flex-start !important;
+  padding: 0 !important;
+  line-height: 1.2;
+}
+#story-director-modal .sd-plain-fold[data-acc^="tts-"] > summary b { font-size: 15px; }
+/* 展开时标题与内容留间距（折叠态不留，故收敛高度） */
+#story-director-modal .sd-plain-fold[data-acc^="tts-"][open] > summary { margin-bottom: 8px; }
+/* 有声卡片收紧内边距：折叠态不显空旷（展开内容自带上间距） */
+#story-director-modal .sd-card:has(> .sd-plain-fold[data-acc^="tts-"]) { padding: 11px 16px; }
+/* 有声输入框占位符字号略小 */
+#story-director-modal .sd-tts-voice-row .text_pole::placeholder { font-size: 12px; }
 
 #story-director-modal .sd-status-card { padding: 14px 16px; }
 
@@ -2233,6 +2253,18 @@ html body #zmer-universal-toast-theme-layer { z-index: 2147483646 !important; }
 #story-director-modal .sd-geo-shortcut:hover { background: var(--sd-glass) !important; }
 #story-director-modal .sd-geo-shortcut.active { color: var(--sd-accent) !important; background: var(--sd-glass) !important; }
 
+/* 快捷窗图标按钮（下载/收藏） */
+.sd-tts-pop-icon {
+  width: 30px; height: 30px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--sd-hairline, rgba(255,255,255,.14));
+  border-radius: 8px;
+  background: transparent;
+  color: var(--sd-text, #eee);
+  cursor: pointer;
+}
+.sd-tts-pop-icon:hover { background: var(--sd-glass-weak, rgba(255,255,255,.08)); }
+
 #story-director-modal .sd-geo-empty { text-align: center; padding: 40px 20px; }
 #story-director-modal .sd-geo-empty i { font-size: 2.2em; color: var(--sd-accent); opacity: .7; margin-bottom: 8px; }
 #story-director-modal .sd-geo-empty b { color: var(--sd-accent); }
@@ -2567,3 +2599,244 @@ html body #zmer-universal-toast-theme-layer { z-index: 2147483646 !important; }
   #story-director-modal .sd-evt-stage-erupt::before { animation: none; }
   #story-director-modal .sd-geo-edge-flow { opacity: .6; stroke-dasharray: none; }
 }
+
+/* ── 有声小剧场（TTS）配置 tab ── */
+#story-director-modal .sd-tts-voice-list { margin: 6px 0 4px; display: flex; flex-direction: column; gap: 8px; }
+#story-director-modal .sd-tts-voice-row {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.1fr) 34px;
+  gap: 8px;
+  align-items: center;
+}
+#story-director-modal .sd-tts-voice-row .text_pole { margin: 0 !important; }
+#story-director-modal .sd-tts-voice-row .sd-tts-vdel { width: 34px; height: 34px; }
+/* 音色库 / NPC 原型：复用剧札 sd-lib-folder/row 外观（文件夹分组、只显示名字、小图标），仅补列表容器的限高滚动 */
+#story-director-modal .sd-tts-lib-list,
+#story-director-modal .sd-tts-npc-list { margin: 6px 0 4px; display: flex; flex-direction: column; gap: 6px; }
+#story-director-modal .sd-tts-lib-list.sd-scroll,
+#story-director-modal .sd-tts-npc-list.sd-scroll { max-height: 240px; overflow-y: auto; scrollbar-width: thin; padding-right: 2px; }
+/* 折叠标题副注释（NPC 卡）：小字、弱化、不抢主标题 */
+#story-director-modal .sd-tts-sub { font-size: .76em; font-weight: 400; color: var(--sd-muted); margin-left: 8px; opacity: .85; }
+/* 收藏夹行 */
+#story-director-modal .sd-tts-fav-list { margin: 6px 0 4px; display: flex; flex-direction: column; gap: 6px; }
+#story-director-modal .sd-tts-fav-list.sd-scroll { max-height: 280px; overflow-y: auto; scrollbar-width: thin; padding-right: 2px; }
+#story-director-modal .sd-tts-fav-row {
+  display: grid;
+  grid-template-columns: 30px auto 1fr 30px;
+  gap: 8px;
+  align-items: center;
+  padding: 3px 4px;
+  border-radius: 7px;
+}
+#story-director-modal .sd-tts-fav-row .sd-tts-txt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: .9; }
+#story-director-modal .sd-tts-fav-row .sd-tts-spk { font-weight: 600; opacity: .8; white-space: nowrap; }
+#story-director-modal .sd-tts-fav-play {
+  width: 30px; height: 30px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: none; border-radius: 50%;
+  background: var(--sd-glass-weak); color: var(--sd-text); cursor: pointer;
+}
+#story-director-modal .sd-tts-fav-play:hover { background: var(--sd-glass); }
+#story-director-modal .sd-tts-tag-list { margin: 6px 0 8px; display: flex; flex-direction: column; gap: 8px; }
+#story-director-modal .sd-tts-tag-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 88px 34px;
+  gap: 8px;
+  align-items: center;
+}
+#story-director-modal .sd-tts-tag-row .text_pole { margin: 0 !important; }
+#story-director-modal .sd-tts-tag-row .sd-tts-tag-del { width: 34px; height: 34px; }
+/* 滑条全自绘：accent-color 只染填充/滑块，轨道仍是浏览器默认（浅主题下近白、糊在浅卡上看不见）。
+   故 appearance:none 后显式画轨道(主题边框色) + 滑块(主题强调色)，双 ID + !important 压过 ST 移动端高特异性。 */
+#story-director-modal#story-director-modal input[type=range] {
+  -webkit-appearance: none !important;
+  appearance: none !important;
+  width: 100%;
+  height: 6px;
+  margin: 8px 0 12px;
+  padding: 0 !important;
+  background: var(--sd-border) !important;
+  border: none !important;
+  border-radius: 999px !important;
+  cursor: pointer;
+}
+#story-director-modal#story-director-modal input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--sd-accent, #b08d57);
+  border: 2px solid var(--sd-card, #fff);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .25);
+  cursor: pointer;
+}
+#story-director-modal#story-director-modal input[type=range]::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--sd-accent, #b08d57);
+  border: 2px solid var(--sd-card, #fff);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .25);
+  cursor: pointer;
+}
+#story-director-modal#story-director-modal input[type=range]::-moz-range-track {
+  height: 6px;
+  background: var(--sd-border);
+  border-radius: 999px;
+}
+#story-director-modal .sd-tts-speed-val,
+#story-director-modal .sd-tts-vol-val,
+#story-director-modal .sd-tts-pitch-val {
+  font-variant-numeric: tabular-nums;
+  opacity: .75;
+  margin-left: 4px;
+}
+
+/* ── 有声小剧场 · 正文注入（位于 ST #chat 内，不加 modal 前缀；用 sd-tts- 命名空间防撞，色用 currentColor 适配 ST 主题）── */
+/* margin 上下都留足 + flex-wrap：避免在「聊天气泡底部内边距不同」的美化主题里被气泡裁掉下半；偏左用 padding 与正文略对齐 */
+.sd-tts-toolbar { display: flex; flex-wrap: wrap; gap: 6px; row-gap: 6px; margin: 6px 0 8px; padding: 2px 0; align-items: center; justify-content: center; }
+.sd-tts-trigger,
+.sd-tts-reextract,
+.sd-tts-regenall,
+.sd-tts-playall {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid currentColor;
+  border-radius: 7px;
+  background: rgba(127, 127, 127, .12);   /* 微透明底衬：跨 ST 美化主题保证可见 */
+  color: inherit;
+  opacity: .7;
+  cursor: pointer;
+  font-size: 12px;
+  transition: opacity .15s ease, background .15s ease;
+}
+.sd-tts-trigger:hover,
+.sd-tts-reextract:hover,
+.sd-tts-regenall:hover,
+.sd-tts-playall:hover { opacity: 1; background: rgba(127, 127, 127, .22); }
+.sd-tts-regenall[hidden],
+.sd-tts-playall[hidden] { display: none; }
+.sd-tts-regenall:disabled { opacity: .3; cursor: default; }
+
+/* 正文内联小喇叭：紧跟台词句尾，体积小、不占行。方形底与工具栏/列表图标风格统一 */
+.sd-tts-play.sd-tts-inline {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin: 0 2px;
+  vertical-align: middle;
+  border: none;
+  border-radius: 6px;
+  background: rgba(127, 127, 127, .18);
+  color: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background .15s ease;
+}
+.sd-tts-play.sd-tts-inline:hover { background: rgba(127, 127, 127, .36); }
+.sd-tts-play.sd-tts-inline.sd-playing { background: rgba(127, 170, 127, .5); }
+/* 正文内联「连续播放本条」钮：与单句喇叭同尺寸，方形底+强调色区分 */
+.sd-tts-inline-playall {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin: 0 3px 0 2px;
+  vertical-align: middle;
+  border: none;
+  border-radius: 6px;
+  background: rgba(95, 150, 110, .42);
+  color: inherit;
+  font-size: 10px;
+  cursor: pointer;
+  transition: background .15s ease;
+}
+.sd-tts-inline-playall:hover { background: rgba(95, 150, 110, .7); }
+.sd-tts-inline-playall:disabled { opacity: .5; cursor: default; }
+/* 内联连播钮播放态（充当停止钮）：暖红底，与外层工具栏停止态视觉联动 */
+.sd-tts-inline-playall.sd-tts-playing { background: rgba(200, 90, 80, .55); }
+.sd-tts-inline-playall.sd-tts-playing:hover { background: rgba(200, 90, 80, .75); }
+
+.sd-tts-bar {
+  margin: 6px 0 2px;
+  padding: 8px 10px;
+  border: 1px solid rgba(127, 127, 127, .28);
+  border-radius: 10px;
+  background: rgba(127, 127, 127, .07);
+  font-size: 0.92em;
+}
+.sd-tts-lines { display: flex; flex-direction: column; gap: 5px; }
+.sd-tts-line {
+  display: grid;
+  grid-template-columns: 24px auto 1fr;
+  gap: 8px;
+  align-items: center;
+  padding: 3px 5px;
+  border-radius: 7px;
+  transition: background .15s ease;
+}
+.sd-tts-line.sd-playing { background: rgba(127, 170, 127, .22); }
+.sd-tts-line.sd-tts-novoice { opacity: .5; }
+.sd-tts-play {
+  width: 20px;
+  height: 20px;
+  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 6px;
+  background: rgba(127, 127, 127, .18);
+  color: inherit;
+  cursor: pointer;
+  transition: background .15s ease;
+}
+.sd-tts-play:hover:not(:disabled) { background: rgba(127, 127, 127, .34); }
+.sd-tts-play:disabled { cursor: not-allowed; opacity: .6; }
+.sd-tts-spk { font-weight: 600; white-space: nowrap; opacity: .85; }
+.sd-tts-txt { opacity: .92; overflow: hidden; text-overflow: ellipsis; }
+.sd-tts-bar-actions { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; align-items: center; }
+.sd-tts-status { opacity: .7; font-size: 0.9em; }
+.sd-tts-status.sd-tts-err { color: #d9534f; opacity: .9; }
+.sd-tts-bar .sd-mini-btn,
+/* 连播钮播放态（充当停止钮）：暖红描边+底色，与「播放」态区分 */
+.sd-tts-toolbar .sd-tts-playall.sd-tts-playing { border-color: rgba(200, 90, 80, .5); background: rgba(200, 90, 80, .14); }
+.sd-tts-toolbar .sd-tts-playall.sd-tts-playing:hover { background: rgba(200, 90, 80, .24); }
+
+/* 快捷窗：挂在 body，主题变量只定义在 #story-director-modal 上，故在此为各主题补一份（仅快捷窗用到的几个变量） */
+.sd-tts-popup { --sd-text: #3c352e; --sd-glass: rgba(250,247,240,.97); --sd-glass-weak: rgba(255,255,255,.18); --sd-hairline: rgba(70,60,50,.10); --sd-accent: #5f7a68; }
+.sd-tts-popup.sd-theme-dark { --sd-text: #e8e6e1; --sd-glass: rgba(38,40,45,.96); --sd-glass-weak: rgba(255,255,255,.045); --sd-hairline: rgba(232,230,225,.08); --sd-accent: #a4cdb2; color-scheme: dark; }
+.sd-tts-popup.sd-theme-summer { --sd-text: #2c5560; --sd-glass: rgba(244,250,250,.97); --sd-glass-weak: rgba(255,255,255,.22); --sd-hairline: rgba(40,120,130,.10); --sd-accent: #3aa6bc; }
+.sd-tts-popup.sd-theme-candy { --sd-text: #6f5161; --sd-glass: rgba(252,247,250,.97); --sd-glass-weak: rgba(255,255,255,.26); --sd-hairline: rgba(180,135,158,.10); --sd-accent: #d79bb3; }
+.sd-tts-popup.sd-theme-kraft { --sd-text: #5a4a30; --sd-glass: rgba(248,242,229,.97); --sd-glass-weak: rgba(255,252,244,.22); --sd-hairline: rgba(135,105,62,.10); --sd-accent: #b08a55; }
+.sd-tts-popup.sd-theme-dream { --sd-text: #565377; --sd-glass: rgba(250,249,253,.97); --sd-glass-weak: rgba(255,255,255,.30); --sd-hairline: rgba(150,140,190,.10); --sd-accent: #a99edd; }
+.sd-tts-popup {
+  position: fixed;
+  z-index: 2147483002;
+  min-width: 210px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--sd-glass, #2b2b30);
+  color: var(--sd-text, #eee);
+  border: 1px solid var(--sd-hairline, rgba(255,255,255,.14));
+  box-shadow: 0 12px 40px rgba(0, 0, 0, .38);
+  backdrop-filter: blur(12px);
+}
+.sd-tts-popup-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.sd-tts-popup-row > span { width: 36px; opacity: .8; font-size: 0.9em; }
+.sd-tts-popup-row input[type=range] { flex: 1; accent-color: var(--sd-accent, #b08d57); }
+.sd-tts-popup-row .sd-tts-pop-speed-val { width: 38px; text-align: right; font-variant-numeric: tabular-nums; opacity: .85; }
+.sd-tts-popup-row select { flex: 1; background: var(--sd-glass-weak, rgba(255,255,255,.06)); color: inherit; border: 1px solid var(--sd-hairline, rgba(255,255,255,.14)); border-radius: 7px; padding: 4px 6px; }
+.sd-tts-popup-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.sd-tts-popup-actions .sd-mini-btn { padding: 5px 14px; border: 1px solid var(--sd-accent, #b08d57); border-radius: 8px; background: transparent; color: var(--sd-text, #eee); cursor: pointer; font: inherit; font-size: 0.9em; }
+.sd-tts-popup-actions .sd-mini-btn:hover { background: var(--sd-glass-weak, rgba(255,255,255,.08)); }
+.sd-tts-popup-actions .sd-mini-btn i { margin-right: 5px; }

@@ -1,10 +1,12 @@
 // 千幕 (Qianmu) - SillyTavern third-party UI extension
 import { BUILTIN_THEATERS, BUILTIN_THEATER_FOLDER } from './builtin-theaters.js';
 import { QIANMU_THEATERS, QIANMU_THEATER_FOLDER } from './qianmu-theaters.js';
+import { synthesize as ttsSynthesize, cacheKeyFor as ttsCacheKey, MINIMAX_ENDPOINTS, MINIMAX_MODELS } from './qianmu-tts.js';
+import * as blobStore from './qianmu-blobstore.js';
 
 const MODULE_NAME = 'story_director_liminale';
 const EXTENSION_NAME = '千幕';
-const VERSION = '1.6.2';
+const VERSION = '1.7.3';
 const SETTINGS_PANEL_ID = 'story-director-settings';
 const MODAL_ID = 'story-director-modal';
 const FLOAT_ID = 'story-director-float';
@@ -17,8 +19,8 @@ const FLOAT_LOGO_URL = new URL('./qianmulogo.png', import.meta.url).href;
 
 const PROMPT_REVISION = 23;
 const BLUEPRINT_REVISION = 1;          // 默认剧本模板版本，升一档即用新默认覆盖各聊天剧本（旧 DIY 自动备份进「恢复上次」）
-const BUILTIN_THEATER_REVISION = 6;   // 内置剧场组版本，升一档即重置内置项（保留用户自建剧札）。4：加 id 命名空间判定；5：加逐字遗留副本清扫，根除 script-* 古早孤儿；6：并入 19 个吱吱新增剧场（问答/论坛二者与旧同名内容不同已改名区分，幻想小剧场逐字重复已剔除）
-const QIANMU_THEATER_REVISION = 5;   // 千幕剧场组版本，与吱吱组各自独立；升一档即重置千幕内置项（保留用户自建）。1：首发 10 札（周年纪事/我们的第一次/习惯如此/葬礼那天/平行结局/史册有载/若生于古时/一物之眼/使用说明书/存档与分支）；2：用户修订版正文（结构化分块·字数上调·title 不变）；3：第二批 10 札（凌晨四点/住过的地方/倒着写的一生/差一点/史上最差约会/十二时辰/生生世世/今日宜忌/错时的信/捡来的你）；4：以何相爱（一盲一聋哑·无声者如何相爱·禁痊愈收场）；5：第二批9札换用户修订正文+以何相爱改名「何以谓爱」+全21札格式统一（#### → 【】、** → 「」、字面内容不变）
+const BUILTIN_THEATER_REVISION = 6;   // 内置剧场组版本，升一档即重置内置项（保留用户自建剧札）。
+const QIANMU_THEATER_REVISION = 5;   // 千幕剧场组版本，与吱吱组各自独立；升一档即重置千幕内置项（保留用户自建）。
 const LOG_LIMIT = 5;
 const LOG_CLIP = 80000;
 
@@ -344,6 +346,34 @@ const DEFAULT_SETTINGS = Object.freeze({
   selectedWorldBookItemsByChat: {},
   globalWorldBookNames: {},       // 「设为全局」的世界书：对所有聊天默认引用（仍可在单聊天里取消）
   enabledWorldBooksByChat: {},
+  // 有声小剧场（MiniMax TTS）：与推演主体无关的独立模块，全部命名空间隔离在此，零侵入主流程。
+  tts: {
+    enabled: false,              // 总开关，默认关
+    apiKey: '',                  // MiniMax API Key
+    endpoint: 'https://api.minimaxi.com/v1/t2a_v2',   // 官方端点之一
+    proxyBase: '',               // 选填反代地址（直连可用时留空）
+    groupId: '',                 // 选填 GroupId（新接口一般可空）
+    model: 'speech-2.8-hd',      // 默认模型（2.8 系列支持情绪+语气词）
+    format: 'mp3',
+    defaultSpeed: 1,             // 默认语速 [0.5,2]
+    defaultVol: 1,               // 默认音量 (0,10]
+    defaultPitch: 0,             // 默认语调 [-12,12]
+    extractApiProfileId: '',     // 台词提取用哪个 API 预设（空=用当前主 API）
+    voiceLibrary: [],            // 音色库：[{ id, name, voiceId }]，一次保存永久复用——配角色时下拉选名即填 ID
+    cacheLimit: 200,             // 音频缓存条数上限（近似 LRU）
+    injectInChat: true,          // 单句喇叭是否注入 ST 正文消息
+    // 标签屏蔽/提取：提取台词前先清洗原始消息，剔除状态栏/思维链/HTML 等非台词噪音，省 token、提精度。
+    // action: 'remove'=删除该标签整段；'extract'=只保留该标签内内容（extract 一旦存在则优先，其余 remove 忽略）。
+    tagRules: [{ name: 'thinking', action: 'remove' }],
+    stripHtml: true,             // 清洗后再剥裸 HTML 标签（状态栏/卡片等），默认开
+    extractPrompt: '',           // 自定义台词提取系统提示词（空=用内置默认 TTS_EXTRACT_SYSTEM）
+    extractPromptBackup: null,   // 「恢复上次」：方案载入/重置覆盖前自动备份
+    guidanceSchemes: [],         // 台词指导方案库：[{ id, name, folder, content, createdAt }]
+    testText: '你好，这是一段试听。',   // 统一试听台词
+    npcEnabled: false,           // NPC 泛用音色：未在本聊天映射命中的说话人按原型库自动归类，默认关
+    npcArchetypes: [],           // NPC 原型音色库：[{ id, label, voiceId }]（label 如「严肃老年男」）
+    npcAssignByChat: {},         // 按聊天记忆「说话人→原型 id」：{ chatKey: { speaker: archId } }，熟脸 NPC 不漂移
+  },
   theater: {
     instruction: '',
     apiProfileId: '',
@@ -362,6 +392,7 @@ let settings = null;
 let activeTab = 'dashboard';
 let theaterView = null; // null=常规；{mode:'read', scene}=阅读；{mode:'favorites'}=收藏夹
 let editorView = null;  // null=常规；{target, title, value, returnTab}=行内全屏编辑（沿用阅读页逻辑，不另开 body 窗口）
+let ttsEditorReturnScroll = null;  // 进入行内编辑器前的正文滚动位，关闭后恢复（防弹回顶部）
 let theaterScriptSource = '';   // 当前此幕指令来自哪个剧札标题；空=即兴（手动输入/未保存）
 let chatterExpanded = false;       // 尘寰群生：false=动态浮现舞台，true=展开完整台本列表
 let contextScanCache = { presets: {}, worldBooks: {}, presetNames: [], worldBookNames: [], currentPresetName: '', boundWorldBookNames: [], presetScannedAt: '', worldScannedAt: '' };
@@ -382,6 +413,9 @@ let templateSearch = '';
 let lastWorldView = '';   // 世界书下拉「最后选择」的查看项
 let theaterExportMode = false;
 let theaterExportSelection = new Set();
+let ttsSchemeSearch = '';            // 台词指导方案库搜索
+let ttsSchemeExportMode = false;     // 台词指导方案库多选导出态
+let ttsSchemeExportSelection = new Set();
 let injectSelection = new Map();   // 写入勾选持久化（id→text，跨重渲染/切主题/切标签保留，Map 顺序即勾选先后）
 let accState = {};                 // 折叠面板开合状态记忆
 
@@ -569,6 +603,9 @@ function getChatStore() {
   if (!Array.isArray(meta[MODULE_NAME].threads)) meta[MODULE_NAME].threads = [];   // 活幕·伏笔显影档案层
   if (!Array.isArray(meta[MODULE_NAME].factions)) meta[MODULE_NAME].factions = [];   // 活幕·势：势力/地缘格局层
   if (!Array.isArray(meta[MODULE_NAME].worldEvents)) meta[MODULE_NAME].worldEvents = [];   // 活幕·势：世界事件层
+  if (!meta[MODULE_NAME].ttsLines || typeof meta[MODULE_NAME].ttsLines !== 'object') meta[MODULE_NAME].ttsLines = {};   // 有声：已提取台词列表 内容指纹key→lines，持久化跨刷新
+  if (!meta[MODULE_NAME].ttsLineKeyByMes || typeof meta[MODULE_NAME].ttsLineKeyByMes !== 'object') meta[MODULE_NAME].ttsLineKeyByMes = {};   // 有声：楼层mesid→最近一次台词key，原地编正文后凭此+台词原文在场校验迁移缓存（免重提）
+  if (!Array.isArray(meta[MODULE_NAME].ttsVoiceMap)) meta[MODULE_NAME].ttsVoiceMap = [];   // 有声：本聊天角色→音色映射，按聊天切配置（类比推演按聊天）
   if (isLegacyBlueprint(meta[MODULE_NAME].blueprint) && !meta[MODULE_NAME].blueprintEdited) {
     meta[MODULE_NAME].blueprint = DEFAULT_BLUEPRINT;
   }
@@ -1012,6 +1049,57 @@ async function promptNameAndFolder({ dialogTitle, namePlaceholder, name = '', fo
   const newFolder = await promptInput(dialogTitle, '文件夹（留空不分类）：', folder || '');
   if (newFolder === null) return null;
   return { name: String(newName || '').trim(), folder: sanitizeFolder(newFolder) };
+}
+
+// 音色库条目弹窗：音色名 + 音色 ID（沿用剧札 Popup 交互，无 textarea）
+// withKeywords=true（NPC 原型用）：额外加「关键词描述」字段，喂给提取模型辅助声线归类（仅输入提示，不参与本地匹配/记忆）
+async function promptVoiceLibEntry({ dialogTitle, name = '', voiceId = '', folder = '', keywords = '', nameLabel = '音色名', namePlaceholder = '如 活泼少女音', withKeywords = false }) {
+  const context = ctx();
+  const Popup = context.Popup;
+  if (Popup && context.POPUP_TYPE) {
+    const wrap = document.createElement('div');
+    wrap.className = 'sd-lib-edit-form';
+    const kwField = withKeywords
+      ? `<label style="display:block;text-align:left;margin:0 0 4px">关键词描述<span style="opacity:.6;font-weight:400">（辅助提取模型判断声线，越具体越准）</span></label>
+         <input type="text" class="text_pole sd-vl-kw" placeholder="如 大学生、干净、18-25岁清朗音" style="width:100%;margin:0 0 10px">`
+      : '';
+    wrap.innerHTML = `
+      <label style="display:block;text-align:left;margin:0 0 4px">${htmlEscape(nameLabel)}</label>
+      <input type="text" class="text_pole sd-vl-name" placeholder="${htmlEscape(namePlaceholder)}" style="width:100%;margin:0 0 10px">
+      ${kwField}
+      <label style="display:block;text-align:left;margin:0 0 4px">音色 ID</label>
+      <input type="text" class="text_pole sd-vl-id" placeholder="MiniMax Voice ID" style="width:100%;margin:0 0 10px">
+      <label style="display:block;text-align:left;margin:0 0 4px">文件夹</label>
+      <input type="text" class="text_pole sd-vl-folder" placeholder="留空则不分类" style="width:100%;margin:0">`;
+    wrap.querySelector('.sd-vl-name').value = name || '';
+    wrap.querySelector('.sd-vl-id').value = voiceId || '';
+    wrap.querySelector('.sd-vl-folder').value = folder || '';
+    if (withKeywords) wrap.querySelector('.sd-vl-kw').value = keywords || '';
+    try {
+      const popup = new Popup(wrap, context.POPUP_TYPE.CONFIRM, '', { okButton: '保存', cancelButton: '取消' });
+      const ok = await popup.show();
+      if (!ok) return null;
+      return {
+        name: String(wrap.querySelector('.sd-vl-name').value || '').trim(),
+        voiceId: String(wrap.querySelector('.sd-vl-id').value || '').trim(),
+        folder: sanitizeFolder(wrap.querySelector('.sd-vl-folder').value),
+        keywords: withKeywords ? String(wrap.querySelector('.sd-vl-kw').value || '').trim() : '',
+      };
+    } catch (_) {}
+  }
+  const newName = await promptInput(dialogTitle, `${nameLabel}：`, name || '');
+  if (newName === null) return null;
+  let newKw = '';
+  if (withKeywords) {
+    const kw = await promptInput(dialogTitle, '关键词描述（辅助判断声线，可空）：', keywords || '');
+    if (kw === null) return null;
+    newKw = String(kw || '').trim();
+  }
+  const newId = await promptInput(dialogTitle, '音色 ID：', voiceId || '');
+  if (newId === null) return null;
+  const newFolder = await promptInput(dialogTitle, '文件夹（留空不分类）：', folder || '');
+  if (newFolder === null) return null;
+  return { name: String(newName || '').trim(), voiceId: String(newId || '').trim(), folder: sanitizeFolder(newFolder), keywords: newKw };
 }
 
 
@@ -2401,6 +2489,8 @@ function closeModal() {
 // 行内全屏文本编辑（编剧/幕后提示词/此幕指令共用）：在千幕界面内切换出编辑视图，沿用阅读页布局+吸顶返回/保存，
 // 不另在 body 挂独立窗口（窄屏 fixed 定位会以 .sd-window 为基准跑偏）。
 function openTextEditor({ target, title, value, placeholder = '', commit }) {
+  // 记住进入编辑器前的正文滚动位，关闭后恢复——否则 renderModal 会把页面弹回顶部
+  ttsEditorReturnScroll = document.getElementById(MODAL_ID)?.querySelector('.sd-body')?.scrollTop ?? 0;
   editorView = { target, title: title || '编辑', value: value || '', placeholder, commit, returnTab: activeTab };
   renderModal();
 }
@@ -2408,6 +2498,9 @@ function openTextEditor({ target, title, value, placeholder = '', commit }) {
 function closeEditorView() {
   editorView = null;
   renderModal();
+  const body = document.getElementById(MODAL_ID)?.querySelector('.sd-body');
+  if (body && ttsEditorReturnScroll != null) body.scrollTop = ttsEditorReturnScroll;
+  ttsEditorReturnScroll = null;
 }
 
 // 行内编辑保存：按 target 直写对应数据模型，与各自原有持久化口径一致
@@ -2424,6 +2517,11 @@ async function commitEditorValue(target, val) {
     getTheater().instruction = val || '';
     theaterScriptSource = '';   // 手动改动即视为即兴，脱离剧札来源
     saveSettings();
+  } else if (target.startsWith('ttsscheme:')) {
+    const id = target.slice('ttsscheme:'.length);
+    const schemes = settings.tts?.guidanceSchemes || [];
+    const sch = schemes.find((x) => x.id === id);
+    if (sch) { sch.content = val || ''; saveSettings(); }
   }
 }
 
@@ -2598,6 +2696,7 @@ function renderModal() {
     ['context', '取材'],
     ['settings', '幕后'],
     ['theater', '幕外'],
+    ['tts', '配音'],
   ];
   const wasOpen = modal.classList.contains('open');
   const animIn = modalJustOpened;   // 仅「打开」后的首帧入场动画，消费后清零，静默重渲染不再播（消除刷新闪动）
@@ -2614,7 +2713,7 @@ function renderModal() {
           <p>一蝶振翅&nbsp;&nbsp;万象入幕</p>
         </div>
         <div class="sd-header-actions">
-          ${settings.geopoliticsEnabled ? `<button class="sd-geo-shortcut ${activeTab === 'geopolitics' ? 'active' : ''}" title="世界格局" aria-label="世界格局"><i class="fa-solid fa-atom"></i></button>` : ''}
+          <button class="sd-geo-shortcut ${activeTab === 'geopolitics' ? 'active' : ''}" title="世界格局" aria-label="世界格局"><i class="fa-solid fa-atom"></i></button>
           <button class="sd-plug-shortcut" title="API与日志"><i class="fa-solid fa-gear"></i></button>
           <div class="sd-theme-pick">
             <button class="sd-theme-btn" title="外观主题" aria-label="外观主题" aria-haspopup="true"><i class="fa-solid fa-palette"></i></button>
@@ -2685,8 +2784,61 @@ function renderModal() {
     if (!tabsBar.dataset.fadeBound) {
       tabsBar.dataset.fadeBound = '1';
       tabsBar.addEventListener('scroll', () => updateTabsFade(tabsBar), { passive: true });
+      bindTabsScrollControls(tabsBar);
     }
   }
+}
+
+// 标签栏横向滚动增强：滚轮纵→横、PC 鼠标按住拖动。移动端触摸滑动由 CSS overflow-x 原生承担，不在此干预。
+function bindTabsScrollControls(bar) {
+  // 滚轮：竖直滚轮转为横向滚动（横向滚轮/触控板横扫保持原生）
+  bar.addEventListener('wheel', (e) => {
+    if (e.deltaY === 0) return;
+    const max = bar.scrollWidth - bar.clientWidth;
+    if (max <= 2) return;   // 无可滚动内容则让滚轮冒泡给页面
+    bar.scrollLeft += e.deltaY;
+    e.preventDefault();
+  }, { passive: false });
+
+  // 鼠标按住拖动（仅鼠标；触摸交给原生）。拖动超阈值时吞掉随后的 click，避免误触切标签。
+  let dragging = false;
+  let startX = 0;
+  let startScroll = 0;
+  let moved = 0;
+  bar.addEventListener('pointerdown', (e) => {
+    if (e.pointerType !== 'mouse' || e.button !== 0) return;
+    dragging = true;
+    moved = 0;
+    startX = e.clientX;
+    startScroll = bar.scrollLeft;
+  });
+  bar.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    const dx = e.clientX - startX;
+    moved = Math.max(moved, Math.abs(dx));
+    bar.scrollLeft = startScroll - dx;
+    if (moved > 3) {
+      bar.classList.add('sd-tabs-dragging');
+      if (bar.hasPointerCapture?.(e.pointerId) === false) { try { bar.setPointerCapture(e.pointerId); } catch (_) {} }
+      e.preventDefault();
+    }
+  });
+  const endDrag = (e) => {
+    if (!dragging) return;
+    dragging = false;
+    bar.classList.remove('sd-tabs-dragging');
+    try { bar.releasePointerCapture?.(e.pointerId); } catch (_) {}
+    if (moved > 3) {
+      // 抑制本次拖动末尾触发的 click（捕获阶段一次性拦截）
+      const swallow = (ev) => { ev.stopPropagation(); ev.preventDefault(); };
+      bar.addEventListener('click', swallow, { capture: true, once: true });
+      // 若拖动后未产生 click（极少数），下一帧自动移除该一次性监听，避免误吞下一次真实点击
+      setTimeout(() => bar.removeEventListener('click', swallow, { capture: true }), 0);
+    }
+  };
+  bar.addEventListener('pointerup', endDrag);
+  bar.addEventListener('pointercancel', endDrag);
+  bar.addEventListener('pointerleave', endDrag);
 }
 
 // 标签栏两端渐隐：仅在该侧确有可滚动内容时才加雾化遮罩，提示「这边还能滑」，滑到尽头则隐去该侧
@@ -2711,6 +2863,7 @@ function renderActiveTab() {
     case 'context': return renderContextTab();
     case 'settings': return renderDirectorSettingsTab();
     case 'theater': return renderTheaterTab();
+    case 'tts': return renderTtsTab();
     case 'geopolitics': return renderGeopoliticsTab();
     case 'plug': return renderPlugTab();
     default: return renderDashboardTab();
@@ -2910,7 +3063,7 @@ function renderGeopoliticsTab() {
     return `<div class="sd-geo-tab"><div class="sd-empty sd-geo-empty">
       <i class="fa-solid fa-atom"></i>
       <p><b>世界格局</b> 尚未生成。</p>
-      <p class="sd-muted">推演后，世界的势力格局、地缘张力会在此自成脉络。</p>
+      <p class="sd-muted">${settings.geopoliticsEnabled ? '推演后，世界的势力格局、地缘张力会在此自成脉络。' : '该功能默认关闭。请到「幕后」页勾选「启用世界格局」，之后推演时世界的势力格局、地缘张力会在此自成脉络。'}</p>
     </div></div>`;
   }
 
@@ -3643,6 +3796,1665 @@ function renderLogEntry(log, index) {
   </details>`;
 }
 
+function renderTtsVoiceMapRows(map, lib = []) {
+  if (!map.length) return '<p class="sd-muted sd-hint-sm">尚未配置角色。点「添加角色」，下拉选音色库里的音色（或在库为空时手填 ID）；未配置的角色不会生成语音。</p>';
+  const hasLib = Array.isArray(lib) && lib.length > 0;
+  return map.map((row, i) => {
+    // 音色库非空 → 下拉选（值为 voiceId）；当前 voiceId 不在库里则补一个临时项保留显示；库为空 → 退回手填输入框
+    let idField;
+    if (hasLib) {
+      const inLib = lib.some((v) => v.voiceId === row.voiceId);
+      const opts = [`<option value="" ${!row.voiceId ? 'selected' : ''}>— 选择音色 —</option>`]
+        .concat(lib.map((v) => `<option value="${htmlEscape(v.voiceId)}" ${v.voiceId === row.voiceId ? 'selected' : ''}>${htmlEscape(v.name || v.voiceId)}</option>`));
+      if (row.voiceId && !inLib) opts.push(`<option value="${htmlEscape(row.voiceId)}" selected>（自定义）${htmlEscape(row.voiceId)}</option>`);
+      idField = `<select class="text_pole sd-tts-vid-sel">${opts.join('')}</select>`;
+    } else {
+      idField = `<input class="text_pole sd-tts-vid" placeholder="音色 ID" value="${htmlEscape(row.voiceId || '')}">`;
+    }
+    return `
+    <div class="sd-tts-voice-row" data-idx="${i}">
+      <input class="text_pole sd-tts-vname" placeholder="角色名" value="${htmlEscape(row.name || '')}">
+      ${idField}
+      <button type="button" class="sd-icon-btn sd-danger sd-tts-vdel" title="删除该角色" aria-label="删除该角色"><i class="fa-solid fa-trash-can"></i></button>
+    </div>`;
+  }).join('');
+}
+
+// 音色库 / NPC 原型 共用渲染：按文件夹分组（沿用剧札 sd-lib-folder/row 外观），条目只显示名字，小图标，data-id 寻址。
+// kind: 'lib'（音色库，名字字段 name）| 'npc'（原型，名字字段 label）。试听/编辑/删除按钮 class 按 kind 区分。
+function renderTtsVoiceEntryRows(list, kind) {
+  const isNpc = kind === 'npc';
+  const getName = (it) => isNpc ? it.label : it.name;
+  const cls = isNpc ? { test: 'sd-tts-narch-test', edit: 'sd-tts-narch-edit', del: 'sd-tts-narch-del' }
+                    : { test: 'sd-tts-lib-test', edit: 'sd-tts-lib-edit', del: 'sd-tts-lib-del' };
+  if (!list.length) {
+    return `<p class="sd-muted sd-hint-sm">${isNpc ? '尚未配置原型。点「添加原型」，填入原型名（如 严肃老年男）与音色 ID。' : '音色库为空。点「添加音色」，填入音色名（如 温柔青年音）与 MiniMax 音色 ID。'}</p>`;
+  }
+  const ns = isNpc ? 'ttsnpc' : 'ttslib';
+  const row = (it) => `
+    <article class="sd-lib-row">
+      <div class="sd-lib-main"><h4>${htmlEscape(getName(it) || '未命名')}</h4></div>
+      <div class="sd-lib-actions">
+        <button type="button" class="sd-icon-btn sd-icon-sm ${cls.test}" data-id="${htmlEscape(it.id)}" title="试听" aria-label="试听"><i class="fa-solid fa-play"></i></button>
+        <button type="button" class="sd-icon-btn sd-icon-sm ${cls.edit}" data-id="${htmlEscape(it.id)}" title="编辑" aria-label="编辑"><i class="fa-solid fa-pencil"></i></button>
+        <button type="button" class="sd-icon-btn sd-icon-sm sd-danger ${cls.del}" data-id="${htmlEscape(it.id)}" title="删除" aria-label="删除"><i class="fa-solid fa-trash-can"></i></button>
+      </div>
+    </article>`;
+  const { folderList, loose } = groupByFolder(list, (it) => it.folder, getName, true);
+  const folderHtml = folderList.map(({ name, list: items }) => `
+    <details class="sd-lib-folder" data-acc="${ns}-folder-${htmlEscape(name)}">
+      <summary><i class="fa-solid fa-folder"></i><b>${htmlEscape(name)}</b><span>${items.length}</span></summary>
+      <div class="sd-lib-folder-body">${items.map(row).join('')}</div>
+    </details>`).join('');
+  return folderHtml + loose.map(row).join('');
+}
+
+function renderTtsVoiceLibRows(lib) {
+  return renderTtsVoiceEntryRows(Array.isArray(lib) ? lib : [], 'lib');
+}
+
+function renderTtsNpcRows(list) {
+  return renderTtsVoiceEntryRows(Array.isArray(list) ? list : [], 'npc');
+}
+function renderTtsTagRows(rules) {
+  const list = rules.length ? rules : [{ name: '', action: 'remove' }];
+  return list.map((rule, index) => `
+    <div class="sd-tts-tag-row" data-idx="${index}">
+      <input class="text_pole sd-tts-tag-name" placeholder="标签名，如 thinking、status" value="${htmlEscape(rule.name || '')}">
+      <select class="text_pole sd-tts-tag-action"><option value="remove" ${rule.action !== 'extract' ? 'selected' : ''}>屏蔽</option><option value="extract" ${rule.action === 'extract' ? 'selected' : ''}>提取</option></select>
+      <button type="button" class="sd-icon-btn sd-danger sd-tts-tag-del" title="删除" aria-label="删除"><i class="fa-solid fa-xmark"></i></button>
+    </div>`).join('');
+}
+
+function ttsSchemeLibraryCfg() {
+  return {
+    ns: 'ttsscheme',
+    title: '台词指导方案库',
+    items: settings.tts?.guidanceSchemes || [],
+    getName: (x) => x.name,
+    getFolder: (x) => x.folder,
+    getSearch: () => ttsSchemeSearch,
+    setSearch: (v) => { ttsSchemeSearch = v; },
+    exportMode: ttsSchemeExportMode,
+    selection: ttsSchemeExportSelection,
+    emptyText: '暂无方案',
+    searchPlaceholder: '搜索方案标题…',
+  };
+}
+
+// 收藏夹列表占位（点刷新后由 ttsRefreshFavorites 异步填充）
+function renderTtsFavoritesPlaceholder() {
+  return '<p class="sd-muted sd-hint-sm">点「刷新收藏」加载已收藏的语音。</p>';
+}
+
+function renderTtsTab() {
+  const t = settings.tts || {};
+  const map = ttsActiveVoiceMap();
+  const lib = Array.isArray(t.voiceLibrary) ? t.voiceLibrary : [];
+  const profiles = Array.isArray(settings.apiProfiles) ? settings.apiProfiles : [];
+  const endpoints = Object.entries(MINIMAX_ENDPOINTS);
+  const dis = t.enabled ? '' : 'sd-disabled-card';
+  const epEmoji = (name) => name.includes('国际') ? '🌏 国际' : name.includes('备用') ? '🇨🇳 备用' : '🇨🇳 国内';
+  return `
+    <section class="sd-card">
+      <div class="sd-toggle-row">
+        <label class="checkbox_label"><input type="checkbox" class="sd-tts-enabled" ${t.enabled ? 'checked' : ''}> 启用配音</label>
+      </div>
+    </section>
+    <section class="sd-card ${dis}">
+      <details class="sd-plain-fold" data-acc="tts-api" open>
+        <summary><b>MiniMax</b></summary>
+        <label>API Key</label><input class="text_pole sd-tts-key" type="password" placeholder="MiniMax API Key" value="${htmlEscape(t.apiKey || '')}">
+        <label>URL</label>
+        <select class="text_pole sd-tts-endpoint">${endpoints.map(([name, url]) => `<option value="${htmlEscape(url)}" ${url === t.endpoint ? 'selected' : ''}>${epEmoji(name)}</option>`).join('')}</select>
+        <p class="sd-muted sd-hint-sm sd-tts-endpoint-url">${htmlEscape(t.endpoint || (endpoints[0] && endpoints[0][1]) || '')}</p>
+        <label>模型</label>
+        <select class="text_pole sd-tts-model">${MINIMAX_MODELS.map((m) => `<option value="${htmlEscape(m)}" ${m === t.model ? 'selected' : ''}>${htmlEscape(m)}</option>`).join('')}</select>
+        <label>台词分析抓取模型</label>
+        <select class="text_pole sd-tts-extract-api"><option value="">使用千幕当前主 API</option>${profiles.map((p) => `<option value="${htmlEscape(p.id)}" ${p.id === t.extractApiProfileId ? 'selected' : ''}>${htmlEscape(p.name || p.model || '未命名API')}</option>`).join('')}</select>
+        <div class="sd-button-row"><button type="button" class="sd-btn sd-tts-test-conn"><i class="fa-solid fa-plug-circle-check"></i>测试连接</button><button type="button" class="sd-btn sd-tts-save-conn">保存</button></div>
+      </details>
+    </section>
+    <section class="sd-card ${dis}">
+      <details class="sd-plain-fold" data-acc="tts-voice" open>
+        <summary><b>主音色匹配</b></summary>
+        <div class="sd-tts-voice-list">${renderTtsVoiceMapRows(map, lib)}</div>
+        <div class="sd-button-row"><button type="button" class="sd-btn sd-mini-btn sd-tts-add-voice"><i class="fa-solid fa-plus"></i>添加角色</button></div>
+      </details>
+    </section>
+    <section class="sd-card ${dis}">
+      <details class="sd-plain-fold" data-acc="tts-lib" open>
+        <summary><b>音色库</b></summary>
+        <label>试听台词</label><input class="text_pole sd-tts-test-text" placeholder="输入一句话，用于各音色试听" value="${htmlEscape(t.testText || '你好，这是一段试听。')}">
+        <div class="sd-tts-lib-list sd-scroll">${renderTtsVoiceLibRows(lib)}</div>
+        <div class="sd-button-row"><button type="button" class="sd-btn sd-mini-btn sd-tts-add-lib"><i class="fa-solid fa-plus"></i>添加音色</button></div>
+      </details>
+    </section>
+    <section class="sd-card ${dis}">
+      <details class="sd-plain-fold" data-acc="tts-npc" open>
+        <summary><b>NPC 泛用音色</b><span class="sd-tts-sub">提取模型自动根据此合集为非主角色人物适配音色</span></summary>
+        <label class="checkbox_label"><input type="checkbox" class="sd-tts-npc-enabled" ${t.npcEnabled ? 'checked' : ''}> 启用</label>
+        <div class="sd-tts-npc-list sd-scroll">${renderTtsNpcRows(Array.isArray(t.npcArchetypes) ? t.npcArchetypes : [])}</div>
+        <div class="sd-button-row">
+          <button type="button" class="sd-btn sd-mini-btn sd-tts-add-npc"><i class="fa-solid fa-plus"></i>添加原型</button>
+          <button type="button" class="sd-btn sd-mini-btn sd-tts-npc-forget" title="清空本聊天已记忆的 NPC→原型 分配，下次重新归类">清空本聊天分配</button>
+        </div>
+      </details>
+    </section>
+    <section class="sd-card ${dis}">
+      <details class="sd-plain-fold" data-acc="tts-params" open>
+        <summary><b>默认参数</b></summary>
+        <label>语速 <span class="sd-tts-speed-val">${Number(t.defaultSpeed ?? 1).toFixed(2)}</span></label>
+        <input type="range" class="sd-tts-speed" min="0.5" max="2" step="0.05" value="${Number(t.defaultSpeed ?? 1)}">
+        <label>音量 <span class="sd-tts-vol-val">${Number(t.defaultVol ?? 1).toFixed(1)}</span></label>
+        <input type="range" class="sd-tts-vol" min="0.1" max="10" step="0.1" value="${Number(t.defaultVol ?? 1)}">
+        <label>语调 <span class="sd-tts-pitch-val">${Number(t.defaultPitch ?? 0)}</span></label>
+        <input type="range" class="sd-tts-pitch" min="-12" max="12" step="1" value="${Number(t.defaultPitch ?? 0)}">
+      </details>
+    </section>
+    <section class="sd-card ${dis}">
+      <details class="sd-plain-fold" data-acc="tts-tags" open>
+        <summary><b>标签规则</b></summary>
+        <div class="sd-tts-tag-list">${renderTtsTagRows(Array.isArray(t.tagRules) ? t.tagRules : [])}</div>
+        <div class="sd-button-row"><button type="button" class="sd-btn sd-mini-btn sd-tts-add-tag"><i class="fa-solid fa-plus"></i>添加标签</button></div>
+        <label class="checkbox_label"><input type="checkbox" class="sd-tts-strip-html" ${t.stripHtml !== false ? 'checked' : ''}> 屏蔽裸 HTML 标签（状态栏/卡片等）</label>
+      </details>
+    </section>
+    <section class="sd-card ${dis}">
+      <details class="sd-plain-fold" data-acc="tts-favorites" open>
+        <summary><b>收藏夹</b></summary>
+        <div class="sd-tts-fav-list sd-scroll">${renderTtsFavoritesPlaceholder()}</div>
+        <div class="sd-button-row"><button type="button" class="sd-btn sd-mini-btn sd-tts-fav-refresh"><i class="fa-solid fa-rotate"></i>刷新收藏</button></div>
+      </details>
+    </section>
+    <section class="sd-card ${dis}">
+      <details class="sd-plain-fold" data-acc="tts-cache" open>
+        <summary><b>音频缓存</b></summary>
+        <p class="sd-muted sd-hint-sm">音频缓存不支持跨端，如需换设备记得导出。</p>
+        <label>缓存条数上限</label><input class="text_pole sd-tts-cache-limit" type="number" min="0" step="10" value="${Number(t.cacheLimit ?? 200)}">
+        <div class="sd-button-row">
+          <button type="button" class="sd-btn sd-mini-btn sd-tts-cache-export"><i class="fa-solid fa-file-export"></i>导出缓存</button>
+          <label class="sd-btn sd-mini-btn sd-tts-cache-import-label" title="导入音频缓存文件"><i class="fa-solid fa-file-import"></i>导入缓存<input type="file" accept="application/json" class="sd-tts-cache-import" hidden></label>
+          <button type="button" class="sd-btn sd-mini-btn sd-danger sd-tts-cache-clear" title="清空音频缓存"><i class="fa-solid fa-broom"></i>清空缓存</button>
+        </div>
+      </details>
+    </section>
+    <section class="sd-card ${dis}">
+      <details class="sd-plain-fold" data-acc="tts-extract-prompt">
+        <summary><b>台词提取提示词</b></summary>
+        <textarea class="text_pole sd-textarea sd-tts-extract-prompt" spellcheck="false" placeholder="留空则使用内置默认">${htmlEscape(t.extractPrompt || TTS_EXTRACT_SYSTEM)}</textarea>
+        <div class="sd-button-row">
+          <button type="button" class="sd-btn sd-tts-save-prompt">保存提示词</button>
+          <button type="button" class="sd-btn sd-tts-save-scheme">保存到方案库</button>
+          <button type="button" class="sd-btn sd-tts-restore-prompt" title="找回载入/重置前你上一次使用的提示词" ${t.extractPromptBackup ? '' : 'disabled'}>恢复上次</button>
+          <button type="button" class="sd-btn sd-tts-reset-prompt">恢复默认</button>
+        </div>
+        ${renderLibrarySection(ttsSchemeLibraryCfg())}
+      </details>
+    </section>`;
+}
+
+function bindTtsTabEvents(root) {
+  if (activeTab !== 'tts') return;
+  const t = settings.tts;
+
+  // 总开关
+  root.querySelector('.sd-tts-enabled')?.addEventListener('change', (e) => {
+    t.enabled = !!e.target.checked;
+    saveSettings();
+    if (t.enabled) ttsStartChat(); else ttsStopChat();
+    renderModal();
+  });
+
+  // 接口字段：失焦即存
+  const bindField = (sel, key, transform) => {
+    root.querySelector(sel)?.addEventListener('change', (e) => {
+      t[key] = transform ? transform(e.target.value) : e.target.value;
+      saveSettings();
+    });
+  };
+  bindField('.sd-tts-key', 'apiKey');
+  bindField('.sd-tts-endpoint', 'endpoint');
+  // URL 选择变化时，标题下方实时显示具体网址
+  root.querySelector('.sd-tts-endpoint')?.addEventListener('change', (e) => {
+    const out = root.querySelector('.sd-tts-endpoint-url');
+    if (out) out.textContent = e.target.value || '';
+  });
+  bindField('.sd-tts-model', 'model');
+  bindField('.sd-tts-extract-api', 'extractApiProfileId');
+  bindField('.sd-tts-cache-limit', 'cacheLimit', (v) => Math.max(0, Number(v) || 0));
+  bindField('.sd-tts-test-text', 'testText', (v) => String(v || ''));
+
+  // MiniMax 接口：测试连接（合成一句试听语音并播放）/ 保存（字段失焦本已存，此处显式存 + 反馈）
+  root.querySelector('.sd-tts-test-conn')?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    // 以当前界面值为准（不强依赖已 change 落盘）
+    const apiKey = (root.querySelector('.sd-tts-key')?.value || '').trim();
+    const endpoint = root.querySelector('.sd-tts-endpoint')?.value || t.endpoint;
+    const model = root.querySelector('.sd-tts-model')?.value || t.model;
+    if (!apiKey) { toast('请先填写 MiniMax API Key。', 'warning'); return; }
+    // 测试音色：固定用 MiniMax 内置音色，仅验连通性——不取用户库/映射（那些 ID 可能对当前账号/模型无效，导致测试不稳）
+    const voiceId = 'male-qn-qingse';
+    const btnIcon = btn.querySelector('i');
+    const prevIcon = btnIcon?.className;
+    if (btnIcon) btnIcon.className = 'fa-solid fa-spinner fa-spin';
+    btn.disabled = true;
+    try {
+      const { blob } = await ttsSynthesize({
+        apiKey, text: '你好，这是一段连接测试。', voiceId, model,
+        speed: Number(t.defaultSpeed ?? 1), pitch: Number(t.defaultPitch ?? 0),
+        format: t.format || 'mp3', endpoint, proxyBase: t.proxyBase, groupId: t.groupId,
+      });
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audio.addEventListener('ended', () => URL.revokeObjectURL(url), { once: true });
+      await audio.play().catch(() => {});
+      toast('已成功连接', 'success');
+    } catch (err) {
+      toast(`连接失败：${err?.message || err}`, 'error');
+    } finally {
+      btn.disabled = false;
+      if (btnIcon && prevIcon) btnIcon.className = prevIcon;
+    }
+  });
+  root.querySelector('.sd-tts-save-conn')?.addEventListener('click', () => {
+    // 把当前界面值显式写入并落盘（即便用户没触发 change）
+    t.apiKey = (root.querySelector('.sd-tts-key')?.value || '').trim();
+    t.endpoint = root.querySelector('.sd-tts-endpoint')?.value || t.endpoint;
+    t.model = root.querySelector('.sd-tts-model')?.value || t.model;
+    t.extractApiProfileId = root.querySelector('.sd-tts-extract-api')?.value || '';
+    saveSettings();
+    toast('已保存', 'success');
+  });
+
+  // 滑块：实时回显 + 存
+  const bindSlider = (sel, valSel, key, fmt) => {
+    const el = root.querySelector(sel);
+    const out = root.querySelector(valSel);
+    if (!el) return;
+    el.addEventListener('input', () => { if (out) out.textContent = fmt(el.value); });
+    el.addEventListener('change', () => { t[key] = Number(el.value); saveSettings(); });
+  };
+  bindSlider('.sd-tts-speed', '.sd-tts-speed-val', 'defaultSpeed', (v) => Number(v).toFixed(2));
+  bindSlider('.sd-tts-vol', '.sd-tts-vol-val', 'defaultVol', (v) => Number(v).toFixed(1));
+  bindSlider('.sd-tts-pitch', '.sd-tts-pitch-val', 'defaultPitch', (v) => String(Math.round(v)));
+
+  // 角色映射：增 / 删 / 改（始终读写本聊天 store.ttsVoiceMap）
+  root.querySelector('.sd-tts-add-voice')?.addEventListener('click', () => {
+    const map = ttsActiveVoiceMap();
+    map.push({ name: '', voiceId: '', speed: null, emotion: 'auto' });
+    ttsSaveVoiceMap();
+    renderModal();
+  });
+  root.querySelectorAll('.sd-tts-voice-row').forEach((rowEl) => {
+    const idx = Number(rowEl.dataset.idx);
+    const map = ttsActiveVoiceMap();
+    rowEl.querySelector('.sd-tts-vname')?.addEventListener('change', (e) => {
+      if (map[idx]) { map[idx].name = e.target.value.trim(); ttsSaveVoiceMap(); }
+    });
+    // 音色 ID：库非空时为下拉(.sd-tts-vid-sel)，库为空时为手填输入框(.sd-tts-vid)
+    rowEl.querySelector('.sd-tts-vid-sel')?.addEventListener('change', (e) => {
+      if (map[idx]) { map[idx].voiceId = e.target.value.trim(); ttsSaveVoiceMap(); }
+    });
+    rowEl.querySelector('.sd-tts-vid')?.addEventListener('change', (e) => {
+      if (map[idx]) { map[idx].voiceId = e.target.value.trim(); ttsSaveVoiceMap(); }
+    });
+    rowEl.querySelector('.sd-tts-vdel')?.addEventListener('click', () => {
+      map.splice(idx, 1);
+      ttsSaveVoiceMap();
+      renderModal();
+    });
+  });
+
+  // 音色库：增（弹窗填名+ID+文件夹）/ 编辑 / 删 / 试听。条目按 data-id 寻址（文件夹分组后下标不连续）
+  root.querySelector('.sd-tts-add-lib')?.addEventListener('click', async () => {
+    const r = await promptVoiceLibEntry({ dialogTitle: '添加音色', name: '', voiceId: '', folder: '' });
+    if (!r) return;
+    if (!r.name || !r.voiceId) { toast('音色名与 ID 都要填。', 'warning'); return; }
+    t.voiceLibrary = Array.isArray(t.voiceLibrary) ? t.voiceLibrary : [];
+    t.voiceLibrary.push({ id: uid('vlib'), name: r.name, voiceId: r.voiceId, folder: r.folder || '' });
+    saveSettings();
+    renderModal();
+  });
+  root.querySelectorAll('.sd-tts-lib-test').forEach((btn) => btn.addEventListener('click', async (e) => {
+    const cur = (t.voiceLibrary || []).find((v) => v.id === btn.dataset.id);
+    const text = (root.querySelector('.sd-tts-test-text')?.value || '').trim();
+    await ttsPreviewVoice(cur?.voiceId || '', text, e.currentTarget);
+  }));
+  root.querySelectorAll('.sd-tts-lib-edit').forEach((btn) => btn.addEventListener('click', async () => {
+    const cur = (t.voiceLibrary || []).find((v) => v.id === btn.dataset.id);
+    if (!cur) return;
+    const r = await promptVoiceLibEntry({ dialogTitle: '编辑音色', name: cur.name, voiceId: cur.voiceId, folder: cur.folder || '' });
+    if (!r) return;
+    if (!r.name || !r.voiceId) { toast('音色名与 ID 都要填。', 'warning'); return; }
+    cur.name = r.name; cur.voiceId = r.voiceId; cur.folder = r.folder || '';
+    saveSettings();
+    renderModal();
+  }));
+  root.querySelectorAll('.sd-tts-lib-del').forEach((btn) => btn.addEventListener('click', () => {
+    const i = (t.voiceLibrary || []).findIndex((v) => v.id === btn.dataset.id);
+    if (i < 0) return;
+    t.voiceLibrary.splice(i, 1);
+    saveSettings();
+    renderModal();
+  }));
+
+  // NPC 原型音色：开关 / 增（弹窗填原型名+ID+文件夹）/ 编辑 / 删 / 试听 / 忘记本聊天分配（与音色库同构，按 data-id 寻址）
+  root.querySelector('.sd-tts-npc-enabled')?.addEventListener('change', (e) => {
+    t.npcEnabled = !!e.target.checked;
+    saveSettings();
+  });
+  root.querySelector('.sd-tts-add-npc')?.addEventListener('click', async () => {
+    const r = await promptVoiceLibEntry({ dialogTitle: '添加原型', name: '', voiceId: '', folder: '', keywords: '', nameLabel: '原型名', namePlaceholder: '如 严肃老年男', withKeywords: true });
+    if (!r) return;
+    if (!r.name || !r.voiceId) { toast('原型名与 ID 都要填。', 'warning'); return; }
+    t.npcArchetypes = Array.isArray(t.npcArchetypes) ? t.npcArchetypes : [];
+    t.npcArchetypes.push({ id: uid('npc'), label: r.name, voiceId: r.voiceId, folder: r.folder || '', keywords: r.keywords || '' });
+    saveSettings();
+    renderModal();
+  });
+  root.querySelectorAll('.sd-tts-narch-test').forEach((btn) => btn.addEventListener('click', async (e) => {
+    const cur = (t.npcArchetypes || []).find((a) => a.id === btn.dataset.id);
+    const text = (root.querySelector('.sd-tts-test-text')?.value || '').trim();
+    await ttsPreviewVoice(cur?.voiceId || '', text, e.currentTarget);
+  }));
+  root.querySelectorAll('.sd-tts-narch-edit').forEach((btn) => btn.addEventListener('click', async () => {
+    const cur = (t.npcArchetypes || []).find((a) => a.id === btn.dataset.id);
+    if (!cur) return;
+    // 注意：改名只动 label，不动 id；已记忆的「说话人→原型」按 id 绑定，故改名 / 改 ID / 改关键词都不会丢失已分配的 NPC 音色匹配
+    const r = await promptVoiceLibEntry({ dialogTitle: '编辑原型', name: cur.label, voiceId: cur.voiceId, folder: cur.folder || '', keywords: cur.keywords || '', nameLabel: '原型名', namePlaceholder: '如 严肃老年男', withKeywords: true });
+    if (!r) return;
+    if (!r.name || !r.voiceId) { toast('原型名与 ID 都要填。', 'warning'); return; }
+    cur.label = r.name; cur.voiceId = r.voiceId; cur.folder = r.folder || ''; cur.keywords = r.keywords || '';
+    saveSettings();
+    renderModal();
+  }));
+  root.querySelectorAll('.sd-tts-narch-del').forEach((btn) => btn.addEventListener('click', () => {
+    const i = (t.npcArchetypes || []).findIndex((a) => a.id === btn.dataset.id);
+    if (i < 0) return;
+    t.npcArchetypes.splice(i, 1);
+    saveSettings();
+    renderModal();
+  }));
+  root.querySelector('.sd-tts-npc-forget')?.addEventListener('click', async () => {
+    const key = getChatKey();
+    const has = t.npcAssignByChat && t.npcAssignByChat[key] && Object.keys(t.npcAssignByChat[key]).length;
+    if (!has) { toast('本聊天还没有 NPC 分配记忆。', 'info'); return; }
+    const yes = await confirmDialog('忘记本聊天分配', '将清空本聊天已记忆的「NPC→原型」分配，下次提取会重新归类。确认？');
+    if (!yes) return;
+    delete t.npcAssignByChat[key];
+    saveSettings();
+    toast('已清空本聊天 NPC 分配记忆。', 'success');
+  });
+
+  // 标签规则：增 / 删 / 改 + 剥 HTML 开关
+  root.querySelector('.sd-tts-add-tag')?.addEventListener('click', () => {
+    t.tagRules = Array.isArray(t.tagRules) ? t.tagRules : [];
+    t.tagRules.push({ name: '', action: 'remove' });
+    saveSettings();
+    renderModal();
+  });
+  root.querySelectorAll('.sd-tts-tag-row').forEach((rowEl) => {
+    const idx = Number(rowEl.dataset.idx);
+    t.tagRules = Array.isArray(t.tagRules) ? t.tagRules : [];
+    rowEl.querySelector('.sd-tts-tag-name')?.addEventListener('change', (e) => {
+      if (!t.tagRules[idx]) t.tagRules[idx] = { name: '', action: 'remove' };
+      t.tagRules[idx].name = e.target.value.trim().replace(/^<|>$/g, '');
+      saveSettings();
+    });
+    rowEl.querySelector('.sd-tts-tag-action')?.addEventListener('change', (e) => {
+      if (!t.tagRules[idx]) t.tagRules[idx] = { name: '', action: 'remove' };
+      t.tagRules[idx].action = e.target.value === 'extract' ? 'extract' : 'remove';
+      saveSettings();
+    });
+    rowEl.querySelector('.sd-tts-tag-del')?.addEventListener('click', () => {
+      t.tagRules.splice(idx, 1);
+      saveSettings();
+      renderModal();
+    });
+  });
+  root.querySelector('.sd-tts-strip-html')?.addEventListener('change', (e) => {
+    t.stripHtml = !!e.target.checked;
+    saveSettings();
+  });
+
+  // 台词提取提示词：保存 / 恢复默认 / 恢复上次 / 保存到方案库
+  root.querySelector('.sd-tts-save-prompt')?.addEventListener('click', () => {
+    const val = root.querySelector('.sd-tts-extract-prompt')?.value ?? '';
+    t.extractPrompt = String(val).trim() === TTS_EXTRACT_SYSTEM.trim() ? '' : val;   // 与默认相同则存空=跟随默认
+    saveSettings();
+    toast('台词提取提示词已保存。', 'success');
+  });
+  root.querySelector('.sd-tts-reset-prompt')?.addEventListener('click', async () => {
+    const yes = await confirmDialog('恢复默认提示词', '将台词提取提示词恢复为内置默认？当前内容会被覆盖（覆盖前自动备份，可「恢复上次」找回）。');
+    if (!yes) return;
+    const cur = (root.querySelector('.sd-tts-extract-prompt')?.value ?? '').trim();
+    if (cur && cur !== TTS_EXTRACT_SYSTEM.trim()) t.extractPromptBackup = cur;
+    t.extractPrompt = '';
+    saveSettings();
+    renderModal();
+    toast('已恢复默认提示词。', 'success');
+  });
+  root.querySelector('.sd-tts-restore-prompt')?.addEventListener('click', async () => {
+    if (!t.extractPromptBackup) { toast('没有可恢复的上一份提示词。', 'info'); return; }
+    const yes = await confirmDialog('恢复上次提示词', '将台词提取提示词替换为上一次使用的那一份？当前内容会被覆盖。');
+    if (!yes) return;
+    t.extractPrompt = t.extractPromptBackup;
+    t.extractPromptBackup = null;
+    saveSettings();
+    renderModal();
+    toast('已恢复上一份提示词。', 'success');
+  });
+  root.querySelector('.sd-tts-save-scheme')?.addEventListener('click', async () => {
+    const val = (root.querySelector('.sd-tts-extract-prompt')?.value ?? '').trim();
+    if (!val) { toast('提示词为空，无法保存为方案。', 'warning'); return; }
+    const name = await promptInput('保存台词指导方案', '方案名称：', '');
+    if (!name) return;
+    t.guidanceSchemes = Array.isArray(t.guidanceSchemes) ? t.guidanceSchemes : [];
+    const existing = t.guidanceSchemes.find((x) => x.name === name);
+    const scheme = { id: existing?.id || uid('ttssch'), name, folder: existing?.folder || '', content: val, createdAt: existing?.createdAt || new Date().toISOString() };
+    t.guidanceSchemes = existing ? t.guidanceSchemes.map((x) => x.id === existing.id ? scheme : x) : [...t.guidanceSchemes, scheme];
+    saveSettings();
+    renderModal();
+    toast('已保存到方案库。', 'success');
+  });
+
+  // 台词指导方案库：复用通用库（载入=写入提示词框，编辑=行内编辑，删除）
+  bindLibraryEvents(root, ttsSchemeLibraryCfg, {
+    onLoad: (id) => {
+      const sch = (t.guidanceSchemes || []).find((x) => x.id === id);
+      if (!sch) return;
+      const cur = (root.querySelector('.sd-tts-extract-prompt')?.value ?? '').trim();
+      if (cur && cur !== TTS_EXTRACT_SYSTEM.trim()) t.extractPromptBackup = cur;   // 覆盖前备份
+      t.extractPrompt = sch.content || '';
+      saveSettings();
+      renderModal();
+      toast(`已载入方案「${sch.name}」。`, 'success');
+    },
+    onEdit: (id) => {
+      const sch = (t.guidanceSchemes || []).find((x) => x.id === id);
+      if (!sch) return;
+      openTextEditor({
+        target: `ttsscheme:${id}`,
+        title: `编辑方案 · ${sch.name}`,
+        value: sch.content || '',
+        placeholder: '台词提取提示词内容',
+      });
+    },
+    onDelete: async (id) => {
+      const sch = (t.guidanceSchemes || []).find((x) => x.id === id);
+      if (!sch) return;
+      const yes = await confirmDialog('删除方案', `确认删除方案「${sch.name}」？`);
+      if (!yes) return;
+      t.guidanceSchemes = (t.guidanceSchemes || []).filter((x) => x.id !== id);
+      saveSettings();
+      renderModal();
+    },
+  });
+
+  // 收藏夹：进入有声页即自动加载（无需手点刷新），刷新钮保留作手动重载
+  root.querySelector('.sd-tts-fav-refresh')?.addEventListener('click', () => ttsRefreshFavorites(root));
+  if (root.querySelector('.sd-tts-fav-list')) ttsRefreshFavorites(root);
+
+  // 清空缓存
+  root.querySelector('.sd-tts-cache-clear')?.addEventListener('click', async () => {
+    if (!blobStore.blobStoreAvailable()) { toast('当前环境不支持本地缓存。', 'warning'); return; }
+    const yes = await confirmDialog('清空音频缓存', '将删除所有已缓存的合成语音（收藏的不受影响）。确认清空？');
+    if (!yes) return;
+    try { await blobStore.clearAudioCache(); toast('音频缓存已清空。', 'success'); }
+    catch (err) { toast(`清空失败：${err?.message || err}`, 'error'); }
+  });
+  root.querySelector('.sd-tts-cache-export')?.addEventListener('click', (e) => ttsExportAudioCache(e.currentTarget));
+  root.querySelector('.sd-tts-cache-import')?.addEventListener('change', (e) => ttsImportAudioCache(e));
+}
+
+// 当前聊天显示名：优先角色名 / 群名，回退 chatId；用于导出文件名
+function ttsChatDisplayName() {
+  const c = ctx();
+  const name = c.name2 || c.groupId && (c.groups || []).find?.((g) => g.id === c.groupId)?.name || c.characterId != null && c.characters?.[c.characterId]?.name || c.chatId || '聊天';
+  return String(name || '聊天').replace(/[\\/:*?"<>|\n\r\t]+/g, '_').slice(0, 32) || '聊天';
+}
+
+// 导出音频缓存：把 IndexedDB 里全部音频 blob 转 base64 打包成 JSON 下载（文件名=聊天名+时间戳）。
+// 用于跨端迁移（音频缓存是浏览器本地 IndexedDB，不随聊天元数据同步）。
+async function ttsExportAudioCache(btn) {
+  if (!blobStore.blobStoreAvailable()) { toast('当前环境不支持本地缓存。', 'warning'); return; }
+  const icon = btn?.querySelector('i');
+  const prev = icon?.className;
+  if (icon) icon.className = 'fa-solid fa-spinner fa-spin';
+  if (btn) btn.disabled = true;
+  try {
+    const list = await blobStore.listAudio();
+    if (!list.length) { toast('音频缓存为空，没有可导出的内容。', 'info'); return; }
+    const blobToB64 = (blob) => new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(String(r.result || '').split(',')[1] || '');   // 去掉 data:...;base64, 前缀
+      r.onerror = () => reject(r.error);
+      r.readAsDataURL(blob);
+    });
+    const entries = [];
+    for (const e of list) {
+      entries.push({ key: e.key, meta: e.meta || {}, createdAt: e.createdAt || 0, type: e.blob?.type || 'audio/mpeg', data: await blobToB64(e.blob) });
+    }
+    const payload = { version: 1, type: 'qianmu-tts-audio-cache', exportedAt: new Date().toISOString(), count: entries.length, entries };
+    const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `qianmu-语音缓存-${ttsChatDisplayName()}-${fileStamp()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    toast(`已导出 ${entries.length} 条音频缓存。`, 'success');
+  } catch (err) {
+    toast(`导出失败：${err?.message || err}`, 'error');
+  } finally {
+    if (icon && prev) icon.className = prev;
+    if (btn) btn.disabled = false;
+  }
+}
+
+// 导入音频缓存：读 JSON、base64 还原成 blob，批量写入 IndexedDB（已存在的 key 跳过，不覆盖本地新生成的）。
+async function ttsImportAudioCache(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  event.target.value = '';
+  if (!blobStore.blobStoreAvailable()) { toast('当前环境不支持本地缓存。', 'warning'); return; }
+  let data;
+  try {
+    data = JSON.parse(await file.text());
+    if (data?.type !== 'qianmu-tts-audio-cache' || !Array.isArray(data.entries)) throw new Error('格式不符');
+  } catch (_) {
+    return toast('导入失败：不是有效的千幕语音缓存文件。', 'error');
+  }
+  try {
+    const b64ToBlob = (b64, type) => {
+      const bin = atob(b64 || '');
+      const len = bin.length;
+      const bytes = new Uint8Array(len);
+      for (let i = 0; i < len; i++) bytes[i] = bin.charCodeAt(i);
+      return new Blob([bytes], { type: type || 'audio/mpeg' });
+    };
+    const entries = data.entries.map((e) => ({ key: e.key, meta: e.meta || {}, createdAt: e.createdAt || Date.now(), blob: e.data ? b64ToBlob(e.data, e.type) : null }));
+    const { added, skipped } = await blobStore.bulkPutAudio(entries);
+    toast(`导入完成：新增 ${added} 条${skipped ? `，跳过 ${skipped} 条（已存在或无效）` : ''}。`, 'success');
+  } catch (err) {
+    toast(`导入失败：${err?.message || err}`, 'error');
+  }
+}
+
+// 试听某音色：用统一试听台词 + 当前默认参数合成播放（不进缓存，纯预览）
+async function ttsPreviewVoice(voiceId, text, btn) {
+  const t = settings.tts || {};
+  if (!t.apiKey) { toast('请先填写 MiniMax API Key。', 'warning'); return; }
+  if (!voiceId) { toast('该行还没填音色 ID。', 'warning'); return; }
+  if (!text) { toast('请先在上方填写试听台词。', 'warning'); return; }
+  const icon = btn?.querySelector('i');
+  const prev = icon?.className;
+  if (icon) icon.className = 'fa-solid fa-spinner fa-spin';
+  if (btn) btn.disabled = true;
+  try {
+    const { blob } = await ttsSynthesize({
+      apiKey: t.apiKey, text, voiceId, model: t.model,
+      speed: Number(t.defaultSpeed ?? 1), vol: Number(t.defaultVol ?? 1), pitch: Number(t.defaultPitch ?? 0),
+      format: t.format || 'mp3', endpoint: t.endpoint, proxyBase: t.proxyBase, groupId: t.groupId,
+    });
+    const url = URL.createObjectURL(blob);
+    const audio = new Audio(url);
+    audio.addEventListener('ended', () => URL.revokeObjectURL(url), { once: true });
+    await audio.play();
+  } catch (err) {
+    toast(`试听失败：${err?.message || err}`, 'error');
+  } finally {
+    if (btn) btn.disabled = false;
+    if (icon && prev) icon.className = prev;
+  }
+}
+
+// 收藏夹：从 IndexedDB 列出已收藏语音，渲染重听/删除
+async function ttsRefreshFavorites(root) {
+  const box = root.querySelector('.sd-tts-fav-list');
+  if (!box) return;
+  if (!blobStore.blobStoreAvailable()) { box.innerHTML = '<p class="sd-muted sd-hint-sm">当前环境不支持本地收藏。</p>'; return; }
+  box.innerHTML = '<p class="sd-muted sd-hint-sm"><i class="fa-solid fa-spinner fa-spin"></i> 加载中…</p>';
+  let favs = [];
+  try { favs = await blobStore.listFavorites(); }
+  catch (_) { box.innerHTML = '<p class="sd-muted sd-hint-sm sd-tts-err">读取收藏失败。</p>'; return; }
+  if (!favs.length) { box.innerHTML = '<p class="sd-muted sd-hint-sm">还没有收藏的语音。双击正文台词的小喇叭，在快捷窗里点收藏。</p>'; return; }
+  box.innerHTML = favs.map((f) => {
+    const spk = htmlEscape(f.meta?.speaker || '');
+    const txt = htmlEscape(f.label || f.meta?.text || '');
+    return `<div class="sd-tts-fav-row" data-id="${htmlEscape(f.id)}">
+      <button type="button" class="sd-tts-play sd-tts-fav-play" title="重听"><i class="fa-solid fa-volume-high"></i></button>
+      ${spk ? `<span class="sd-tts-spk">${spk}</span>` : ''}
+      <span class="sd-tts-txt">${txt}</span>
+      <button type="button" class="sd-icon-btn sd-icon-sm sd-danger sd-tts-fav-del" title="删除收藏"><i class="fa-solid fa-trash-can"></i></button>
+    </div>`;
+  }).join('');
+  box.querySelectorAll('.sd-tts-fav-row').forEach((rowEl) => {
+    const id = rowEl.dataset.id;
+    rowEl.querySelector('.sd-tts-fav-play')?.addEventListener('click', async () => {
+      try {
+        const fav = await blobStore.getFavorite(id);
+        if (fav?.blob) await ttsPlayBlob(fav.blob, rowEl);
+      } catch (err) { toast(`播放失败：${err?.message || err}`, 'error'); }
+    });
+    rowEl.querySelector('.sd-tts-fav-del')?.addEventListener('click', async () => {
+      const yes = await confirmDialog('删除收藏', '确认从收藏夹删除这条语音？');
+      if (!yes) return;
+      try { await blobStore.removeFavorite(id); ttsRefreshFavorites(root); }
+      catch (err) { toast(`删除失败：${err?.message || err}`, 'error'); }
+    });
+  });
+}
+
+/* ============================================================
+   有声小剧场 · 台词提取（阶段 3）
+   复用千幕现有 API 链路（主 API 或指定 API 预设），用专用提示词把正文里
+   「被引号包裹但确实是台词」的部分抽出来，附带说话人与情绪。
+   非台词引号（书名、强调、心理活动、术语等）一律剔除。
+   ============================================================ */
+
+// 提取系统提示词：约束模型只产出严格 JSON，且只保留真台词。
+const TTS_EXTRACT_SYSTEM = `你是有声剧配音指导导演，负责从正文中提取角色实发声台词并完成配音前置标注，所有台词按原文出场顺序排列，最终输出纯JSON格式的标注结果。
+
+标注规则：
+1. 有效台词判定：仅提取角色真实开口说出的对话内容，以原文中的引号（「」『』“”、英文双引号""）为识别标识；无引号包裹的非口语表述一律不计入。
+2. 无效内容剔除：严格排除以下非台词类内容：书籍/作品名称、起强调作用的词语、角色未出声的心理活动/内心独白、专有名词引用、旁白叙述、动作神态描写、独立成句的拟声词。
+3. speaker（说话人）：结合上下文语境判断发言角色，填写角色本名；无法明确判定则统一填写「未知」，禁止将旁白叙事者标注为说话人。
+4. text（台词文本）：完整保留角色原句内容，包含嗯、哼、哈哈等语气助词；移除包裹台词的引号符号，删除台词前后附带的动作、神态补充描写。
+5. 情绪(emotion)：从 [happy, sad, angry, fearful, disgusted, surprised, calm, fluent, whisper] 中选最贴合的一个。判定情绪必须结合上下文语境，而非孤立地只看台词本身的字面——务必综合考量：①该句前后的旁白、动作、神态描写（如「她攥紧了拳头」「声音发颤」「冷笑」）；②说话人当前所处的情境与立场（冲突、安抚、试探、独处等）；③同一角色相邻台词的情绪走向与转折。同一句话在不同语境下情绪可能截然相反（如「你来了」可为 happy 重逢、亦可为 angry 质问或 sad 诀别），需据语境定夺。仅当上下文确无任何情绪线索、字面也中性时才填 "calm"；完全无从判断再填 "auto" 交给语音模型。优先依语境给出明确情绪，避免无脑套用 auto。
+6. 若整段没有任何真台词，返回 {"lines": []}
+
+输出规范：仅输出纯JSON结构，不得添加任何解释文字、代码块标记、额外备注。标准格式参考：
+{"lines": [{"speaker": "角色名", "text": "台词原话", "emotion": "auto"}]}`;
+
+// 提取用 API 配置：优先 settings.tts.extractApiProfileId 指定的预设，否则用主 API（返回 null 表示走主 API/ST）
+function ttsExtractApiConfig() {
+  const id = settings.tts?.extractApiProfileId || '';
+  if (!id) return null;
+  const profile = (settings.apiProfiles || []).find((p) => p.id === id);
+  if (profile) return { apiUrl: profile.apiUrl, apiKey: profile.apiKey, model: profile.model, temperature: profile.temperature };
+  return null;
+}
+
+// 调用模型做提取：与幕外同样的分发逻辑（cfg 存在或 external 走直连，否则走 ST generateRaw）。
+// 不走流式（提取要完整 JSON），独立 AbortController，避免干扰推演/幕外。
+async function callTtsExtractModel(systemPrompt, userPrompt, cfg) {
+  const useExternal = settings.providerMode === 'external' || cfg;
+  if (useExternal) {
+    const eff = cfg || { apiUrl: settings.apiUrl, apiKey: settings.apiKey, model: settings.model };
+    if (!(normalizeUrl(eff.apiUrl) && eff.apiKey && eff.model)) throw new Error('INVALID_API_SETTINGS');
+    const messages = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt },
+    ];
+    return await callExternalApi(messages, null, cfg, new AbortController());
+  }
+  if (!getGenerateRaw()) throw new Error('INVALID_API_SETTINGS');
+  return await callSillyTavernModel(userPrompt, systemPrompt, null);
+}
+
+// TTS 专用标签清洗：提取台词前先剔除状态栏/思维链/HTML 等非台词噪音（省 token、提精度）。
+// 用 settings.tts.tagRules（与「取材」的规则独立）；extract 规则一旦存在则只保留其内容，否则按 remove 删除各标签段。
+// stripHtml 开则最后剥裸 HTML 标签。注释 <!-- --> 一律去除。
+function ttsCleanText(text) {
+  let value = String(text || '');
+  value = value.replace(/<!--[\s\S]*?-->/g, '');
+  const t = settings.tts || {};
+  const rules = (Array.isArray(t.tagRules) ? t.tagRules : [])
+    .map((r) => ({ name: String(r.name || '').trim().replace(/^<|>$/g, ''), action: r.action === 'extract' ? 'extract' : 'remove' }))
+    .filter((r) => r.name);
+  const extractRules = rules.filter((r) => r.action === 'extract');
+  if (extractRules.length) {
+    const extracted = [];
+    for (const rule of extractRules) {
+      const reg = new RegExp(`<${escapeRegExp(rule.name)}\\b[^>]*>([\\s\\S]*?)<\\/${escapeRegExp(rule.name)}>`, 'gi');
+      let m;
+      while ((m = reg.exec(value)) !== null) extracted.push(m[1].trim());
+    }
+    value = extracted.join('\n\n');
+  } else {
+    for (const rule of rules) {
+      const reg = new RegExp(`<${escapeRegExp(rule.name)}\\b[^>]*>[\\s\\S]*?<\\/${escapeRegExp(rule.name)}>`, 'gi');
+      value = value.replace(reg, '');
+    }
+  }
+  if (t.stripHtml !== false) {
+    value = value.replace(/<script[\s\S]*?<\/script>/gi, '').replace(/<style[\s\S]*?<\/style>/gi, '');
+    value = value.replace(/<[^>]+>/g, '');
+  }
+  return value.replace(/\n{3,}/g, '\n\n').trim();
+}
+
+// 从一段正文提取台词。返回 [{ speaker, text, emotion }]，已剔除空文本。
+// 失败抛错由调用方提示；返回空数组表示「这段没有真台词」。
+async function extractDialogue(text) {
+  const passage = String(text || '').trim();
+  if (!passage) return [];
+  const cfg = ttsExtractApiConfig();
+  const t = settings.tts || {};
+  let sysPrompt = (t.extractPrompt || '').trim() || TTS_EXTRACT_SYSTEM;
+  // NPC 泛用音色开启且配了原型：追加归类指令，让模型给非主角台词标一个最贴的原型标签
+  const archetypes = (Array.isArray(t.npcArchetypes) ? t.npcArchetypes : []).filter((a) => a.label && a.voiceId);
+  const npcOn = t.npcEnabled && archetypes.length > 0;
+  if (npcOn) {
+    // 每个原型列成「原型名（关键词描述）」，让模型据关键词精准判声线，而非只靠笼统的原型名猜
+    const labels = archetypes.map((a) => a.label).join('、');
+    const archLines = archetypes.map((a) => {
+      const kw = String(a.keywords || '').trim();
+      return kw ? `- ${a.label}：${kw}` : `- ${a.label}`;
+    }).join('\n');
+    sysPrompt += `\n\n【NPC 音色归类】对每句台词额外判断说话人最贴合的人物原型，填入字段 "npc"，只能从下列原型名中选一个：[${labels}]。每个原型附带关键词描述（年龄、气质、声线特征等），请结合说话人在正文中的身份、年龄、性格与情境，对照关键词描述选出最贴的那个；没有特别贴合的，就按大致声线（性别 / 年龄段 / 气质）挑最接近的一个，不要留空、也不要新造原型名。主角 / 已知重要角色（通常已单独配音色）可留空 ""。\n原型清单：\n${archLines}\n输出格式扩展为：{"lines": [{"speaker": "角色名", "text": "台词", "emotion": "auto", "npc": "原型名或空"}]}`;
+  }
+  const userPrompt = `【正文】\n${passage}`;
+  const raw = await callTtsExtractModel(sysPrompt, userPrompt, cfg);
+  const content = String(raw || '').trim();
+  if (!content) return [];
+  let parsed;
+  try { parsed = extractJson(content); }
+  catch (_) { throw new Error('台词提取结果无法解析'); }
+  const lines = Array.isArray(parsed?.lines) ? parsed.lines : (Array.isArray(parsed) ? parsed : []);
+  const validEmotions = new Set(['happy', 'sad', 'angry', 'fearful', 'disgusted', 'surprised', 'calm', 'fluent', 'whisper']);
+  return lines
+    .map((l) => ({
+      speaker: String(l?.speaker || '').trim() || '未知',
+      text: String(l?.text || '').trim(),
+      emotion: validEmotions.has(l?.emotion) ? l.emotion : 'auto',
+      npc: npcOn ? String(l?.npc || '').trim() : '',   // 模型判定的 NPC 原型标签（仅 npcOn 时有意义）
+    }))
+    .filter((l) => l.text);
+}
+
+/* ============================================================
+   有声小剧场 · 正文注入与播放（阶段 4）
+   懒触发：每条消息只挂一个 🎧 钮，点了才提取台词、铺开各句 🔊。
+   事件委托 + 幂等标记：不轮询、不改写 ST 正文 innerHTML，只追加兄弟挂件。
+   ============================================================ */
+
+const TTS_BAR_CLASS = 'sd-tts-bar';
+let ttsChatBound = false;          // #chat 委托/观察者是否已挂
+let ttsChatObserver = null;
+let ttsScanTimer = null;           // 扫描防抖：观察者短时间多次触发只在安定后扫一次，避免插在 ST 半渲染态里
+// 防抖扫描：DOM 连续变动（进聊天注水、流式回复）期间合并成一次，待 ST 安定再扫，规避注入打断 ST 渲染。
+function ttsScanDebounced(delay = 120) {
+  if (ttsScanTimer) clearTimeout(ttsScanTimer);
+  ttsScanTimer = setTimeout(() => { ttsScanTimer = null; try { ttsScanMessages(); } catch (_) {} }, delay);
+}
+let ttsLineCache = new Map();      // 内容指纹 → [{speaker,text,emotion}]（本会话内提取结果，避免重复调模型）
+
+// 台词列表的「内容指纹」：按消息正文本身算 key，而非楼层 mesid——
+// 楼层会因重 roll/swipe/插楼漂移，正文不变指纹就不变，故跨刷新/重排都能稳定命中；正文一变（重 roll/编辑）指纹即变，自动重提。
+function ttsContentKey(raw) {
+  const s = String(raw || '');
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0;
+  return 'h' + h.toString(36) + '_' + s.length;   // 'h' 前缀避免被当数组下标；带长度近乎杜绝碰撞
+}
+// 原地编正文后的缓存迁移：内容指纹随正文一变即漂移、新 key 查不到旧台词列表。
+// 凭楼层 mesid 锚到「最近一次该楼的 key」，再以**台词原文是否仍逐字在场**为闸门——
+// 全部台词句仍出现在新正文清洗后的 passage 里（即只改了旁白/非台词）→ 把旧 lines 迁到新 key（含持久化 speed/emotion override），免重提、音频逐句仍命中；
+// 任一句台词原文消失（真改了台词）→ 不迁移，该条回 🎧 等用户手动重提。mesid 锚点 + 逐字闸门双保险，不靠模糊猜测。
+function ttsMigrateLinesOnEdit(mesEl, newKey) {
+  const mesid = ttsMesId(mesEl);
+  if (mesid === '') return null;
+  let store;
+  try { store = getChatStore(); } catch (_) { return null; }
+  const oldKey = store.ttsLineKeyByMes?.[mesid];
+  if (!oldKey || oldKey === newKey) return null;
+  const oldLines = ttsLineCache.get(oldKey) || store.ttsLines?.[oldKey];
+  if (!Array.isArray(oldLines) || !oldLines.length) return null;
+  // 闸门：每句台词原文仍逐字在新 passage 中（去引号+折空白归一，宽松到只防「台词真被改」）
+  const norm = (s) => String(s || '').replace(/["'“”‘’「」『』]/g, '').replace(/\s+/g, '');
+  const passage = norm(ttsCleanText(ttsRawText(mesEl)));
+  const allPresent = oldLines.every((l) => {
+    const needle = norm(l.text);
+    return needle.length < 2 || passage.includes(needle);
+  });
+  if (!allPresent) return null;   // 台词真变了：不迁移
+  // 迁移：旧 lines 落到新 key、更新锚点。**不删旧 key**——内容指纹寻址下，内容相同的别的楼层可能也指向旧 key，
+  // 删了会把那些楼层的缓存一并打掉（串楼）。孤儿键无害，由 ttsPruneLineStore 统一按上限裁剪。
+  store.ttsLines[newKey] = oldLines;
+  ttsLineCache.set(newKey, oldLines);
+  store.ttsLineKeyByMes[mesid] = newKey;
+  try { ttsPruneLineStore(store.ttsLines); saveMetadata(); } catch (_) {}
+  return oldLines;
+}
+// 取消息原始正文：只认 chat[mesid].mes（原始文本，正则不改它，故指纹免疫正则开关）。
+// 取不到（如切聊天/开关正则重建时 DOM 已在、ctx().chat 尚未对齐）返回空串——
+// 调用方据空串跳过，交下一轮扫描用正确指纹恢复；绝不回退读 DOM 文本，
+// 否则会读到正则渲染后的显示文本、算出漂移指纹，致已有台词/音频缓存认领不回（孤儿化）。
+function ttsRawText(mesEl) {
+  const mesid = ttsMesId(mesEl);
+  const chat = ctx().chat;
+  if (mesid !== '' && Array.isArray(chat)) {
+    const idx = Number(mesid);
+    if (Number.isInteger(idx) && chat[idx]) return String(chat[idx].mes || '');
+  }
+  return '';
+}
+// 楼层号：mesid/mesId 任一
+function ttsMesId(mesEl) {
+  return mesEl?.getAttribute('mesid') || mesEl?.getAttribute('mesId') || '';
+}
+// 裁剪持久化 ttsLines：超上限按插入序（Object 保序）丢最旧的孤儿条目，防聊天存档膨胀。
+// 上限取 100：列表存在聊天 JSON 里、每回合随 saveMetadata 序列化写盘，故收紧（不同于音频缓存——那在 IndexedDB 懒加载、不进存档）；100 条覆盖任何正常回看，丢了也只是一次廉价重提。
+function ttsPruneLineStore(store, limit = 100) {
+  const keys = Object.keys(store);
+  if (keys.length <= limit) return;
+  for (const k of keys.slice(0, keys.length - limit)) delete store[k];
+}
+let ttsCurrentAudio = null;        // 当前播放的 Audio（新播放前先停旧的）
+let ttsCurrentUrl = '';            // 当前 objectURL（播完撤销）
+let ttsSeqToken = 0;               // 连播序列令牌：自增即令旧连播失效（停止/重启）
+let ttsPlayCleanup = null;         // 当前 ttsPlayBlob 的收尾回调：停止时主动调，令 await 的播放 Promise 立即 resolve、旧连播循环得以解开（不被暂停的音频卡死）
+let ttsPopupEl = null;             // 快捷窗 DOM
+
+// 当前生效的角色→音色映射：始终绑定当前聊天，取本聊天 store.ttsVoiceMap（类比推演按聊天）。
+// 未打开聊天时 store 为临时对象、映射为空，故界面显示为空。返回真实数组引用（增删改后调 ttsSaveVoiceMap 落盘）。
+function ttsActiveVoiceMap() {
+  const store = getChatStore();
+  if (!Array.isArray(store.ttsVoiceMap)) store.ttsVoiceMap = [];
+  return store.ttsVoiceMap;
+}
+
+// 落盘当前映射：写本聊天元数据
+function ttsSaveVoiceMap() {
+  try { saveMetadata(); } catch (_) {}
+}
+
+// 按说话人查音色配置。优先本聊天映射（精确→去空白包含）；未命中且 NPC 开启则查「本聊天记忆」的原型音色。
+// 返回 { voiceId, speed?, emotion? } 或 null（不生成）。
+function ttsResolveVoice(speaker) {
+  const t = settings.tts || {};
+  const map = ttsActiveVoiceMap();
+  const name = String(speaker || '').trim();
+  if (!name) return null;
+  let row = map.find((r) => r.voiceId && String(r.name || '').trim() === name);
+  if (!row) {
+    const norm = name.replace(/\s+/g, '');
+    row = map.find((r) => r.voiceId && r.name && (norm.includes(String(r.name).replace(/\s+/g, '')) || String(r.name).replace(/\s+/g, '').includes(norm)));
+  }
+  if (row) return row;
+  // NPC 泛用：查本聊天已记忆的「说话人→原型」分配
+  if (t.npcEnabled) {
+    const archId = t.npcAssignByChat?.[getChatKey()]?.[name];
+    if (archId) {
+      const arch = (t.npcArchetypes || []).find((a) => a.id === archId && a.voiceId);
+      if (arch) return { name, voiceId: arch.voiceId, speed: null, emotion: 'auto' };
+    }
+  }
+  return null;
+}
+
+// 提取后：给未在本聊天映射命中、但模型标了 NPC 原型的说话人，按聊天记忆分配原型并落库（熟脸不漂移）。
+// 返回是否有新分配（调用方据此决定是否 saveSettings）。
+function ttsAssignNpc(lines) {
+  const t = settings.tts || {};
+  if (!t.npcEnabled || !Array.isArray(t.npcArchetypes) || !t.npcArchetypes.length) return false;
+  const map = ttsActiveVoiceMap();
+  const inVoiceMap = (name) => {
+    const norm = String(name).replace(/\s+/g, '');
+    return map.some((r) => r.voiceId && r.name && (String(r.name).trim() === name || norm.includes(String(r.name).replace(/\s+/g, '')) || String(r.name).replace(/\s+/g, '').includes(norm)));
+  };
+  const key = getChatKey();
+  t.npcAssignByChat = t.npcAssignByChat || {};
+  t.npcAssignByChat[key] = t.npcAssignByChat[key] || {};
+  const mem = t.npcAssignByChat[key];
+  let changed = false;
+  for (const l of lines) {
+    const name = String(l.speaker || '').trim();
+    if (!name || name === '未知') continue;
+    if (inVoiceMap(name)) continue;        // 主角等已显式配音色，不动
+    if (mem[name]) continue;               // 已记忆，保持稳定（熟脸不漂移）
+    const label = String(l.npc || '').trim();
+    if (!label) continue;
+    const arch = t.npcArchetypes.find((a) => a.voiceId && (a.label === label || String(a.label).replace(/\s+/g, '') === label.replace(/\s+/g, '')));
+    if (arch) { mem[name] = arch.id; changed = true; }
+  }
+  return changed;
+}
+
+// 合成参数：默认值 ← 角色行 ← 单句（line 自带的 speed/emotion 覆盖，已持久化）。返回 null 表示该说话人无音色、应跳过。
+function ttsBuildParams(line) {
+  const t = settings.tts || {};
+  const voice = ttsResolveVoice(line.speaker);
+  if (!voice) return null;
+  // 情绪：单句显式（非 auto）优先 → 角色默认 → auto
+  const emotion = (line.emotion && line.emotion !== 'auto') ? line.emotion
+    : (voice.emotion && voice.emotion !== 'auto' ? voice.emotion : 'auto');
+  // 语速：单句显式 → 角色默认 → 全局默认
+  const speed = Number.isFinite(line.speed) ? line.speed
+    : (Number.isFinite(voice.speed) ? voice.speed : Number(t.defaultSpeed ?? 1));
+  return {
+    apiKey: t.apiKey,
+    text: line.text,
+    voiceId: voice.voiceId,
+    model: t.model,
+    speed,
+    vol: Number(t.defaultVol ?? 1),   // 全局默认音量（每音色微调已移除）
+    pitch: Number(t.defaultPitch ?? 0),
+    emotion,
+    format: t.format || 'mp3',
+    endpoint: t.endpoint,
+    proxyBase: t.proxyBase,
+    groupId: t.groupId,
+  };
+}
+
+// 带缓存合成：命中 IndexedDB 直接取，否则调 API 并存缓存。force=true 跳过缓存（重生成）。
+// 返回 { blob, params, cached }；params 用于下载/收藏命名，cached 用于决定是否弹提示。
+async function ttsSynthCached(line, force = false) {
+  const params = ttsBuildParams(line);
+  if (!params) throw new Error(`「${line.speaker}」未配置音色`);
+  if (!params.apiKey) throw new Error('未配置 MiniMax API Key');
+  const key = ttsCacheKey(params);
+  const useCache = blobStore.blobStoreAvailable();
+  if (!force && useCache) {
+    try {
+      const hit = await blobStore.getAudio(key);
+      if (hit?.blob) return { blob: hit.blob, params, cached: true };
+    } catch (_) {}
+  }
+  const { blob } = await ttsSynthesize(params);
+  if (useCache) {
+    try {
+      await blobStore.putAudio(key, blob, { speaker: line.speaker, text: line.text });
+      await blobStore.pruneAudio(Number(settings.tts?.cacheLimit ?? 200));
+    } catch (_) {}
+  }
+  return { blob, params, cached: false };
+}
+
+// 停止当前播放（单句或连播）。bumpSeq=true 同时令进行中的连播失效。
+function ttsStopPlayback(bumpSeq = true) {
+  if (bumpSeq) ttsSeqToken++;
+  if (ttsCurrentAudio) {
+    try { ttsCurrentAudio.pause(); } catch (_) {}
+    ttsCurrentAudio = null;
+  }
+  if (bumpSeq && ttsPlayCleanup) ttsPlayCleanup();   // 仅真·停止(bumpSeq)时主动收尾在播那句：解开 await 的播放 Promise（暂停不触发 ended），令旧连播循环即刻继续、查 token 后退出。false 路径（连播内部换句）不收尾——否则单句插播会无 token 变更地解开连播 await，致连播续播与单句抢播。
+  if (ttsCurrentUrl) { try { URL.revokeObjectURL(ttsCurrentUrl); } catch (_) {} ttsCurrentUrl = ''; }
+  // 列表项与正文内联图标都可能带高亮，一并清
+  document.querySelectorAll('.sd-playing').forEach((el) => el.classList.remove('sd-playing'));
+  // 连播钮复位为「播放」外观——仅在「真·停止」(bumpSeq=true) 时做。
+  // 连播内部每句切换调 ttsStopPlayback(false) 停上一句，那不是停止整段，复位会致停止键频闪回播放键。
+  if (bumpSeq) {
+    document.querySelectorAll('.sd-tts-playing').forEach((b) => {
+      b.classList.remove('sd-tts-playing');
+      const isToolbar = b.classList.contains('sd-tts-playall');
+      b.innerHTML = '<i class="fa-regular fa-circle-play"></i>';
+      b.title = isToolbar ? '连续播放本条全部台词（命中缓存秒回）；播放中再点即停止' : '连续播放本条全部台词';
+    });
+  }
+}
+
+// 播放一个 blob，返回在结束/出错/被停止时 resolve 的 Promise。hi 为需高亮的元素数组（列表项 + 对应正文内联图标，同步亮灭）。
+function ttsPlayBlob(blob, hi = []) {
+  ttsStopPlayback(false);   // 停旧的单句，但不打断连播序列
+  const els = (Array.isArray(hi) ? hi : [hi]).filter(Boolean);
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(blob);
+    const audio = new Audio(url);
+    ttsCurrentAudio = audio;
+    ttsCurrentUrl = url;
+    els.forEach((el) => el.classList.add('sd-playing'));
+    let done = false;
+    const cleanup = () => {
+      if (done) return;          // 幂等：ended/error/被停止 任一触发后再调皆无操作
+      done = true;
+      if (ttsPlayCleanup === cleanup) ttsPlayCleanup = null;
+      els.forEach((el) => el.classList.remove('sd-playing'));
+      if (ttsCurrentUrl === url) { try { URL.revokeObjectURL(url); } catch (_) {} ttsCurrentUrl = ''; }
+      if (ttsCurrentAudio === audio) ttsCurrentAudio = null;
+      resolve();
+    };
+    ttsPlayCleanup = cleanup;     // 供 ttsStopPlayback 主动收尾，解开 await（暂停的音频不会触发 ended）
+    audio.addEventListener('ended', cleanup, { once: true });
+    audio.addEventListener('error', cleanup, { once: true });
+    audio.play().catch(cleanup);
+  });
+}
+
+// 给单条消息找/建台词条容器（插在 🎧 钮之后；幂等）
+function ttsEnsureBar(mesEl) {
+  let bar = mesEl.querySelector(`.${TTS_BAR_CLASS}`);
+  if (bar) return bar;
+  const tb = mesEl.querySelector('.sd-tts-toolbar');
+  const textEl = mesEl.querySelector('.mes_text');
+  const anchor = tb || textEl;
+  if (!anchor) return null;
+  bar = document.createElement('div');
+  bar.className = TTS_BAR_CLASS;
+  anchor.insertAdjacentElement('afterend', bar);
+  return bar;
+}
+
+// 扫描 #chat，给每条消息幂等追加工具栏（🎧 提取/折叠 + 🔁 重新提取）；不提取，点了才提取。
+// 工具栏只挂一次（sdTtsHooked 标记）；自动恢复 ttsAutoRestore 解耦出来每次扫描都跑——首扫可能早于元数据注水，
+// 那时查不到持久化台词，需后续扫描重试。恢复纯读缓存/持久化、幂等，重复跑无副作用。
+function ttsScanMessages() {
+  const t = settings.tts || {};
+  if (!t.enabled || !t.injectInChat) return;
+  const chat = document.getElementById('chat');
+  if (!chat) return;
+  chat.querySelectorAll('.mes').forEach((mesEl) => {
+    if (mesEl.getAttribute('is_system') === 'true') { mesEl.dataset.sdTtsHooked = '1'; return; }
+    const textEl = mesEl.querySelector('.mes_text');
+    if (!textEl) return;
+    if (mesEl.dataset.sdTtsHooked !== '1') {
+      mesEl.dataset.sdTtsHooked = '1';
+      const bar = document.createElement('div');
+      bar.className = 'sd-tts-toolbar';
+      bar.innerHTML = `
+        <button type="button" class="sd-tts-trigger" title="提取/展开台词列表" aria-label="提取台词"><i class="fa-solid fa-clapperboard"></i></button>
+        <button type="button" class="sd-tts-reextract" title="重新提取台词列表（仅刷新文本）" aria-label="重新提取台词"><i class="fa-solid fa-film"></i></button>
+        <button type="button" class="sd-tts-regenall" title="重新生成本条全部语音" aria-label="重生本条全部语音" hidden><i class="fa-solid fa-rotate"></i></button>
+        <button type="button" class="sd-tts-playall" title="连续播放本条全部台词" aria-label="连续播放" hidden><i class="fa-regular fa-circle-play"></i></button>`;
+      textEl.insertAdjacentElement('afterend', bar);
+    }
+    ttsAutoRestore(mesEl);   // 每次扫描都试：本条此前已提取过则渲染台词条与播放键（只读缓存/持久化、不调模型、幂等；已渲染则内部即返回）
+  });
+}
+
+// 委托点击：🎧 触发 / 🔁 重提取 / 🔊 单句（双击=快捷窗）/ ▶ 连播（播放中再点=停止）/ 🌀 重生语音
+function ttsOnChatClick(e) {
+  const reext = e.target.closest('.sd-tts-reextract');
+  if (reext) { e.preventDefault(); ttsHandleTrigger(reext.closest('.mes')?.querySelector('.sd-tts-trigger') || reext, true); return; }
+  const trig = e.target.closest('.sd-tts-trigger');
+  if (trig) { e.preventDefault(); ttsHandleTrigger(trig); return; }
+  const regenAll = e.target.closest('.sd-tts-regenall');
+  if (regenAll) { e.preventDefault(); ttsHandlePlayAll(regenAll, true); return; }   // force=true 全量重生成
+  const playAll = e.target.closest('.sd-tts-playall, .sd-tts-inline-playall');
+  if (playAll) {
+    e.preventDefault();
+    // 合并的连播/停止钮：播放态再点即停止；否则开始连播
+    if (playAll.classList.contains('sd-tts-playing')) { ttsStopPlayback(true); return; }
+    ttsHandlePlayAll(playAll, false);
+    return;
+  }
+  const playBtn = e.target.closest('.sd-tts-play');
+  if (playBtn) { e.preventDefault(); ttsHandleLinePlayClick(playBtn); return; }
+}
+
+// 切换某条消息所有连播钮（外层工具栏 + 正文内联）的 播放↔停止 外观。playing=true → 停止图标+「停止」文案+.sd-tts-playing
+function ttsSetPlayingState(mesEl, playing) {
+  if (!mesEl) return;
+  mesEl.querySelectorAll('.sd-tts-playall, .sd-tts-inline-playall').forEach((b) => {
+    b.classList.toggle('sd-tts-playing', !!playing);
+    const iconCls = playing ? 'fa-solid fa-circle-stop' : 'fa-regular fa-circle-play';
+    // 工具栏与内联钮均仅图标（去文案）
+    b.innerHTML = `<i class="${iconCls}"></i>`;
+    if (b.classList.contains('sd-tts-playall')) {
+      b.title = playing ? '停止播放' : '连续播放本条全部台词';
+    } else {
+      b.title = playing ? '停止播放' : '连续播放本条全部台词';
+    }
+  });
+}
+
+// 单句播放钮：单击播放，双击弹快捷窗。用延迟守卫区分（合成本就比 250ms 慢，延迟无感）。
+let ttsClickTimer = null;
+function ttsHandleLinePlayClick(btn) {
+  if (ttsClickTimer) { clearTimeout(ttsClickTimer); ttsClickTimer = null; ttsOpenQuickPopup(btn); return; }
+  ttsClickTimer = setTimeout(() => {
+    ttsClickTimer = null;
+    ttsPlayLineFromBtn(btn);
+  }, 250);
+}
+
+// 从播放钮解析「第几句 + line 对象 + 所属消息」。列表项与内联图标都带 data-idx，回查缓存 lines 拿到持久化的 speed/emotion。
+// 缓存与持久化同引用，故直接拿到的 line 改了即生效；缓存丢失时用 dataset 兜底现搭（不含 override）。
+function ttsResolveLineFromBtn(btn) {
+  const mesEl = btn.closest('.mes');
+  const idxHost = btn.closest('[data-idx]');
+  const idx = Number(idxHost?.dataset.idx);
+  const key = mesEl?.querySelector(`.${TTS_BAR_CLASS}`)?.dataset.key || '';
+  const lines = key ? ttsLineCache.get(key) : null;
+  let line = (lines && Number.isInteger(idx) && lines[idx]) ? lines[idx] : null;
+  if (!line) {
+    // 缓存查不到：优先按 idx 取列表项快照（speaker/text/emotion/speed 齐），再退到按钮自身 dataset（内联图标也带），最后才裸兜底
+    const rowEl = (Number.isInteger(idx) && mesEl)
+      ? mesEl.querySelector(`.sd-tts-line[data-idx="${idx}"]`) : null;
+    const host = rowEl || btn.closest('.sd-tts-line') || idxHost || btn;
+    line = { speaker: host.dataset?.speaker || '未知', text: host.dataset?.text || '', emotion: host.dataset?.emotion || 'auto' };
+    if (host.dataset?.speed !== undefined && host.dataset.speed !== '') line.speed = Number(host.dataset.speed);   // override 过的语速，缺则回落默认
+  }
+  return { mesEl, idx: Number.isInteger(idx) ? idx : -1, line, key };
+}
+
+// 把第 idx 句的 override（speed/emotion）写入 line 并落盘（缓存与持久化同引用，改了即生效）。
+// 内存缓存缺失（如进聊天后仅持久化、该 key 尚未坐实 ttsLineCache）时回落持久化并重新坐实缓存，
+// 确保 override 落到**后续点击会读到的同一份**对象——否则改动只留在弹窗临时 line 上、播放路径读不到（重生成不覆盖旧缓存的根因）。
+function ttsPersistLineOverride(mesEl, idx, patch) {
+  const key = mesEl?.querySelector(`.${TTS_BAR_CLASS}`)?.dataset.key || '';
+  let lines = key ? ttsLineCache.get(key) : null;
+  if (!lines && key) {
+    const saved = getChatStore().ttsLines?.[key];
+    if (Array.isArray(saved)) { lines = saved; ttsLineCache.set(key, lines); }   // 重新坐实，后续 resolve 命中同引用
+  }
+  if (!lines || !Number.isInteger(idx) || !lines[idx]) return null;
+  Object.assign(lines[idx], patch);
+  try { saveMetadata(); } catch (_) {}
+  return lines[idx];
+}
+
+// override 后同步该句 DOM 数据集（列表项 + 正文内联图标）：作为缓存全失时的兜底真相源，
+// 让 ttsResolveLineFromBtn/连播的字面兜底也能算出含 override 的正确 key（speed 无值则清掉，回落默认）。
+function ttsSyncLineDataset(mesEl, idx, line) {
+  if (!mesEl || !Number.isInteger(idx) || !line) return;
+  mesEl.querySelectorAll(`.sd-tts-line[data-idx="${idx}"], .sd-tts-inline[data-idx="${idx}"]`).forEach((el) => {
+    el.dataset.emotion = line.emotion || 'auto';
+    if (Number.isFinite(line.speed)) el.dataset.speed = String(line.speed);
+    else delete el.dataset.speed;
+  });
+}
+
+// 某句所有可高亮元素：列表项 + 对应正文内联图标（同步亮灭）
+function ttsHighlightEls(mesEl, idx) {
+  if (!mesEl || !Number.isInteger(idx) || idx < 0) return [];
+  return Array.from(mesEl.querySelectorAll(`.sd-tts-line[data-idx="${idx}"], .sd-tts-inline.sd-tts-play[data-idx="${idx}"]`));
+}
+
+// 播放一句已解析台词：spinner → 合成（force=重生成跳缓存）→ 仅真合成弹提示 → 列表+内联同步高亮
+async function ttsPlayResolvedLine(line, mesEl, idx, spinBtn, force = false) {
+  const icon = spinBtn?.querySelector('i');
+  const prev = icon?.className;
+  if (icon) icon.className = 'fa-solid fa-spinner fa-spin';
+  try {
+    const { blob, cached } = await ttsSynthCached(line, force);
+    if (icon && prev) icon.className = prev;
+    if (!cached) toast('配音已完成', 'success');   // 仅真合成才通知，缓存重播不刷屏
+    await ttsPlayBlob(blob, ttsHighlightEls(mesEl, idx));
+  } catch (err) {
+    if (icon && prev) icon.className = prev;
+    toast(`配音失败：${err?.message || err}`, 'error');
+  }
+}
+
+async function ttsPlayLineFromBtn(btn, force = false) {
+  if (btn.disabled) return;
+  const { mesEl, idx, line } = ttsResolveLineFromBtn(btn);
+  await ttsPlayResolvedLine(line, mesEl, idx, btn, force);
+}
+
+// 🎧 触发：提取台词 → 渲染台词条 + 正文内联 🔊。force=true 为重新提取（清缓存重 roll）
+async function ttsHandleTrigger(trig, force = false) {
+  const mesEl = trig.closest('.mes');
+  if (!mesEl) return;
+  const bar = ttsEnsureBar(mesEl);
+  if (!bar) return;
+  // 非强制 + 已渲染：纯折叠/展开已生成的台词条（内联图标随之显隐），不需正文。连播/停止钮一经提取即常驻，折叠不隐藏、不停播——交用户用按钮自控。
+  if (!force && bar.dataset.loaded === '1') {
+    bar.hidden = !bar.hidden;
+    mesEl.querySelectorAll('.sd-tts-inline').forEach((el) => { el.hidden = bar.hidden; });
+    return;
+  }
+  // 据原始正文算「内容指纹」做缓存 key
+  const raw = ttsRawText(mesEl);
+  if (!raw) { toast('正文尚未就绪，请稍候重试', 'info'); return; }   // 竞态窗口取不到原始正文：拦下，免按空文本算漂移 key 生成孤儿
+  const key = ttsContentKey(raw);
+  if (force) {
+    // 重新提取：清掉本条缓存（内存 + 持久化）与已注入内联，强制重跑
+    ttsLineCache.delete(key);
+    try { delete getChatStore().ttsLines[key]; saveMetadata(); } catch (_) {}
+    bar.dataset.loaded = '';
+    ttsClearInlineIcons(mesEl);
+  }
+  if (bar.dataset.loading === '1') return;
+  bar.dataset.loading = '1';
+  bar.hidden = false;
+  bar.innerHTML = '<span class="sd-tts-status"><i class="fa-solid fa-spinner fa-spin"></i> 正在提取台词…</span>';
+  const icon = trig.querySelector('i');
+  const prevIcon = icon?.className;
+  if (icon) icon.className = 'fa-solid fa-spinner fa-spin';
+  try {
+    // 三级取：内存缓存 → 本聊天持久化（跨刷新/重排存活，按内容指纹寻址）→ 调模型提取
+    let lines = ttsLineCache.has(key) ? ttsLineCache.get(key) : null;
+    if (!lines) {
+      const saved = getChatStore().ttsLines?.[key];
+      if (Array.isArray(saved) && saved.length) { lines = saved; ttsLineCache.set(key, lines); }
+    }
+    if (!lines && !force) lines = ttsMigrateLinesOnEdit(mesEl, key);   // 编了正文但台词没变：迁移旧缓存，免白白调模型（force=用户主动要全量重提则跳过）
+    if (!lines) {
+      const passage = ttsCleanText(raw);
+      lines = await extractDialogue(passage);
+      ttsLineCache.set(key, lines);
+      try { const store = getChatStore(); store.ttsLines[key] = lines; ttsPruneLineStore(store.ttsLines); saveMetadata(); } catch (_) {}   // 持久化，重开 ST 直接取回
+    }
+    if (ttsAssignNpc(lines)) saveSettings();   // NPC 原型分配（熟脸记忆），落库
+    ttsApplyLines(mesEl, bar, lines, key);
+    toast(lines.length ? `台词指导已完成（${lines.length} 句）` : '台词指导已完成（未发现台词）', 'success');
+  } catch (err) {
+    bar.dataset.loading = '';
+    bar.innerHTML = `<span class="sd-tts-status sd-tts-err">提取失败：${htmlEscape(err?.message || String(err))}</span>`;
+    toast(`台词指导失败：${err?.message || err}`, 'error');
+  } finally {
+    if (icon && prevIcon) icon.className = prevIcon;
+  }
+}
+
+// 把一组 lines 落到某条消息的台词条：渲染列表 + 正文内联 🔊 + 外层连播钮显隐。提取/自动恢复共用。
+// collapsed=true：渲染后默认折叠（台词条 + 内联图标隐藏，仅留工具栏播放键）——用于进聊天自动恢复，避免铺满屏幕。
+function ttsApplyLines(mesEl, bar, lines, key, collapsed = false) {
+  bar.dataset.loaded = '1';
+  bar.dataset.loading = '';
+  bar.dataset.key = key;                      // 供播放路径回查缓存 lines（取持久化的 speed/emotion）
+  // 记录楼层→当前 key 锚点：供原地编正文后凭 mesid 找回旧台词列表迁移（见 ttsMigrateLinesOnEdit）
+  const mesid = ttsMesId(mesEl);
+  if (mesid !== '') {
+    try { const s = getChatStore(); if (s.ttsLineKeyByMes[mesid] !== key) { s.ttsLineKeyByMes[mesid] = key; saveMetadata(); } } catch (_) {}
+  }
+  ttsRenderLines(bar, lines);
+  ttsInjectInlineIcons(mesEl, lines);   // 正文内联 🔊（仅已配音色的台词）
+  ttsToggleToolbarPlay(mesEl, lines.some((l) => ttsResolveVoice(l.speaker)));   // 外层连播/停止钮：有可播台词才显
+  if (collapsed) {
+    bar.hidden = true;
+    mesEl.querySelectorAll('.sd-tts-inline').forEach((el) => { el.hidden = true; });   // 内联图标随台词条一并收起，点 🎧 再展开
+  }
+}
+
+// 进入聊天扫描时：若本条正文此前已提取过（持久化命中），直接渲染台词条与播放键，无需用户再点 🎧。
+// 仅读缓存/持久化、绝不调模型；未提取过的消息原样留一个 🎧 钮等用户点。
+function ttsAutoRestore(mesEl) {
+  const bar = mesEl.querySelector(`.${TTS_BAR_CLASS}`);
+  if (bar && bar.dataset.loaded === '1') {
+    // 已渲染过。自愈：若有可播台词、但正文里的内联 🔊 被外部重渲（如 ST 保存原地编辑重写 .mes_text）抹掉了，按缓存幂等补回。
+    // 这条路径替代了「跟 ST 重渲抢时序补一次」的脆弱做法——交给扫描兜底，幂等、跑几次都无害。不动列表/音频/key、不调模型。
+    const k = bar.dataset.key || '';
+    const cached = k ? ttsLineCache.get(k) : null;
+    if (Array.isArray(cached) && cached.some((l) => ttsResolveVoice(l.speaker))
+        && !mesEl.querySelector('.mes_text .sd-tts-inline')) {
+      ttsInjectInlineIcons(mesEl, cached);
+      if (bar.hidden) mesEl.querySelectorAll('.sd-tts-inline').forEach((el) => { el.hidden = true; });   // 折叠态：补回的图标随之隐藏
+    }
+    return;
+  }
+  const raw = ttsRawText(mesEl);
+  if (!raw) return;
+  const key = ttsContentKey(raw);
+  let lines = ttsLineCache.has(key) ? ttsLineCache.get(key) : null;
+  if (!lines) {
+    let saved = null;
+    try { saved = getChatStore().ttsLines?.[key]; } catch (_) {}
+    if (Array.isArray(saved) && saved.length) { lines = saved; ttsLineCache.set(key, lines); }
+  }
+  // 新 key 查不到：可能是原地编了正文（仅旁白/非台词）。凭 mesid 锚点 + 台词原文在场校验迁移旧缓存，免重提。
+  if (!lines) lines = ttsMigrateLinesOnEdit(mesEl, key);
+  if (!Array.isArray(lines) || !lines.length) return;   // 没提取过 / 台词真改了：留 🎧 等点
+  if (ttsAssignNpc(lines)) saveSettings();
+  const ensured = ttsEnsureBar(mesEl);
+  if (ensured) ttsApplyLines(mesEl, ensured, lines, key, true);   // 自动恢复：默认折叠，点 🎧 展开
+}
+
+function ttsRenderLines(bar, lines) {
+  if (!lines.length) {
+    bar.innerHTML = '<span class="sd-tts-status">本条未发现可朗读的台词。</span>';
+    return;
+  }
+  const rows = lines.map((l, i) => {
+    const voiced = !!ttsResolveVoice(l.speaker);
+    return `
+      <div class="sd-tts-line${voiced ? '' : ' sd-tts-novoice'}" data-idx="${i}" data-speaker="${htmlEscape(l.speaker)}" data-text="${htmlEscape(l.text)}" data-emotion="${htmlEscape(l.emotion || 'auto')}">
+        <button type="button" class="sd-tts-play" title="${voiced ? '播放（双击设置语速/情绪并重生成）' : '该角色未配置音色'}" ${voiced ? '' : 'disabled'}><i class="fa-solid fa-headphones"></i></button>
+        <span class="sd-tts-spk">${htmlEscape(l.speaker)}</span>
+        <span class="sd-tts-txt">${htmlEscape(l.text)}</span>
+      </div>`;
+  }).join('');
+  const anyVoiced = lines.some((l) => ttsResolveVoice(l.speaker));
+  bar.innerHTML = `
+    <div class="sd-tts-lines">${rows}</div>
+    ${anyVoiced ? '' : '<div class="sd-tts-bar-actions"><span class="sd-tts-status">未配置任何角色音色，请先配置。</span></div>'}`;
+}
+
+// 提取成功后，把外层工具栏的「连续播放/重生语音/停止」钮显隐切换；anyVoiced=false 则不显示
+function ttsToggleToolbarPlay(mesEl, show) {
+  const tb = mesEl?.querySelector('.sd-tts-toolbar');
+  if (!tb) return;
+  tb.querySelectorAll('.sd-tts-playall, .sd-tts-regenall').forEach((b) => { b.hidden = !show; });
+}
+
+// 清除某条消息正文里已注入的内联 🔊（重新提取前调用）
+function ttsClearInlineIcons(mesEl) {
+  mesEl.querySelectorAll('.sd-tts-inline').forEach((el) => el.remove());
+}
+
+// 正文内联 🔊：把已配音色的台词，在 .mes_text 内对应句尾插入一个小喇叭（与列表共用合成+缓存+快捷窗）。
+// 文本匹配：把 .mes_text 全部文本节点拼成全文做定位，再把匹配末尾映射回具体节点/偏移插入——
+// 故台词即便被加粗/链接拆到多个节点（末条最常见）也能命中。
+function ttsInjectInlineIcons(mesEl, lines) {
+  ttsClearInlineIcons(mesEl);
+  const textEl = mesEl.querySelector('.mes_text');
+  if (!textEl) return;
+  // 保留原始下标（与列表项 data-idx 一致），过滤出有音色且有文本的句子
+  const voicedLines = lines.map((l, i) => ({ line: l, idx: i })).filter((x) => x.line.text && ttsResolveVoice(x.line.speaker));
+  if (!voicedLines.length) return;
+
+  // 收集 .mes_text 下全部文本节点（跳过内联钮内部），拼全文 + 段映射。splitText 不改文本内容，故每句重收一次即可。
+  const collect = () => {
+    const segs = [];
+    let full = '';
+    const w = document.createTreeWalker(textEl, NodeFilter.SHOW_TEXT, {
+      acceptNode: (n) => (n.parentElement?.closest('.sd-tts-inline') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
+    });
+    let node;
+    while ((node = w.nextNode())) {
+      const s = node.nodeValue || '';
+      segs.push({ node, start: full.length, end: full.length + s.length });
+      full += s;
+    }
+    return { full, segs };
+  };
+  // 全文位置 pos → (节点, 节点内偏移)
+  const locateNode = (segs, pos) => {
+    for (const seg of segs) {
+      if (pos > seg.start && pos <= seg.end) return { node: seg.node, offset: pos - seg.start };
+    }
+    const last = segs[segs.length - 1];
+    return last ? { node: last.node, offset: (last.node.nodeValue || '').length } : null;
+  };
+  // 引号兜底：模型偶尔会让正文与提取文本的引号有出入（嵌套混用、全/半角错位、多/少一个），
+  // 字节级 indexOf 必失。故第三档把双方所有引号类字符抹掉再找，再用位置映射回原文具体偏移。
+  // 字符集只收书面对话常态引号：直/弯双引号、直/弯单引号（双引号内嵌套用）、CJK 角括号两级。
+  // 刻意不含 【】（）及德/法/CJK 罕用变体——前者多用于标签/状态栏，后者书面对话几乎不出现，纳入只增误匹配。
+  const QUOTES = /["'“”‘’「」『』]/g;
+  const stripQuotes = (s) => s.replace(QUOTES, '');
+  // 归一化 full：返回去引号后的串 + map[i]=去引号串第 i 位在原 full 里的位置（含末位 = full.length，便于落末尾）
+  const normalizeWithMap = (s) => {
+    let out = '';
+    const map = [];
+    for (let i = 0; i < s.length; i++) {
+      const c = s[i];
+      if (QUOTES.test(c)) { QUOTES.lastIndex = 0; continue; }
+      QUOTES.lastIndex = 0;
+      map.push(i);
+      out += c;
+    }
+    map.push(s.length);
+    return { norm: out, map };
+  };
+  const stripEdges = (s) => s.replace(/^[\s“”"「」『』,，。.!！?？、…—\-]+|[\s“”"「」『』,，。.!！?？、…—\-]+$/g, '');
+
+  let cursor = 0;        // 全文位置游标，逐句前移
+  let firstIcon = null;
+  for (const { line, idx: lineIdx } of voicedLines) {
+    const needle = line.text.trim();
+    if (needle.length < 2) continue;
+    const { full, segs } = collect();
+    // 三档定位：1) 精确 2) 去首尾标点 3) 双方去引号 + 位置回映
+    let endPos = -1;
+    let i = full.indexOf(needle, cursor);
+    if (i >= 0) endPos = i + needle.length;
+    if (endPos < 0) {
+      const core = stripEdges(needle);
+      if (core.length >= 2 && core !== needle) {
+        i = full.indexOf(core, cursor);
+        if (i >= 0) endPos = i + core.length;
+      }
+    }
+    if (endPos < 0) {
+      const needleNQ = stripQuotes(needle.trim());
+      if (needleNQ.length >= 2) {
+        const { norm, map } = normalizeWithMap(full);
+        // cursor 在归一串里的等价起点：找第一个映射 >= cursor 的归一位
+        let ncursor = 0;
+        while (ncursor < map.length - 1 && map[ncursor] < cursor) ncursor++;
+        const ni = norm.indexOf(needleNQ, ncursor);
+        if (ni >= 0) {
+          const nEnd = ni + needleNQ.length;
+          endPos = map[Math.min(nEnd, map.length - 1)];   // 归一末位 → 原文位置
+        }
+      }
+    }
+    if (endPos < 0) continue;   // 三档都不中：跳过内联，列表里仍有该句
+    // 若插入点紧跟着闭合引号（"」'』等），顺势越过去——视觉上挂在台词整体外缘更自然
+    while (endPos < full.length && QUOTES.test(full[endPos])) { QUOTES.lastIndex = 0; endPos++; }
+    QUOTES.lastIndex = 0;
+    const at = locateNode(segs, endPos);
+    if (!at) continue;
+    const target = at.node;
+    let after;
+    if (at.offset >= (target.nodeValue || '').length) after = target.nextSibling;   // 落在节点末尾
+    else after = target.splitText(at.offset);                                        // 节点中间：切开
+    const icon = document.createElement('button');
+    icon.type = 'button';
+    icon.className = 'sd-tts-play sd-tts-inline';
+    icon.title = '播放（双击设置语速/情绪并重生成）';
+    icon.dataset.idx = String(lineIdx);   // 与列表项同下标，回查缓存 lines 取持久化 override + 同步高亮
+    // 自描述兜底：与列表项 .sd-tts-line 一样带 speaker/text/emotion，缓存查不到（key 失配/内存清/重渲染）时也能现搭出正确 line，
+    // 不致回落成「未知」→「未配置音色」（内联图标不在 .sd-tts-line 内，解析时 host=图标自身，靠这几个 dataset 兜底）
+    icon.dataset.speaker = line.speaker || '未知';
+    icon.dataset.text = line.text || '';
+    icon.dataset.emotion = line.emotion || 'auto';
+    icon.innerHTML = '<i class="fa-solid fa-headphones"></i>';
+    if (after) after.parentNode.insertBefore(icon, after);
+    else target.parentNode.appendChild(icon);
+    if (!firstIcon) firstIcon = icon;
+    cursor = endPos;
+  }
+  // 在第一条台词的小喇叭前，插一个「连续播放本条」钮
+  if (firstIcon) {
+    const playAll = document.createElement('button');
+    playAll.type = 'button';
+    playAll.className = 'sd-tts-inline sd-tts-inline-playall';
+    playAll.title = '连续播放本条全部台词';
+    playAll.setAttribute('aria-label', '连续播放本条');
+    playAll.innerHTML = '<i class="fa-regular fa-circle-play"></i>';
+    firstIcon.parentNode.insertBefore(playAll, firstIcon);
+  }
+}
+
+// 连续播放本条：先一次性合成全部已配音色台词，全部就绪后再顺序播放（避免边生成边播的卡顿）。
+// force=false：命中缓存秒回、仅缺的合成、全缓存则静默；force=true（重生语音）：跳缓存强制重合成全部、写回同 key（连播后续读新缓存）。
+// 可被停止/新连播打断；折叠后台词条 hidden 但仍在 DOM，故照常可播。btn 可为外层工具栏钮或正文内联连播钮。
+// 全程包 try/finally：任何抛错都复位忙碌态并弹提示，杜绝按钮卡死在 disabled（disabled 按钮不触发点击、也不弹提示）。
+async function ttsHandlePlayAll(btn, force = false) {
+  const mesEl = btn.closest('.mes');
+  const bar = mesEl?.querySelector(`.${TTS_BAR_CLASS}`) || btn.closest(`.${TTS_BAR_CLASS}`);
+  if (!bar) { toast('未找到台词条，请先点 🎧 提取。', 'info'); return; }
+  const lineEls = Array.from(bar.querySelectorAll('.sd-tts-line:not(.sd-tts-novoice)'));
+  if (!lineEls.length) { toast('本条没有可播放的台词。', 'info'); return; }
+
+  ttsStopPlayback(true);             // 停掉旧播放并使其失效（被打断的旧调用经 ttsPlayCleanup 解开 await，自行退出）
+  const myToken = ++ttsSeqToken;
+  ttsSetPlayingState(mesEl, true);   // 连播/停止钮切到「停止」外观，播放期间可随时点停
+  try {
+    // 以缓存 lines 为准（含持久化 speed/emotion）；按列表项 data-idx 取对应 line，没缓存则 dataset 兜底
+    const key = bar.dataset.key || '';
+    const cachedLines = key ? ttsLineCache.get(key) : null;
+    const jobs = lineEls.map((el) => {
+      const idx = Number(el.dataset.idx);
+      let line = (cachedLines && Number.isInteger(idx) && cachedLines[idx]) ? cachedLines[idx] : null;
+      if (!line) {
+        line = { speaker: el.dataset.speaker || '未知', text: el.dataset.text || '', emotion: el.dataset.emotion || 'auto' };
+        if (el.dataset.speed !== undefined && el.dataset.speed !== '') line.speed = Number(el.dataset.speed);   // override 过的语速，缺则回落默认
+      }
+      return { idx: Number.isInteger(idx) ? idx : -1, line, blob: null };
+    });
+
+    // 是否需要弹「配音中」提示：重生语音(force)必弹；否则先探缓存，全命中则静默
+    let needSynth = force;
+    if (!force) {
+      for (const job of jobs) {
+        const params = ttsBuildParams(job.line);
+        if (!params) continue;
+        let hit = false;
+        if (blobStore.blobStoreAvailable()) { try { hit = await blobStore.hasAudio(ttsCacheKey(params)); } catch (_) {} }
+        if (!hit) { needSynth = true; break; }
+      }
+    }
+    if (myToken !== ttsSeqToken) return;
+
+    // 阶段一：合成全部（force 跳缓存重合成并写回同 key；否则命中缓存秒回。逐条失败不中断）
+    if (needSynth) toast(force ? '全部语音重新生成中…' : '全部台词配音中…', 'info');
+    let failed = 0, lastErr = '';
+    for (const job of jobs) {
+      if (myToken !== ttsSeqToken) return;
+      try { const { blob } = await ttsSynthCached(job.line, force); job.blob = blob; }
+      catch (err) { failed++; lastErr = err?.message || String(err); }
+    }
+    if (myToken !== ttsSeqToken) return;
+    const ready = jobs.filter((j) => j.blob);
+    if (!ready.length) { toast(`配音失败（${lastErr || '无可用台词'}）`, 'error'); return; }
+    if (needSynth) {
+      const okMsg = force ? '全部语音已更新' : '全部配音已交付';
+      toast(failed ? `${okMsg}（${failed} 句失败已跳过）` : okMsg, 'success');
+    }
+
+    // 阶段二：顺序播放，列表项 + 对应正文内联图标同步高亮
+    for (const job of ready) {
+      if (myToken !== ttsSeqToken) break;
+      await ttsPlayBlob(job.blob, ttsHighlightEls(mesEl, job.idx));
+    }
+  } catch (err) {
+    toast(`配音失败：${err?.message || err}`, 'error');
+  } finally {
+    // 仅当本次调用仍是最新（未被新的连播/重生抢占）时才复位播放态——
+    // 否则被抢占的旧调用会把新调用刚切上的「停止」外观打回「播放」。被抢占时新调用自己会负责复位。
+    if (myToken === ttsSeqToken) ttsSetPlayingState(mesEl, false);
+  }
+}
+
+// 双击单句 → 快捷窗：语速滑块 + 情绪下拉 + 重生成/下载/收藏。改动持久化进 line 对象（跨刷新稳定）。
+function ttsOpenQuickPopup(btn) {
+  const { mesEl, idx, line } = ttsResolveLineFromBtn(btn);
+  ttsCloseQuickPopup();
+  const curSpeed = Number.isFinite(line.speed) ? line.speed : Number(settings.tts?.defaultSpeed ?? 1);
+  const curEmotion = (line.emotion && line.emotion !== 'auto') ? line.emotion : 'auto';
+  const emotions = ['auto', 'happy', 'sad', 'angry', 'fearful', 'disgusted', 'surprised', 'calm', 'fluent', 'whisper'];
+  const emoLabel = { auto: '自动 (auto)', happy: '高兴 (happy)', sad: '悲伤 (sad)', angry: '愤怒 (angry)', fearful: '害怕 (fearful)', disgusted: '厌恶 (disgusted)', surprised: '惊讶 (surprised)', calm: '中性 (calm)', fluent: '生动 (fluent)', whisper: '低语 (whisper)' };
+  const pop = document.createElement('div');
+  pop.className = `sd-tts-popup sd-theme-${THEME_KEYS.includes(settings.theme) ? settings.theme : 'light'}`;
+  pop.innerHTML = `
+    <div class="sd-tts-popup-row"><span>语速</span><input type="range" class="sd-tts-pop-speed" min="0.5" max="2" step="0.05" value="${curSpeed}"><b class="sd-tts-pop-speed-val">${curSpeed.toFixed(2)}</b></div>
+    <div class="sd-tts-popup-row"><span>情绪</span><select class="sd-tts-pop-emotion">${emotions.map((em) => `<option value="${em}" ${em === curEmotion ? 'selected' : ''}>${emoLabel[em]}</option>`).join('')}</select></div>
+    <div class="sd-tts-popup-actions">
+      <button type="button" class="sd-tts-pop-icon sd-tts-pop-regen" title="按当前语速/情绪重新生成并播放"><i class="fa-solid fa-rotate"></i></button>
+      <button type="button" class="sd-tts-pop-icon sd-tts-pop-download" title="下载这句"><i class="fa-solid fa-download"></i></button>
+      <button type="button" class="sd-tts-pop-icon sd-tts-pop-fav" title="收藏这句"><i class="fa-solid fa-star"></i></button>
+    </div>`;
+  document.body.appendChild(pop);
+  ttsPopupEl = pop;
+  // 定位到按钮下方
+  const r = btn.getBoundingClientRect();
+  pop.style.left = `${Math.min(window.innerWidth - pop.offsetWidth - 8, Math.max(8, r.left))}px`;
+  pop.style.top = `${Math.min(window.innerHeight - pop.offsetHeight - 8, r.bottom + 6)}px`;
+
+  const speedEl = pop.querySelector('.sd-tts-pop-speed');
+  const speedVal = pop.querySelector('.sd-tts-pop-speed-val');
+  speedEl.addEventListener('input', () => { speedVal.textContent = Number(speedEl.value).toFixed(2); });
+  // 读快捷窗当前控件 → 写入 line 对象并落盘（持久化，单击播放/连播/刷新后都沿用同一份）
+  const applyOverride = () => {
+    const patch = { speed: Number(speedEl.value), emotion: pop.querySelector('.sd-tts-pop-emotion').value };
+    Object.assign(line, patch);                       // 即时生效（缓存同引用）
+    const canon = ttsPersistLineOverride(mesEl, idx, patch);   // 落盘并坐实到「后续点击会读到的同一份」对象
+    ttsSyncLineDataset(mesEl, idx, canon || line);    // 同步 DOM 数据集，缓存全失时字面兜底也能算出含 override 的正确 key
+    return patch;
+  };
+  pop.querySelector('.sd-tts-pop-regen')?.addEventListener('click', async () => {
+    applyOverride();
+    ttsCloseQuickPopup();
+    await ttsPlayResolvedLine(line, mesEl, idx, btn, true);   // force 跳缓存按新参数重生成并自动播放
+  });
+  pop.querySelector('.sd-tts-pop-download')?.addEventListener('click', async (ev) => {
+    applyOverride();
+    await ttsDownloadLine(line, ev.currentTarget);
+  });
+  pop.querySelector('.sd-tts-pop-fav')?.addEventListener('click', async (ev) => {
+    applyOverride();
+    await ttsFavoriteLine(line, ev.currentTarget);
+  });
+  // 点外部关闭
+  setTimeout(() => document.addEventListener('pointerdown', ttsPopupOutside, { capture: true }), 0);
+}
+
+// 文件名净化：取说话人+台词前段，去非法字符
+function ttsSafeName(speaker, text) {
+  const base = `${speaker || '台词'}-${String(text || '').slice(0, 16)}`;
+  return base.replace(/[\\/:*?"<>|\n\r\t]+/g, '_').slice(0, 48) || '台词';
+}
+
+// 下载单句：合成(走缓存)→导出 blob
+async function ttsDownloadLine(line, btn) {
+  const icon = btn?.querySelector('i');
+  const prev = icon?.className;
+  if (icon) icon.className = 'fa-solid fa-spinner fa-spin';
+  try {
+    const { blob, params } = await ttsSynthCached(line, false);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${ttsSafeName(line.speaker, line.text)}.${params.format || 'mp3'}`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    toast('已下载。', 'success');
+  } catch (err) {
+    toast(`下载失败：${err?.message || err}`, 'error');
+  } finally {
+    if (icon && prev) icon.className = prev;
+  }
+}
+
+// 收藏单句：合成(走缓存)→存 IndexedDB 收藏 store
+async function ttsFavoriteLine(line, btn) {
+  if (!blobStore.blobStoreAvailable()) { toast('当前环境不支持本地收藏。', 'warning'); return; }
+  const icon = btn?.querySelector('i');
+  const prev = icon?.className;
+  if (icon) icon.className = 'fa-solid fa-spinner fa-spin';
+  try {
+    const { blob, params } = await ttsSynthCached(line, false);
+    const favId = `fav:${ttsCacheKey(params)}`;
+    await blobStore.addFavorite(favId, blob, { speaker: line.speaker, text: line.text, format: params.format || 'mp3' }, line.text);
+    toast('已收藏。', 'success');
+  } catch (err) {
+    toast(`收藏失败：${err?.message || err}`, 'error');
+  } finally {
+    if (icon && prev) icon.className = prev;
+  }
+}
+function ttsPopupOutside(e) {
+  if (ttsPopupEl && !ttsPopupEl.contains(e.target)) ttsCloseQuickPopup();
+}
+function ttsCloseQuickPopup() {
+  document.removeEventListener('pointerdown', ttsPopupOutside, { capture: true });
+  if (ttsPopupEl) { ttsPopupEl.remove(); ttsPopupEl = null; }
+}
+
+// 启停 #chat 注入（总开关/注入开关变化、切聊天时调用）
+function ttsStartChat() {
+  const t = settings.tts || {};
+  if (!t.enabled || !t.injectInChat) { ttsStopChat(); return; }
+  const chat = document.getElementById('chat');
+  if (!chat) return;   // ST 尚未就绪，留待 MESSAGE_RECEIVED/CHAT_CHANGED 再触发
+  if (!ttsChatBound) {
+    chat.addEventListener('click', ttsOnChatClick);
+    ttsChatObserver = new MutationObserver(() => ttsScanDebounced());
+    ttsChatObserver.observe(chat, { childList: true });   // 只看顶层 childList，极轻
+    ttsChatBound = true;
+  }
+  ttsScanMessages();
+  // 首扫可能早于 ST 注水聊天元数据（ttsLines），自动恢复查不到；延迟再扫一次兜底，让缓存「进聊天即加载」。
+  ttsScanDebounced(400);
+}
+function ttsStopChat() {
+  if (!ttsChatBound) return;
+  if (ttsScanTimer) { clearTimeout(ttsScanTimer); ttsScanTimer = null; }
+  const chat = document.getElementById('chat');
+  chat?.removeEventListener('click', ttsOnChatClick);
+  ttsChatObserver?.disconnect();
+  ttsChatObserver = null;
+  ttsChatBound = false;
+  ttsStopPlayback(true);
+  ttsCloseQuickPopup();
+  document.querySelectorAll('.sd-tts-toolbar').forEach((el) => el.remove());
+  document.querySelectorAll('.sd-tts-inline').forEach((el) => el.remove());
+  document.querySelectorAll(`.${TTS_BAR_CLASS}`).forEach((el) => el.remove());
+  document.querySelectorAll('.mes[data-sd-tts-hooked]').forEach((el) => { delete el.dataset.sdTtsHooked; });
+}
+
 function renderPlugTab() {
   const isExternal = settings.providerMode === 'external';
   const logs = Array.isArray(settings.logHistory) ? settings.logHistory : [];
@@ -3714,12 +5526,16 @@ function bindActiveTabEvents(root) {
       await commitEditorValue(editorView.target, val);
       editorView = null;
       renderModal();
+      const body = document.getElementById(MODAL_ID)?.querySelector('.sd-body');
+      if (body && ttsEditorReturnScroll != null) body.scrollTop = ttsEditorReturnScroll;
+      ttsEditorReturnScroll = null;
       toast('已保存。', 'success');
     });
     return; // 编辑视图独占界面，不再绑定其余标签事件
   }
   bindTheaterTabEvents(root);
   bindGeopoliticsTabEvents(root);
+  bindTtsTabEvents(root);
   // 展开编辑：把目标 textarea 拉进行内全屏编辑视图，保存时按 target 直写数据模型
   root.querySelectorAll('.sd-expand-editor').forEach((el) => el.addEventListener('click', (e) => {
     e.preventDefault(); e.stopPropagation();   // 按钮可能位于 <summary> 内，阻止顺带折叠
@@ -5350,21 +7166,33 @@ function bindEvents() {
     contextScanCache.worldScannedAt = '';
     contextScanCache.boundWorldBookNames = [];
     contextAutoScanned = false;
+    ttsLineCache.clear();      // 切聊天：旧消息台词缓存失效
     renderFloatButton();
     renderInputMenuEntry();
     await applyDirectorInjection();
     rerenderIfOpen();
+    ttsStartChat();            // 新聊天 DOM 重建，重挂注入
   };
   // APP_READY：ST 注水 extensionSettings 完成的信号。init 经 setTimeout 抢跑可能早于注水，
   // 此时读到的 floatPosition 仍是默认 → 悬浮球落默认中位。注水后重读 settings 并按保存位重绘，根治「重载后球回默认位」偶发。
   const appReadyHandler = () => {
     settings = getSettings();
     renderFloatButton();
+    ttsStartChat();   // ST 就绪后 #chat 已存在，挂上有声注入（init 抢跑时 #chat 可能尚未就位）
+  };
+  // 原地编辑正文：刻意不复位缓存——保留已提取台词与已生成音频，交用户手动决定（🔁 全量重提取 / 双击单句更新）。
+  // 但 ST 保存编辑会重渲 .mes_text 内部 HTML，抹掉注入其中的内联 🔊（工具栏/台词条是兄弟节点、不受影响）。
+  // 故只触发一次防抖扫描，由 ttsAutoRestore 的「自愈」分支按缓存幂等补回内联图标（延时让 ST 重渲先落定）。
+  const ttsMessageEditedHandler = () => {
+    const t = settings.tts || {};
+    if (!t.enabled || !t.injectInChat) return;
+    ttsScanDebounced(250);
   };
   const pairs = [
     [types.APP_READY || 'app_ready', appReadyHandler],   // 注水后把悬浮球挪回上次拖动的位置（修偶发回默认位）
     [types.MESSAGE_RECEIVED || 'message_received', refreshHandler],   // 仅角色回复触发；重 roll/删楼由 refreshHandler 照实重算
     [types.MESSAGE_DELETED || 'message_deleted', applyDirectorInjection],   // 删楼即刻重判注入：若已回退到推演前的长度，悬空检测会清空注入
+    [types.MESSAGE_EDITED || 'message_edited', ttsMessageEditedHandler],   // 原地编辑：仅按缓存补回被重渲抹掉的内联 🔊（不动列表/音频/key）
     [types.CHAT_CHANGED || 'chat_changed', rerenderHandler],
     [types.GROUP_UPDATED || 'group_updated', rerenderHandler],
     [types.CHARACTER_SELECTED || 'character_selected', rerenderHandler],
@@ -5393,6 +7221,7 @@ function init() {
   window.addEventListener('resize', resizeHandler);
   bindEvents();
   applyDirectorInjection();
+  ttsStartChat();   // 若 ST 已就绪则即刻挂注入；未就绪由 APP_READY 兜底
   console.log(`[${EXTENSION_NAME}] v${VERSION} loaded`);
 }
 
@@ -5428,6 +7257,7 @@ function cleanupRuntime(resetSettings = false) {
   document.getElementById(INPUT_BUTTON_ID)?.remove();
   inputMenuObserver?.disconnect?.();
   inputMenuObserver = null;
+  ttsStopChat();   // 清理有声注入的 observer/委托/挂件，避免停用或重载后残留
   if (resizeHandler) window.removeEventListener('resize', resizeHandler);
   resizeHandler = null;
   unbindEvents();
