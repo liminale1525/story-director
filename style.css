@@ -2152,6 +2152,8 @@ html body #zmer-universal-toast-theme-layer { z-index: 2147483646 !important; }
 
 /* 幕后说明灰色小字：统一缩到与输出格式提示同字号 */
 #story-director-modal .sd-hint-sm { font-size: .8em; line-height: 1.4; }
+/* 语言增强/音效器：小字注释独占一行（紧贴 label 下方、控件上方留白），窄屏移动端不再挤成一坨 */
+#story-director-modal .sd-tts-fx-hint { display: block; margin: 2px 0 6px; opacity: .85; }
 #story-director-modal .sd-livefeature-row { margin-top: 4px; }
 #story-director-modal .sd-livefeature-row + .sd-livefeature-row { margin-top: 12px; }
 #story-director-modal .sd-livefeature-row .sd-hint-sm { margin: 3px 0 0; }
@@ -2646,6 +2648,43 @@ html body #zmer-universal-toast-theme-layer { z-index: 2147483646 !important; }
 }
 #story-director-modal .sd-tts-tag-row .text_pole { margin: 0 !important; }
 #story-director-modal .sd-tts-tag-row .sd-tts-tag-del { width: 34px; height: 34px; }
+/* 发音词典行：原文 → 读音 + 删除 */
+#story-director-modal .sd-tts-prondict-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 18px minmax(0, 1fr) 34px;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+#story-director-modal .sd-tts-prondict-row .text_pole { margin: 0 !important; }
+#story-director-modal .sd-tts-prondict-arrow { text-align: center; color: var(--sd-muted); }
+#story-director-modal .sd-tts-prondict-row .sd-tts-prondict-del { width: 34px; height: 34px; }
+/* 人设参照卡：身份标签 + 世界书取材式（刷新→下拉多选书→选中书展开条目勾选） */
+#story-director-modal .sd-tts-extract-tags { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+#story-director-modal .sd-tts-extract-wb-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+#story-director-modal .sd-tts-extract-wb-head > span { display: inline-flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+/* 下拉「选择」+ 条目列 两个折叠栏（同款 summary） */
+#story-director-modal .sd-tts-extract-wb-dropdown,
+#story-director-modal .sd-tts-extract-wb-itemfold { border: 1px solid var(--sd-hairline); border-radius: 10px; overflow: hidden; margin-bottom: 6px; }
+#story-director-modal .sd-tts-extract-wb-dropdown > summary,
+#story-director-modal .sd-tts-extract-wb-itemfold > summary { cursor: pointer; list-style: none; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px; font-size: .86em; color: var(--sd-text); background: var(--sd-glass-weak); }
+#story-director-modal .sd-tts-extract-wb-dropdown > summary::-webkit-details-marker,
+#story-director-modal .sd-tts-extract-wb-itemfold > summary::-webkit-details-marker { display: none; }
+#story-director-modal .sd-tts-extract-wb-dropdown > summary span,
+#story-director-modal .sd-tts-extract-wb-itemfold > summary span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#story-director-modal .sd-tts-extract-wb-dropdown > summary b,
+#story-director-modal .sd-tts-extract-wb-itemfold > summary b { color: var(--sd-accent); font-weight: 600; font-size: .9em; flex: 0 0 auto; }
+/* 书列表（下拉体）：checkbox + 点击书名切查看 */
+#story-director-modal .sd-tts-extract-wb-list { max-height: 180px; overflow-y: auto; padding: 4px; }
+#story-director-modal .sd-tts-extract-wb-row { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 8px; }
+#story-director-modal .sd-tts-extract-wb-row.sd-tts-extract-wb-viewing { background: var(--sd-glass-weak); }
+#story-director-modal .sd-tts-extract-wb-name { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; background: transparent; border: 0; color: var(--sd-text); cursor: pointer; font: inherit; font-size: .85em; text-align: left; padding: 2px 0; }
+#story-director-modal .sd-tts-extract-wb-name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#story-director-modal .sd-tts-extract-wb-tag { font-style: normal; font-size: .78em; color: var(--sd-accent); border: 1px solid var(--sd-hairline); border-radius: 6px; padding: 0 5px; flex: 0 0 auto; }
+/* 条目列（条目体） */
+#story-director-modal .sd-tts-extract-wb-items { max-height: 220px; overflow-y: auto; padding: 6px 10px; display: flex; flex-direction: column; gap: 6px; }
+#story-director-modal .sd-tts-extract-wb-item { display: flex; align-items: center; gap: 8px; font-size: .84em; color: var(--sd-text); cursor: pointer; }
+#story-director-modal .sd-tts-extract-wb-item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* 滑条全自绘：accent-color 只染填充/滑块，轨道仍是浏览器默认（浅主题下近白、糊在浅卡上看不见）。
    故 appearance:none 后显式画轨道(主题边框色) + 滑块(主题强调色)，双 ID + !important 压过 ST 移动端高特异性。 */
 #story-director-modal#story-director-modal input[type=range] {
@@ -2840,3 +2879,373 @@ html body #zmer-universal-toast-theme-layer { z-index: 2147483646 !important; }
 .sd-tts-popup-actions .sd-mini-btn { padding: 5px 14px; border: 1px solid var(--sd-accent, #b08d57); border-radius: 8px; background: transparent; color: var(--sd-text, #eee); cursor: pointer; font: inherit; font-size: 0.9em; }
 .sd-tts-popup-actions .sd-mini-btn:hover { background: var(--sd-glass-weak, rgba(255,255,255,.08)); }
 .sd-tts-popup-actions .sd-mini-btn i { margin-right: 5px; }
+
+/* ============================================================
+   共读 · 电子书陪读模块（阶段 1A：书架 + 阅读器·手机阅读 APP 式）
+   阅读器跟随千幕主题与字体；全屏走 body portal 覆盖整个 ST 页面。
+   ============================================================ */
+
+/* ── 头部入口按钮（与 sd-geo-shortcut 同款圆形框） ── */
+#story-director-modal .sd-coread-shortcut {
+  position: static !important;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px; padding: 0 !important;
+  border: 1px solid var(--sd-hairline) !important;
+  border-radius: 999px !important; cursor: pointer;
+  color: var(--sd-text) !important; background: var(--sd-glass-weak) !important; box-shadow: none !important;
+  transition: background .2s ease, color .2s ease;
+}
+#story-director-modal .sd-coread-shortcut i { font-size: 14px; }
+#story-director-modal .sd-coread-shortcut:hover { background: var(--sd-glass) !important; }
+#story-director-modal .sd-coread-shortcut.active { color: var(--sd-accent) !important; background: var(--sd-glass) !important; }
+
+/* ── 阅读器永远走 body portal（不再内嵌模态，规避 .sd-window 包含块裁切窄屏/移动端） ── */
+
+/* ── 书架 ── */
+.sd-reader-lib { display: flex; flex-direction: column; gap: 14px; }
+.sd-reader-lib-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.sd-reader-search {
+  flex: 1; min-width: 120px; height: 36px; box-sizing: border-box;
+  background: var(--sd-input-bg); color: var(--sd-text);
+  border: 1px solid var(--sd-border); border-radius: 9px; padding: 0 12px; font: inherit; font-size: .92em;
+}
+.sd-reader-sort, .sd-reader-view-toggle, .sd-reader-import {
+  height: 36px; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center;
+  background: var(--sd-input-bg); color: var(--sd-text); border: 1px solid var(--sd-border);
+  border-radius: 9px; padding: 0 12px; font: inherit; font-size: .9em; cursor: pointer; gap: 5px;
+}
+.sd-reader-view-toggle { width: 36px; padding: 0; flex: 0 0 auto; }
+.sd-reader-import { background: var(--sd-accent); color: var(--sd-primary-text); border-color: transparent; }
+.sd-reader-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.sd-reader-tag {
+  background: var(--sd-glass-weak); color: var(--sd-muted); border: 1px solid var(--sd-hairline);
+  border-radius: 20px; padding: 3px 12px; font-size: .82em; cursor: pointer;
+}
+.sd-reader-tag.active { background: var(--sd-accent); color: var(--sd-primary-text); border-color: transparent; }
+
+/* 网格视图 */
+.sd-reader-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap: 16px; }
+.sd-reader-card { position: relative; cursor: pointer; display: flex; flex-direction: column; gap: 8px; transition: transform .16s; }
+.sd-reader-card:hover { transform: translateY(-3px); }
+.sd-reader-card-cover {
+  position: relative; aspect-ratio: 3/4; border-radius: 12px; overflow: hidden;
+  box-shadow: 0 6px 18px rgba(0,0,0,.16); border: 1px solid var(--sd-hairline);
+}
+.sd-reader-cover-ph {
+  width: 100%; height: 100%; box-sizing: border-box; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+  padding: 14px; text-align: center;
+  background: linear-gradient(150deg, var(--sd-accent), var(--sd-text)); color: var(--sd-primary-text);
+}
+.sd-reader-cover-title {
+  font-size: 1.02em; font-weight: 700; line-height: 1.35; max-width: 100%;
+  display: -webkit-box; -webkit-line-clamp: 4; line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; word-break: break-word;
+}
+.sd-reader-cover-author { font-size: .76em; opacity: .8; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sd-reader-prog {
+  position: absolute; left: 6px; bottom: 6px; background: rgba(0,0,0,.55); color: #fff;
+  font-size: .7em; padding: 1px 7px; border-radius: 10px; font-variant-numeric: tabular-nums;
+}
+.sd-reader-card-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.sd-reader-card-title { font-size: .9em; font-weight: 600; color: var(--sd-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sd-reader-card-sub { font-size: .76em; color: var(--sd-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sd-reader-card-del {
+  position: absolute; right: 5px; top: 5px; background: rgba(0,0,0,.5); color: #fff; border: 0;
+  width: 24px; height: 24px; border-radius: 7px; cursor: pointer; opacity: 0; transition: opacity .16s; font-size: .8em;
+}
+.sd-reader-card:hover .sd-reader-card-del { opacity: 1; }
+
+/* 列表视图：纯文字行 */
+.sd-reader-lib-list .sd-reader-grid { display: flex; flex-direction: column; gap: 0; }
+.sd-reader-row {
+  display: flex; align-items: center; gap: 12px; cursor: pointer;
+  padding: 12px 8px; border-bottom: 1px solid var(--sd-hairline);
+}
+.sd-reader-row:hover { background: var(--sd-glass-weak); }
+.sd-reader-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.sd-reader-row-title { font-size: .94em; font-weight: 600; color: var(--sd-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sd-reader-row-sub { font-size: .78em; color: var(--sd-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sd-reader-row-prog { font-size: .8em; color: var(--sd-muted); font-variant-numeric: tabular-nums; flex: 0 0 auto; }
+.sd-reader-row .sd-reader-card-del { position: static; opacity: .55; background: transparent; color: var(--sd-muted); width: 28px; height: 28px; flex: 0 0 auto; }
+
+.sd-reader-empty { text-align: center; padding: 48px 20px; color: var(--sd-muted); }
+.sd-reader-empty i { font-size: 2.4em; opacity: .5; display: block; margin-bottom: 12px; }
+.sd-reader-empty p { font-size: .9em; line-height: 1.7; }
+
+/* ── 阅读器舞台（始终 body portal·真·全页，逃离模态包含块） ── */
+/* portal 固定铺满视口，用 100dvh 适配移动端浏览器 UI；stage 绝对铺满 portal */
+.sd-reader-portal {
+  position: fixed; inset: 0; z-index: 2147483005;
+  width: 100vw; height: 100vh; height: 100dvh; overflow: hidden;
+}
+/* 千幕模态打开期间：压制 ST 快捷回复栏（QR bar）。搜索框/笔记框聚焦时 ST 会经全局 focus 机制
+   牵出快捷栏，bubble 阶段 stopPropagation 拦不住；模态全屏覆盖时该栏本就不可见，直接 CSS 隐藏最稳。 */
+body.sd-qm-modal-open #qr--bar,
+body.sd-qm-modal-open .qr--bar,
+body.sd-qm-modal-open #quickReplyBar,
+body.sd-qm-modal-open #send_form .qr--buttons,
+body.sd-qm-modal-open #qr--buttons { display: none !important; }
+.sd-reader-stage {
+  position: absolute; inset: 0; display: flex; flex-direction: column; overflow: hidden;
+  background: var(--sd-folder-head, #f5f1e8); color: var(--sd-text); font-family: var(--sd-font, inherit);
+}
+
+/* 阅读器按钮：portal 挂在 body 上、不在 #story-director-modal 作用域内，故 .sd-btn 那套主样式够不着→
+   会回落浏览器默认(浅字浅底/看不清)。这里把同款规则镜像到 portal 作用域，复用 portal 已复制的主题变量，
+   与千幕主题恒一致。后续阅读器内任何 .sd-btn / .sd-primary / .sd-danger 自动联动，不必再单独配色。 */
+#sd-reader-portal .sd-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  min-height: 34px; padding: 7px 14px; border-radius: 999px;
+  border: 1px solid var(--sd-border); background: var(--sd-glass); color: var(--sd-text);
+  font: inherit; font-size: .92em; line-height: 1.2; white-space: nowrap; cursor: pointer;
+  box-shadow: 0 1px 0 rgba(255,255,255,.22) inset, 0 1px 2px rgba(0,0,0,.06);
+  transition: transform .15s ease, filter .15s ease, background .2s ease, color .2s ease;
+}
+#sd-reader-portal .sd-btn:hover:not(:disabled) { transform: translateY(-1px); filter: brightness(1.05); }
+#sd-reader-portal .sd-btn:disabled { cursor: not-allowed; opacity: .46; }
+#sd-reader-portal .sd-btn i { font-size: .92em; opacity: .85; }
+#sd-reader-portal .sd-primary { background: var(--sd-primary); color: var(--sd-primary-text); border-color: transparent; }
+#sd-reader-portal .sd-danger { color: #a23a3a; border-color: rgba(162,58,58,.35); }
+.sd-reader-fs-placeholder { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 60px 20px; color: var(--sd-muted); text-align: center; }
+.sd-reader-fs-placeholder i { font-size: 2.4em; opacity: .5; }
+.sd-reader-resume { margin-top: 10px; cursor: pointer; }
+
+/* 顶栏：固定不抽回 */
+.sd-reader-topbar {
+  display: flex; align-items: center; gap: 4px; padding: 10px 12px; flex: 0 0 auto; z-index: 4;
+  background: var(--sd-folder-head); border-bottom: 1px solid var(--sd-hairline);
+  padding-top: max(10px, env(safe-area-inset-top));
+}
+.sd-reader-topbar button { background: transparent; border: 0; color: var(--sd-muted); cursor: pointer; font-size: 1em; padding: 6px 9px; border-radius: 8px; flex: 0 0 auto; }
+.sd-reader-topbar button:hover { color: var(--sd-text); background: var(--sd-glass-weak); }
+.sd-reader-chtitle { flex: 1; min-width: 0; font-size: .92em; font-weight: 600; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sd-reader-mark-btn.active { color: var(--sd-accent) !important; }
+.sd-reader-back { font-size: 1.15em !important; }
+
+/* 正文：占满 topbar 以下全部空间；底栏浮于其上，不预留空位 */
+.sd-reader-body { flex: 1; min-height: 0; overflow-y: auto; padding: 26px var(--sd-rd-px, 6%) 84px; scroll-behavior: smooth; -webkit-overflow-scrolling: touch; }
+/* 对话图钉固定：对话抽屉常驻底部，正文给出 padding 让全文可滚于其上 */
+.sd-reader-dialog-pinned .sd-reader-body { padding-bottom: calc(var(--sd-rd-dialogh, 300px) + 24px); }
+.sd-reader-article { margin: 0 auto; }
+.sd-reader-h2 { font-size: 1.3em; font-weight: 600; margin: 0 0 1.2em; line-height: 1.4; }
+.sd-reader-article p { margin: 0 0 var(--sd-rd-para, 1em); text-indent: 2em; }
+.sd-reader-blank { color: var(--sd-muted); font-style: italic; text-indent: 0; }
+
+/* 底栏：绝对定位浮于正文底部·四等宽钮·可抽回 */
+.sd-reader-bottombar {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 5;
+  display: flex; align-items: stretch; padding: 6px 8px;
+  background: var(--sd-folder-head); border-top: 1px solid var(--sd-hairline);
+  transition: transform .2s, opacity .2s;
+  padding-bottom: max(6px, env(safe-area-inset-bottom));
+}
+.sd-reader-bb {
+  flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 3px;
+  background: transparent; border: 0; color: var(--sd-muted); cursor: pointer; font-size: 1.05em; padding: 6px 2px; border-radius: 8px;
+}
+.sd-reader-bb span { font-size: .6em; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sd-reader-bb:hover { color: var(--sd-text); background: var(--sd-glass-weak); }
+
+/* 底栏抽回态（顶栏永不动） */
+.sd-reader-bar-hidden .sd-reader-bottombar { opacity: 0; transform: translateY(110%); pointer-events: none; }
+
+/* 划线工具浮窗：跟随选区/划线定位（JS 设 left/top）·父级 划线|笔记，展开样式级 + 取色 + 返回 */
+.sd-reader-hltools {
+  position: absolute; z-index: 11;
+  display: flex; align-items: center; gap: 3px; padding: 5px;
+  background: var(--sd-folder-head); border: 1px solid var(--sd-hairline); border-radius: 12px;
+  box-shadow: 0 8px 28px rgba(0,0,0,.3);
+}
+/* 阅读器内大量元素用 display:flex/grid 布局，会盖过 [hidden] 自带的 display:none。
+   一条作用域兜底：portal 内任何带 hidden 属性的元素一律真隐藏。
+   依赖它的：划线浮窗三级(hltools-lv)、目录/笔记/书签三页(ptab)、笔记编辑浮层(noteoverlay)。
+   抽屉走 .open+transform(非 hidden)，不受影响。 */
+#sd-reader-portal [hidden] { display: none !important; }
+.sd-reader-hltools-lv { display: flex; align-items: center; gap: 3px; }
+.sd-reader-hltools button {
+  background: transparent; border: 0; color: var(--sd-text); cursor: pointer; border-radius: 9px;
+  display: inline-flex; align-items: center; gap: 6px; justify-content: center; white-space: nowrap;
+}
+.sd-reader-hltools button:hover { background: var(--sd-glass-weak); color: var(--sd-accent); }
+/* 父级/已划线级：带文字钮 */
+.sd-reader-hltools-main button, .sd-reader-hltools-exist button { font-size: .84em; padding: 8px 14px; }
+.sd-reader-hltools-main button span, .sd-reader-hltools-exist button span { font-size: 1em; }
+/* 样式级：图标方钮 + 返回箭头 */
+.sd-reader-hltools-styles button { width: 38px; height: 38px; font-size: 1em; }
+.sd-reader-hltools-styles [data-back] { color: var(--sd-muted); border-right: 1px solid var(--sd-hairline); border-radius: 0; padding-right: 4px; margin-right: 2px; }
+.sd-reader-hlcolor { position: relative; width: 38px; height: 38px; border-radius: 9px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; overflow: hidden; }
+.sd-reader-hlcolor input[type=color] { position: absolute; inset: 0; opacity: 0; cursor: pointer; border: 0; padding: 0; }
+.sd-reader-hlcolor span { width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--sd-folder-head); box-shadow: 0 0 0 1px var(--sd-hairline); }
+
+/* 正文划线高亮：三种样式（--hl-color 来自划线快照色·缺省回落主题强调色·荧光经 color-mix 自动半透明） */
+.sd-reader-hl { cursor: pointer; color: inherit; background: transparent; }
+.sd-reader-hl-mark { background: color-mix(in srgb, var(--hl-color, var(--sd-accent)) 32%, transparent); border-radius: 3px; padding: 0 1px; }
+.sd-reader-hl-wavy { text-decoration: underline wavy var(--hl-color, var(--sd-accent)); text-underline-offset: 3px; }
+.sd-reader-hl-underline { border-bottom: 2px solid var(--hl-color, var(--sd-accent)); }
+
+/* 抽屉顶部抓手 */
+.sd-reader-panel-grip { width: 36px; height: 4px; border-radius: 3px; background: var(--sd-hairline); margin: 8px auto 2px; flex: 0 0 auto; }
+
+/* 抽屉（从底部升起·浮于正文+底栏之上） */
+.sd-reader-panel {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 10; max-height: 72%;
+  background: var(--sd-folder-head); border-top: 1px solid var(--sd-hairline);
+  border-radius: 16px 16px 0 0; box-shadow: 0 -10px 36px rgba(0,0,0,.22);
+  transform: translateY(110%); transition: transform .26s ease; display: flex; flex-direction: column;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.sd-reader-panel.open { transform: translateY(0); }
+.sd-reader-toc { padding-bottom: 8px; }
+.sd-reader-panel-tabs { display: flex; gap: 4px; padding: 12px 14px 8px; flex: 0 0 auto; }
+.sd-reader-panel-tabs button { flex: 1; background: transparent; border: 0; color: var(--sd-muted); cursor: pointer; font: inherit; font-size: .88em; padding: 7px; border-radius: 8px; }
+.sd-reader-panel-tabs button.active { background: var(--sd-glass-weak); color: var(--sd-accent); font-weight: 600; }
+.sd-reader-panel-body { overflow-y: auto; padding: 0 10px 8px; min-height: 0; }
+.sd-reader-toc-item {
+  display: block; width: 100%; text-align: left; background: transparent; border: 0; color: var(--sd-text);
+  padding: 9px 12px; border-radius: 8px; cursor: pointer; font: inherit; font-size: .86em;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sd-reader-toc-item:hover { background: var(--sd-glass-weak); }
+.sd-reader-toc-item.active { color: var(--sd-accent); font-weight: 600; }
+.sd-reader-panel-empty { padding: 28px 16px; text-align: center; color: var(--sd-muted); font-size: .85em; line-height: 1.7; }
+.sd-reader-note-item { padding: 10px 12px; border-bottom: 1px solid var(--sd-hairline); }
+.sd-reader-note-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.sd-reader-note-kind { font-size: .7em; background: var(--sd-glass-weak); color: var(--sd-muted); padding: 1px 8px; border-radius: 10px; flex: 0 0 auto; }
+.sd-reader-note-kind.sd-reader-kind-note { color: var(--sd-accent); background: color-mix(in srgb, var(--sd-accent) 16%, transparent); }
+.sd-reader-note-jump { background: transparent; border: 0; color: var(--sd-muted); cursor: pointer; font-size: .76em; padding: 0; }
+.sd-reader-note-edit { margin-left: auto; background: transparent; border: 0; color: var(--sd-muted); cursor: pointer; font-size: .82em; }
+.sd-reader-note-del { background: transparent; border: 0; color: var(--sd-muted); cursor: pointer; font-size: .85em; }
+.sd-reader-note-edit:hover, .sd-reader-note-del:hover { color: var(--sd-accent); }
+.sd-reader-note-text { font-size: .85em; line-height: 1.6; color: var(--sd-text); }
+.sd-reader-note-anno { font-size: .8em; color: var(--sd-muted); margin-top: 4px; padding-left: 8px; border-left: 2px solid var(--sd-accent); }
+
+/* 语音条列表 */
+.sd-reader-voice-item { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--sd-hairline); }
+.sd-reader-voice-play { background: var(--sd-glass-weak); border: 0; color: var(--sd-accent); cursor: pointer; width: 30px; height: 30px; border-radius: 50%; flex: 0 0 auto; }
+.sd-reader-voice-main { flex: 1; min-width: 0; }
+.sd-reader-voice-text { font-size: .85em; line-height: 1.6; color: var(--sd-text); }
+.sd-reader-voice-time { font-size: .72em; color: var(--sd-muted); margin-top: 3px; }
+
+/* 对话抽屉（占位·1B 接入·可拖拽调高·图钉固定） */
+.sd-reader-dialog { max-height: 88%; }
+.sd-reader-dialog-grip { cursor: ns-resize; padding: 6px 0; margin: 2px auto; width: 48px; }
+.sd-reader-dialog-head { display: flex; align-items: center; justify-content: space-between; padding: 2px 14px 8px; font-size: .82em; color: var(--sd-muted); font-weight: 600; flex: 0 0 auto; }
+.sd-reader-dialog-head-btns { display: flex; align-items: center; gap: 2px; }
+.sd-reader-dialog-setup { background: transparent; border: 0; color: var(--sd-muted); cursor: pointer; padding: 4px 8px; border-radius: 8px; }
+.sd-reader-dialog-setup:hover { color: var(--sd-text); background: var(--sd-glass-weak); }
+.sd-reader-dialog-pin { background: transparent; border: 0; color: var(--sd-muted); cursor: pointer; padding: 4px 8px; border-radius: 8px; transform: rotate(38deg); }
+.sd-reader-dialog-pin:hover { color: var(--sd-text); background: var(--sd-glass-weak); }
+.sd-reader-dialog-pin.active { color: var(--sd-accent); transform: rotate(0deg); }
+/* 固定态对话抽屉降一层，其他抽屉打开时可覆盖其上 */
+.sd-reader-dialog-pinned .sd-reader-dialog { z-index: 8; }
+.sd-reader-dialog-body { flex: 1; min-height: 0; overflow-y: auto; padding: 0 14px; }
+.sd-reader-dialog-input { display: flex; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--sd-hairline); flex: 0 0 auto; align-items: flex-end; }
+.sd-reader-dialog-ta { flex: 1; min-width: 0; background: var(--sd-input-bg); color: var(--sd-text); border: 1px solid var(--sd-border); border-radius: 10px; padding: 9px 12px; font: inherit; font-size: .88em; resize: none; max-height: 120px; }
+.sd-reader-dialog-ta:disabled { opacity: .6; cursor: not-allowed; }
+.sd-reader-dialog-send { flex: 0 0 auto; width: 38px; height: 38px; border-radius: 10px; border: 0; background: var(--sd-accent); color: var(--sd-primary-text); cursor: pointer; }
+.sd-reader-dialog-send:disabled { opacity: .4; cursor: not-allowed; }
+
+/* 进度抽屉：上行左右半 + 当前/全文 + 滑块 */
+.sd-reader-prog-inner { padding: 6px 18px 24px; display: flex; flex-direction: column; gap: 14px; }
+.sd-reader-prog-halves { display: flex; }
+.sd-reader-prog-half { flex: 1; text-align: center; }
+.sd-reader-prog-half + .sd-reader-prog-half { border-left: 1px solid var(--sd-hairline); }
+.sd-reader-prog-pct { font-size: 2.1em; font-weight: 700; color: var(--sd-accent); line-height: 1; font-variant-numeric: tabular-nums; }
+.sd-reader-prog-pct small { font-size: .42em; font-weight: 600; margin-left: 2px; }
+.sd-reader-prog-dur { font-size: 1.5em; font-weight: 700; color: var(--sd-text); line-height: 1.3; }
+.sd-reader-prog-cap { font-size: .74em; color: var(--sd-muted); margin-top: 6px; }
+.sd-reader-prog-page { text-align: center; font-size: .82em; color: var(--sd-muted); font-variant-numeric: tabular-nums; }
+.sd-reader-prog-ctl { display: flex; align-items: center; gap: 10px; }
+.sd-reader-prog-ctl button { background: transparent; border: 0; color: var(--sd-muted); cursor: pointer; font-size: 1em; padding: 6px; flex: 0 0 auto; }
+.sd-reader-prog-ctl button:disabled { opacity: .3; cursor: default; }
+.sd-reader-prog-slider { flex: 1; min-width: 0; accent-color: var(--sd-accent); }
+
+/* 笔记编辑浮层（脱离五抽屉体系·居中浮于一切之上·窄屏移动端永不出界） */
+.sd-reader-noteoverlay {
+  position: absolute; inset: 0; z-index: 14;
+  display: flex; align-items: center; justify-content: center; padding: 20px;
+  background: rgba(0,0,0,.42); backdrop-filter: blur(2px);
+}
+.sd-reader-noteoverlay-card {
+  width: 100%; max-width: 440px; max-height: 80%; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 12px;
+  background: var(--sd-folder-head); border: 1px solid var(--sd-hairline);
+  border-radius: 16px; box-shadow: 0 18px 50px rgba(0,0,0,.4); padding: 16px 16px 14px;
+}
+.sd-reader-noteoverlay-head { font-size: .94em; font-weight: 600; color: var(--sd-text); display: flex; align-items: center; gap: 8px; }
+.sd-reader-noteoverlay-head i { color: var(--sd-accent); }
+.sd-reader-noteedit-quote { font-size: .84em; color: var(--sd-muted); line-height: 1.6; padding: 8px 12px; border-left: 2px solid var(--sd-accent); background: var(--sd-glass-weak); border-radius: 0 8px 8px 0; max-height: 120px; overflow-y: auto; }
+.sd-reader-noteedit-input { background: var(--sd-input-bg); color: var(--sd-text); border: 1px solid var(--sd-border); border-radius: 10px; padding: 10px 12px; font: inherit; font-size: .9em; min-height: 84px; resize: vertical; line-height: 1.6; }
+.sd-reader-noteedit-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.sd-reader-noteedit-actions .sd-btn { cursor: pointer; }
+
+/* 伴读设定浮层（1B-1·复用笔记浮层定位语言·取材式独立勾选） */
+.sd-reader-setupoverlay {
+  position: absolute; inset: 0; z-index: 14;
+  display: flex; align-items: center; justify-content: center; padding: 20px;
+  background: rgba(0,0,0,.42); backdrop-filter: blur(2px);
+}
+.sd-reader-setupoverlay-card {
+  width: 100%; max-width: 460px; max-height: 84%; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 14px;
+  background: var(--sd-folder-head); border: 1px solid var(--sd-hairline);
+  border-radius: 16px; box-shadow: 0 18px 50px rgba(0,0,0,.4); padding: 16px 16px 14px;
+}
+.sd-reader-setup-body { display: flex; flex-direction: column; gap: 16px; }
+.sd-reader-setup-row { display: flex; flex-direction: column; gap: 6px; }
+.sd-reader-setup-lab { font-size: .82em; color: var(--sd-muted); }
+.sd-reader-setup-visible {
+  background: var(--sd-input-bg); color: var(--sd-text); border: 1px solid var(--sd-border);
+  border-radius: 9px; padding: 8px 11px; font: inherit; font-size: .88em; min-width: 0;
+}
+/* 身份标签（书友 / 我·只读·联动 ST 当前选择） */
+.sd-reader-setup-tags { display: flex; flex-wrap: wrap; gap: 8px; }
+.sd-reader-setup-tag { display: inline-flex; align-items: center; gap: 6px; font-size: .82em; color: var(--sd-text); background: var(--sd-glass-weak); border: 1px solid var(--sd-hairline); border-radius: 999px; padding: 5px 12px; }
+.sd-reader-setup-tag i { color: var(--sd-accent); opacity: .85; }
+/* 共读世界书（取材式下拉 + 条目勾选） */
+.sd-reader-cwb-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.sd-reader-cwb-head > span { display: inline-flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.sd-reader-cwb-scan { cursor: pointer; font-size: .8em; padding: 5px 12px; flex: 0 0 auto; }
+.sd-reader-cwb-dropdown { border: 1px solid var(--sd-hairline); border-radius: 10px; overflow: hidden; }
+.sd-reader-cwb-dropdown > summary { cursor: pointer; list-style: none; display: flex; align-items: center; justify-content: space-between; padding: 9px 12px; font-size: .84em; color: var(--sd-text); background: var(--sd-glass-weak); }
+.sd-reader-cwb-dropdown > summary::-webkit-details-marker { display: none; }
+.sd-reader-cwb-dropdown > summary b { color: var(--sd-accent); font-weight: 600; font-size: .92em; }
+.sd-reader-cwb-list { max-height: 180px; overflow-y: auto; padding: 4px; }
+.sd-reader-cwb-row { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 8px; }
+.sd-reader-cwb-row.sd-reader-cwb-viewing { background: var(--sd-glass-weak); }
+.sd-reader-cwb-name { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; background: transparent; border: 0; color: var(--sd-text); cursor: pointer; font: inherit; font-size: .85em; text-align: left; padding: 2px 0; }
+.sd-reader-cwb-name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sd-reader-cwb-tag { font-style: normal; font-size: .82em; color: var(--sd-accent); border: 1px solid var(--sd-hairline); border-radius: 6px; padding: 1px 6px; flex: 0 0 auto; }
+/* 条目列折叠容器（与书下拉同款 summary） */
+.sd-reader-cwb-itemfold { border: 1px solid var(--sd-hairline); border-radius: 10px; overflow: hidden; margin-top: 8px; }
+.sd-reader-cwb-itemfold > summary { cursor: pointer; list-style: none; display: flex; align-items: center; justify-content: space-between; padding: 9px 12px; font-size: .84em; color: var(--sd-text); background: var(--sd-glass-weak); }
+.sd-reader-cwb-itemfold > summary::-webkit-details-marker { display: none; }
+.sd-reader-cwb-itemfold > summary span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sd-reader-cwb-itemfold > summary b { color: var(--sd-accent); font-weight: 600; font-size: .92em; flex: 0 0 auto; margin-left: 8px; }
+.sd-reader-cwb-items { max-height: 240px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; padding: 4px; }
+.sd-reader-cwb-item > summary { cursor: pointer; list-style: none; padding: 6px 8px; border-radius: 8px; }
+.sd-reader-cwb-item > summary::-webkit-details-marker { display: none; }
+.sd-reader-cwb-item > summary:hover { background: var(--sd-glass-weak); }
+.sd-reader-cwb-itemlab { display: flex; align-items: center; gap: 8px; font-size: .84em; color: var(--sd-text); cursor: pointer; }
+.sd-reader-cwb-itemlab span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sd-reader-cwb-item pre { margin: 4px 8px 8px; padding: 8px 10px; background: var(--sd-input-bg); border-radius: 8px; font-size: .78em; color: var(--sd-muted); white-space: pre-wrap; word-break: break-word; max-height: 160px; overflow-y: auto; }
+
+/* 设置抽屉行 */
+.sd-reader-typo-inner { padding: 4px 16px 20px; display: flex; flex-direction: column; gap: 14px; }
+.sd-reader-typo-row { display: flex; align-items: center; gap: 12px; font-size: .86em; color: var(--sd-muted); }
+.sd-reader-typo-row > span { width: 32px; flex: 0 0 auto; }
+.sd-reader-typo-row input[type=range] { flex: 1; min-width: 0; accent-color: var(--sd-accent); }
+.sd-reader-typo-row input[type=number] { width: 72px; flex: 0 0 auto; background: var(--sd-input-bg); color: var(--sd-text); border: 1px solid var(--sd-border); border-radius: 8px; padding: 5px 8px; font: inherit; font-size: .92em; }
+.sd-reader-typo-row > b { width: 32px; flex: 0 0 auto; text-align: right; font-variant-numeric: tabular-nums; color: var(--sd-text); font-weight: 600; }
+.sd-reader-typo-checks label { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; color: var(--sd-text); }
+.sd-reader-typo-checks input { accent-color: var(--sd-accent); flex: 0 0 auto; }
+
+/* 间距预设段控 + 自定义钮 */
+.sd-reader-preset-seg { flex: 1; min-width: 0; display: flex; gap: 4px; background: var(--sd-glass-weak); border-radius: 9px; padding: 3px; }
+.sd-reader-preset-seg button { flex: 1; min-width: 0; background: transparent; border: 0; color: var(--sd-muted); cursor: pointer; font: inherit; font-size: .86em; padding: 6px; border-radius: 7px; }
+.sd-reader-preset-seg button.active { background: var(--sd-folder-head); color: var(--sd-accent); font-weight: 600; box-shadow: 0 1px 4px rgba(0,0,0,.12); }
+.sd-reader-preset-custom { flex: 0 0 auto; width: 34px; height: 34px; background: var(--sd-glass-weak); border: 1px solid var(--sd-hairline); color: var(--sd-muted); cursor: pointer; border-radius: 8px; }
+.sd-reader-preset-custom.active { color: var(--sd-accent); border-color: var(--sd-accent); }
+.sd-reader-custom-wrap { display: none; flex-direction: column; gap: 14px; }
+.sd-reader-custom-wrap.open { display: flex; }
+.sd-reader-typo-io { display: flex; gap: 8px; margin-top: 4px; }
+.sd-reader-typo-io .sd-btn { flex: 1; cursor: pointer; font-size: .84em; justify-content: center; }

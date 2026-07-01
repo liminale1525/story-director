@@ -18,12 +18,46 @@ export const MINIMAX_MODELS = Object.freeze([
   'speech-01-hd', 'speech-01-turbo',
 ]);
 
+// 语言增强 language_boost：null/不传=不指定；auto=模型自判；其余=指定小语种/方言识别增强。
+// 只收常用项（全 40 种用户用不到，列多反增负担）。粤语必须配 Chinese,Yue 才稳。
+export const MINIMAX_LANGUAGE_BOOST = Object.freeze([
+  { value: '', label: '不指定' },
+  { value: 'auto', label: '自动识别' },
+  { value: 'Chinese', label: '中文（普通话）' },
+  { value: 'Chinese,Yue', label: '粤语 / 广东话' },
+  { value: 'English', label: '英文' },
+  { value: 'Japanese', label: '日文' },
+  { value: 'Korean', label: '韩文' },
+]);
+// 音效器 voice_modify.sound_effects：单选其一或无。
+export const MINIMAX_SOUND_EFFECTS = Object.freeze([
+  { value: '', label: '无' },
+  { value: 'spacious_echo', label: '空旷回音' },
+  { value: 'auditorium_echo', label: '礼堂广播' },
+  { value: 'lofi_telephone', label: '电话失真' },
+  { value: 'robotic', label: '电音' },
+]);
+
 // 情绪枚举（官方）：calm=中性 fluent=生动 whisper=低语。
-// 注意：官方无 "neutral"，中性是 calm；whisper 仅 2.6 系列支持。
+// 注意：官方无 "neutral"，中性是 calm。
+// 官方 T2A 文档 emotion 字段：常规 8 情绪全模型可用；whisper(低语) 仅 2.6 系列(2.8 明确不支持)；
+// fluent(生动) 2.6 与 2.8 系列均支持(02/01 不支持)。给不支持的模型传 → API 拒 → 失败。故按模型门控。
 // 不传 emotion 时模型按文本自动判断（官方推荐）——故 'auto' 在请求里=省略该字段。
 export const MINIMAX_EMOTIONS = Object.freeze([
   'auto', 'happy', 'sad', 'angry', 'fearful', 'disgusted', 'surprised', 'calm', 'fluent', 'whisper',
 ]);
+// whisper 仅 2.6 系列；fluent 仅 2.6/2.8 系列。其余情绪全模型通用。不支持时降级 auto（避免 API 报错）。
+// 给定模型是否支持某情绪。
+export function emotionAllowedForModel(emotion, model) {
+  if (!emotion || emotion === 'auto') return true;
+  if (!MINIMAX_EMOTIONS.includes(emotion)) return false;
+  const m = String(model || '');
+  if (emotion === 'whisper') return /^speech-2\.6-/.test(m);          // 低语：仅 2.6
+  if (emotion === 'fluent') return /^speech-2\.(6|8)-/.test(m);       // 生动：2.6 + 2.8
+  return true;                                                        // 常规 8 情绪：全模型
+}
+
+
 
 // 错误码→中文友好提示（取自官方 base_resp.status_code）
 const STATUS_MESSAGES = {
@@ -114,8 +148,9 @@ export async function synthesize(opts = {}) {
   if (Number.isFinite(opts.speed)) voice_setting.speed = clamp(opts.speed, 0.5, 2);
   if (Number.isFinite(opts.vol)) voice_setting.vol = clamp(opts.vol, 0.01, 10);
   if (Number.isFinite(opts.pitch)) voice_setting.pitch = Math.round(clamp(opts.pitch, -12, 12));
-  // emotion：仅当明确给了非 auto 的合法值才传；否则省略=模型自动判断
-  if (opts.emotion && opts.emotion !== 'auto' && MINIMAX_EMOTIONS.includes(opts.emotion)) {
+  // emotion：仅当明确给了非 auto 的合法值才传；否则省略=模型自动判断。
+  // fluent/whisper 仅 2.6 系列支持，给 2.8 等会被 API 拒→静默降级为 auto（省略），避免「生成失败」。
+  if (opts.emotion && opts.emotion !== 'auto' && MINIMAX_EMOTIONS.includes(opts.emotion) && emotionAllowedForModel(opts.emotion, model)) {
     voice_setting.emotion = opts.emotion;
   }
 
@@ -129,6 +164,17 @@ export async function synthesize(opts = {}) {
   };
   if (opts.languageBoost && opts.languageBoost !== 'auto') body.language_boost = opts.languageBoost;
   else if (opts.languageBoost === 'auto') body.language_boost = 'auto';
+  // 发音词典（多音字/生僻音矫正）：tone 数组形如 ["处理/(chu3)(li3)","危险/dangerous"]。全模型支持。
+  if (Array.isArray(opts.pronunciationTone) && opts.pronunciationTone.length) {
+    body.pronunciation_dict = { tone: opts.pronunciationTone };
+  }
+  // 音效器 voice_modify：音高/强度/音色 [-100,100] + sound_effects 四选一。仅在有非默认设置时才下发。
+  const vm = {};
+  if (Number.isFinite(opts.vmPitch) && opts.vmPitch !== 0) vm.pitch = Math.round(clamp(opts.vmPitch, -100, 100));
+  if (Number.isFinite(opts.vmIntensity) && opts.vmIntensity !== 0) vm.intensity = Math.round(clamp(opts.vmIntensity, -100, 100));
+  if (Number.isFinite(opts.vmTimbre) && opts.vmTimbre !== 0) vm.timbre = Math.round(clamp(opts.vmTimbre, -100, 100));
+  if (opts.soundEffects && MINIMAX_SOUND_EFFECTS.some((e) => e.value === opts.soundEffects)) vm.sound_effects = opts.soundEffects;
+  if (Object.keys(vm).length) body.voice_modify = vm;
 
   let url = resolveUrl(opts.endpoint, opts.proxyBase);
   // GroupId 选填：新接口一般不需要；若用户填了，作为 query 兜底附上
@@ -191,6 +237,12 @@ export function cacheKeyFor(opts = {}) {
     Number.isFinite(opts.vol) ? opts.vol : 1,
     opts.emotion && opts.emotion !== 'auto' ? opts.emotion : 'auto',
     String(opts.format || 'mp3'),
+    opts.languageBoost ? String(opts.languageBoost) : '',
+    Number.isFinite(opts.vmPitch) ? opts.vmPitch : 0,
+    Number.isFinite(opts.vmIntensity) ? opts.vmIntensity : 0,
+    Number.isFinite(opts.vmTimbre) ? opts.vmTimbre : 0,
+    opts.soundEffects ? String(opts.soundEffects) : '',
+    Array.isArray(opts.pronunciationTone) && opts.pronunciationTone.length ? opts.pronunciationTone.join('') : '',
   ];
   return 'tts:' + djb2(parts.join(''));
 }

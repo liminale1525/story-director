@@ -1,12 +1,17 @@
 // 千幕 · 通用二进制存储层（IndexedDB）
-// 服务 TTS 音频缓存 / 收藏夹；后续电子书文件可复用。
+// 服务 TTS 音频缓存 / 收藏夹；共读电子书模块复用（书正文/封面/会话/检索日志）。
 // 与 index.js 完全解耦：不反向依赖、不读 settings，纯键值存取。
 // localStorage 存不下二进制大对象，故独立走 IndexedDB；存 Blob，播放时再 createObjectURL。
 
 const DB_NAME = 'qianmu-blobstore';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE_AUDIO = 'audio';         // key: 缓存键   value: { blob, meta, createdAt }
 const STORE_FAVORITES = 'favorites'; // key: 收藏 id  value: { blob, meta, label, createdAt }
+// ── 共读模块（v2 新增）──
+const STORE_BOOKS = 'reader_books';        // key: bookId   value: { meta:{title,author,...}, fullText, chapters:[], createdAt }（重正文，懒取）
+const STORE_COVERS = 'reader_covers';      // key: bookId   value: Blob（封面图）
+const STORE_CHATS = 'reader_chats';        // key: bucketKey value: { messages:[], summaries:[], cursor, names, updatedAt }（陪读会话）
+const STORE_RETLOG = 'reader_retlog';      // key: 自增id    value: { bookId, query, candidates:[], injected:[], at }（检索日志·环形）
 
 let dbPromise = null;
 
@@ -20,6 +25,10 @@ function openDB() {
       const db = req.result;
       if (!db.objectStoreNames.contains(STORE_AUDIO)) db.createObjectStore(STORE_AUDIO);
       if (!db.objectStoreNames.contains(STORE_FAVORITES)) db.createObjectStore(STORE_FAVORITES);
+      if (!db.objectStoreNames.contains(STORE_BOOKS)) db.createObjectStore(STORE_BOOKS);
+      if (!db.objectStoreNames.contains(STORE_COVERS)) db.createObjectStore(STORE_COVERS);
+      if (!db.objectStoreNames.contains(STORE_CHATS)) db.createObjectStore(STORE_CHATS);
+      if (!db.objectStoreNames.contains(STORE_RETLOG)) db.createObjectStore(STORE_RETLOG, { autoIncrement: true });
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => { dbPromise = null; reject(req.error); };
@@ -165,4 +174,102 @@ export async function listFavorites() {
 export function blobStoreAvailable() {
   try { return typeof indexedDB !== 'undefined' && !!indexedDB; }
   catch (_) { return false; }
+}
+
+// ── 共读：书籍正文（重，懒取）────────────────────────────────
+// 轻重分离：书架列表只读 settings 里的轻元数据（标量长度/标题等），正文仅在打开阅读器时按 id 取。
+
+export async function putBook(bookId, record) {
+  const s = await store(STORE_BOOKS, 'readwrite');
+  await reqP(s.put({ ...record, savedAt: Date.now() }, bookId));
+  return bookId;
+}
+
+export async function getBook(bookId) {
+  const s = await store(STORE_BOOKS, 'readonly');
+  return reqP(s.get(bookId));
+}
+
+export async function deleteBook(bookId) {
+  const s = await store(STORE_BOOKS, 'readwrite');
+  await reqP(s.delete(bookId));
+  try { const c = await store(STORE_COVERS, 'readwrite'); await reqP(c.delete(bookId)); } catch (_) {}
+}
+
+export async function listBookIds() {
+  const s = await store(STORE_BOOKS, 'readonly');
+  const keys = await reqP(s.getAllKeys ? s.getAllKeys() : s.getAll());
+  return Array.isArray(keys) ? keys : [];
+}
+
+// ── 共读：封面图 ─────────────────────────────────────────────
+
+export async function putCover(bookId, blob) {
+  const s = await store(STORE_COVERS, 'readwrite');
+  await reqP(s.put(blob, bookId));
+  return bookId;
+}
+
+export async function getCover(bookId) {
+  const s = await store(STORE_COVERS, 'readonly');
+  return reqP(s.get(bookId));
+}
+
+// ── 共读：陪读会话 bucket（消息/总结/游标）──────────────────
+
+export async function putReaderChat(bucketKey, record) {
+  const s = await store(STORE_CHATS, 'readwrite');
+  await reqP(s.put({ ...record, updatedAt: Date.now() }, bucketKey));
+  return bucketKey;
+}
+
+export async function getReaderChat(bucketKey) {
+  const s = await store(STORE_CHATS, 'readonly');
+  return reqP(s.get(bucketKey));
+}
+
+export async function deleteReaderChat(bucketKey) {
+  const s = await store(STORE_CHATS, 'readwrite');
+  await reqP(s.delete(bucketKey));
+}
+
+export async function listReaderChatKeys() {
+  const s = await store(STORE_CHATS, 'readonly');
+  const keys = await reqP(s.getAllKeys ? s.getAllKeys() : s.getAll());
+  return Array.isArray(keys) ? keys : [];
+}
+
+// ── 共读：检索日志（环形，保留最近 maxEntries 条）──────────
+
+export async function pushRetLog(record, maxEntries = 50) {
+  const s = await store(STORE_RETLOG, 'readwrite');
+  await reqP(s.add({ ...record, at: record?.at || Date.now() }));
+  // 裁剪：autoIncrement key 递增，删除最小的若干个
+  const keys = await reqP(s.getAllKeys ? s.getAllKeys() : s.getAll());
+  if (Array.isArray(keys) && keys.length > maxEntries) {
+    const doomed = keys.slice(0, keys.length - maxEntries);
+    for (const k of doomed) await reqP(s.delete(k));
+  }
+}
+
+export async function listRetLog() {
+  const s = await store(STORE_RETLOG, 'readonly');
+  const out = [];
+  await new Promise((resolve, reject) => {
+    const cur = s.openCursor();
+    cur.onsuccess = () => {
+      const c = cur.result;
+      if (!c) { resolve(); return; }
+      out.push({ id: c.key, ...(c.value || {}) });
+      c.continue();
+    };
+    cur.onerror = () => reject(cur.error);
+  });
+  out.sort((a, b) => (b.at || 0) - (a.at || 0));   // 新→旧
+  return out;
+}
+
+export async function clearRetLog() {
+  const s = await store(STORE_RETLOG, 'readwrite');
+  await reqP(s.clear());
 }

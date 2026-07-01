@@ -1,12 +1,16 @@
 // 千幕 (Qianmu) - SillyTavern third-party UI extension
 import { BUILTIN_THEATERS, BUILTIN_THEATER_FOLDER } from './builtin-theaters.js';
 import { QIANMU_THEATERS, QIANMU_THEATER_FOLDER } from './qianmu-theaters.js';
-import { synthesize as ttsSynthesize, cacheKeyFor as ttsCacheKey, MINIMAX_ENDPOINTS, MINIMAX_MODELS } from './qianmu-tts.js';
+import { synthesize as ttsSynthesize, cacheKeyFor as ttsCacheKey, MINIMAX_ENDPOINTS, MINIMAX_MODELS, emotionAllowedForModel, MINIMAX_LANGUAGE_BOOST, MINIMAX_SOUND_EFFECTS } from './qianmu-tts.js';
 import * as blobStore from './qianmu-blobstore.js';
+import * as reader from './qianmu-reader.js';
 
 const MODULE_NAME = 'story_director_liminale';
 const EXTENSION_NAME = '千幕';
-const VERSION = '1.7.3';
+const VERSION = '1.7.4';
+// 共读模块可见性总闸：开发库=true(展示·自测)，正式库=false(隐藏·半成品沉睡)。
+// 唯一 flip 点——推正式库前置 false、推开发库置 true。入口按钮 + tab 路由 + portal 都据此门控。
+const COREAD_VISIBLE = false;
 const SETTINGS_PANEL_ID = 'story-director-settings';
 const MODAL_ID = 'story-director-modal';
 const FLOAT_ID = 'story-director-float';
@@ -366,6 +370,24 @@ const DEFAULT_SETTINGS = Object.freeze({
     // action: 'remove'=删除该标签整段；'extract'=只保留该标签内内容（extract 一旦存在则优先，其余 remove 忽略）。
     tagRules: [{ name: 'thinking', action: 'remove' }],
     stripHtml: true,             // 清洗后再剥裸 HTML 标签（状态栏/卡片等），默认开
+    // 全局发音词典（多音字/生僻音矫正）：[{ from:'处理', to:'(chu3)(li3)' }]，组装成 MiniMax pronunciation_dict.tone。
+    // 全模型支持·JSON 参数不进正文。提取模型按语境判读音为主，此处作「人名等模型拿不准」的权威兜底，一处配全局生效。
+    pronunciationDict: [],
+    // 语言增强（T3）：''=不指定 / 'auto'=模型自判 / 'Chinese,Yue'=粤语 等。混合中英最省心 auto。
+    languageBoost: 'auto',
+    // 音效器（T3·全局·音高/强度/音色 [-100,100]·0=不改；soundEffects 四选一或空）。后续可扩展音色级。
+    vmPitch: 0,
+    vmIntensity: 0,
+    vmTimbre: 0,
+    soundEffects: '',
+    soundFxAuto: false,          // 音效自动化：开则提取模型按语境给每句挑音效(per-line fx)，覆盖全局。靠模型智商·不稳定·默认关
+    // 按音色(voiceId)的音效器覆盖：{ [voiceId]: {vmPitch,vmIntensity,vmTimbre,soundEffects} }。
+    // 有则该音色处处覆盖全局 T3（音效仍让位于自动化 per-line fx）。音色库小铅笔弹窗内「高级·音效器」折叠区编辑。
+    voiceFxById: {},
+    // 提取（人设参照）：人设默认注入(取材式·让情绪有性格基线、"我/你"锚定身份)。世界书取材式——刷新→下拉多选书→选中书展开条目勾选。
+    // 注：世界书「选择」本身按聊天存(getChatStore.ttsExtractWorldBooks/ttsExtractWorldItems)·不同聊天各自绑定；下面两折叠态为全局 UI 偏好。
+    extractWbFoldOpen: true,     // 下拉「选择」折叠态（持久·全局 UI 偏好）
+    extractItemsFoldOpen: true,  // 条目列折叠态（持久·全局 UI 偏好）
     extractPrompt: '',           // 自定义台词提取系统提示词（空=用内置默认 TTS_EXTRACT_SYSTEM）
     extractPromptBackup: null,   // 「恢复上次」：方案载入/重置覆盖前自动备份
     guidanceSchemes: [],         // 台词指导方案库：[{ id, name, folder, content, createdAt }]
@@ -386,17 +408,49 @@ const DEFAULT_SETTINGS = Object.freeze({
     useChatHistory: true,
     historyDepth: 5,
   },
+  // 共读电子书模块：与推演主体无关的独立模块，命名空间隔离在此，零侵入主流程。
+  // 重数据（书正文/封面/会话/检索日志）在 IndexedDB(qianmu-blobstore)，此处只存轻量书目索引 + 阅读偏好。
+  coread: {
+    enabled: false,                 // 总开关，默认关
+    books: [],                      // 轻量书目索引：[{ id, title, author, addedAt, chapterCount, charCount, tags:[], boundChar, progress, lastChapterIndex, lastScrollRatio, ragEnabled }]，正文在 IndexedDB
+    libViewMode: 'grid',            // 书架视图：grid | list
+    libSort: 'addedAt-desc',        // 排序：title/author/progress/addedAt × asc/desc
+    libTags: [],                    // 当前标签筛选
+    // 阅读排版（阅读器跟随千幕主题与字体，不单选）
+    fontSizePx: 19,
+    lineHeight: 1.9,
+    paraSpacing: 1.0,               // 段间距（em 倍率）
+    contentWidthRem: 42,            // 正文宽度（rem，滑动条 28–66）
+    justify: false,                 // 两端对齐
+    spacingPreset: 'normal',        // 间距预设：compact | normal | loose | custom
+    hlColor: '',                    // 划线颜色（空＝跟随主题强调色）；新划线快照此色
+    fallbackChapterChars: 2400,     // 分章失败时的字数兜底
+    voiceCacheLimit: 100,           // 共读语音条缓存上限（条），用户可自定义
+    bgCustom: '',                   // 阅读背景自定义 CSS（DIY，1B 接线）
+    bubbleCustom: '',               // 对话气泡自定义 CSS（DIY，1B 接线）
+    drawerHeight: 240,              // 对话抽屉高度(px)，可拖拽
+    // 伴读设定层（1B·复用取材的拉取/呈现·选择独立·身份/人设默认跟随 ST 当前选择+千幕注入逻辑）
+    companion: {
+      worldBooks: [],               // 共读专属选中的世界书名（独立于主线选择·条目级勾选另存）
+      worldItems: {},               // 共读专属世界书条目勾选 {bookName:{itemId:true/false}}（独立·条目级）
+      visibleCharsBefore: 800,      // 书友可读范围：仅取「当前阅读位置前」N 字（防剧透·断句对齐）
+      foldWbOpen: true,             // 设定浮层：世界书下拉展开态（持久·跨重开书）
+      foldItemsOpen: true,          // 设定浮层：条目列展开态（持久·跨重开书）
+    },
+  },
 });
 
 let settings = null;
 let activeTab = 'dashboard';
 let theaterView = null; // null=常规；{mode:'read', scene}=阅读；{mode:'favorites'}=收藏夹
+let readerView = null;  // 共读：null=书架；{ bookId, fullscreen, chapterIndex }=阅读器全屏子视图
 let editorView = null;  // null=常规；{target, title, value, returnTab}=行内全屏编辑（沿用阅读页逻辑，不另开 body 窗口）
 let ttsEditorReturnScroll = null;  // 进入行内编辑器前的正文滚动位，关闭后恢复（防弹回顶部）
 let theaterScriptSource = '';   // 当前此幕指令来自哪个剧札标题；空=即兴（手动输入/未保存）
 let chatterExpanded = false;       // 尘寰群生：false=动态浮现舞台，true=展开完整台本列表
 let contextScanCache = { presets: {}, worldBooks: {}, presetNames: [], worldBookNames: [], currentPresetName: '', boundWorldBookNames: [], presetScannedAt: '', worldScannedAt: '' };
 let contextAutoScanned = false;    // 本次 ST 会话内是否已自动补扫过取材（重进/刷新后首开取材页时懒加载一次）
+let ttsExtractAutoScanned = false; // 同上·配音「人设参照」世界书：首开配音页时懒加载一次，让已选世界书/条目免刷新即显
 let modalJustOpened = false;        // 仅本次「打开」后的首帧渲染加入场动画，之后的静默重渲染（刷新/扫描/切换）不再重播，消除闪动
 let busy = false;                  // 推演忙碌态
 let abortController = null;         // 推演中止句柄
@@ -1053,7 +1107,7 @@ async function promptNameAndFolder({ dialogTitle, namePlaceholder, name = '', fo
 
 // 音色库条目弹窗：音色名 + 音色 ID（沿用剧札 Popup 交互，无 textarea）
 // withKeywords=true（NPC 原型用）：额外加「关键词描述」字段，喂给提取模型辅助声线归类（仅输入提示，不参与本地匹配/记忆）
-async function promptVoiceLibEntry({ dialogTitle, name = '', voiceId = '', folder = '', keywords = '', nameLabel = '音色名', namePlaceholder = '如 活泼少女音', withKeywords = false }) {
+async function promptVoiceLibEntry({ dialogTitle, name = '', voiceId = '', folder = '', keywords = '', nameLabel = '音色名', namePlaceholder = '如 活泼少女音', withKeywords = false, withFx = false, fx = null }) {
   const context = ctx();
   const Popup = context.Popup;
   if (Popup && context.POPUP_TYPE) {
@@ -1063,6 +1117,22 @@ async function promptVoiceLibEntry({ dialogTitle, name = '', voiceId = '', folde
       ? `<label style="display:block;text-align:left;margin:0 0 4px">关键词描述<span style="opacity:.6;font-weight:400">（辅助提取模型判断声线，越具体越准）</span></label>
          <input type="text" class="text_pole sd-vl-kw" placeholder="如 大学生、干净、18-25岁清朗音" style="width:100%;margin:0 0 10px">`
       : '';
+    const f = isPlainObject(fx) ? fx : {};
+    const fxField = withFx
+      ? `<details class="sd-vl-fx" style="margin-top:12px;text-align:left">
+           <summary style="cursor:pointer">高级 · 音效器</summary>
+           <div style="padding:8px 2px 0">
+             <label style="display:block;margin:0 0 2px">音高（低沉↔明亮）<b class="sd-vlfx-pitch-val">${Number(f.vmPitch ?? 0)}</b></label>
+             <input type="range" class="sd-vlfx-pitch" min="-100" max="100" step="5" value="${Number(f.vmPitch ?? 0)}" style="width:100%">
+             <label style="display:block;margin:6px 0 2px">强度（刚劲↔轻柔）<b class="sd-vlfx-intensity-val">${Number(f.vmIntensity ?? 0)}</b></label>
+             <input type="range" class="sd-vlfx-intensity" min="-100" max="100" step="5" value="${Number(f.vmIntensity ?? 0)}" style="width:100%">
+             <label style="display:block;margin:6px 0 2px">音色（浑厚↔清脆）<b class="sd-vlfx-timbre-val">${Number(f.vmTimbre ?? 0)}</b></label>
+             <input type="range" class="sd-vlfx-timbre" min="-100" max="100" step="5" value="${Number(f.vmTimbre ?? 0)}" style="width:100%">
+             <label style="display:block;margin:8px 0 2px">音效</label>
+             <select class="text_pole sd-vlfx-soundfx" style="width:100%">${MINIMAX_SOUND_EFFECTS.map((o) => `<option value="${o.value}" ${(f.soundEffects || '') === o.value ? 'selected' : ''}>${o.label}</option>`).join('')}</select>
+           </div>
+         </details>`
+      : '';
     wrap.innerHTML = `
       <label style="display:block;text-align:left;margin:0 0 4px">${htmlEscape(nameLabel)}</label>
       <input type="text" class="text_pole sd-vl-name" placeholder="${htmlEscape(namePlaceholder)}" style="width:100%;margin:0 0 10px">
@@ -1070,21 +1140,38 @@ async function promptVoiceLibEntry({ dialogTitle, name = '', voiceId = '', folde
       <label style="display:block;text-align:left;margin:0 0 4px">音色 ID</label>
       <input type="text" class="text_pole sd-vl-id" placeholder="MiniMax Voice ID" style="width:100%;margin:0 0 10px">
       <label style="display:block;text-align:left;margin:0 0 4px">文件夹</label>
-      <input type="text" class="text_pole sd-vl-folder" placeholder="留空则不分类" style="width:100%;margin:0">`;
+      <input type="text" class="text_pole sd-vl-folder" placeholder="留空则不分类" style="width:100%;margin:0">
+      ${fxField}`;
     wrap.querySelector('.sd-vl-name').value = name || '';
     wrap.querySelector('.sd-vl-id').value = voiceId || '';
     wrap.querySelector('.sd-vl-folder').value = folder || '';
     if (withKeywords) wrap.querySelector('.sd-vl-kw').value = keywords || '';
+    if (withFx) {
+      // 滑块实时回显
+      wrap.querySelectorAll('.sd-vl-fx input[type=range]').forEach((el) => {
+        const out = el.parentElement.querySelector(`.sd-vlfx-${el.className.match(/sd-vlfx-(\w+)/)?.[1]}-val`);
+        el.addEventListener('input', () => { if (out) out.textContent = String(Math.round(el.value)); });
+      });
+    }
     try {
       const popup = new Popup(wrap, context.POPUP_TYPE.CONFIRM, '', { okButton: '保存', cancelButton: '取消' });
       const ok = await popup.show();
       if (!ok) return null;
-      return {
+      const out = {
         name: String(wrap.querySelector('.sd-vl-name').value || '').trim(),
         voiceId: String(wrap.querySelector('.sd-vl-id').value || '').trim(),
         folder: sanitizeFolder(wrap.querySelector('.sd-vl-folder').value),
         keywords: withKeywords ? String(wrap.querySelector('.sd-vl-kw').value || '').trim() : '',
       };
+      if (withFx) {
+        out.fx = {
+          vmPitch: Number(wrap.querySelector('.sd-vlfx-pitch').value) || 0,
+          vmIntensity: Number(wrap.querySelector('.sd-vlfx-intensity').value) || 0,
+          vmTimbre: Number(wrap.querySelector('.sd-vlfx-timbre').value) || 0,
+          soundEffects: String(wrap.querySelector('.sd-vlfx-soundfx').value || ''),
+        };
+      }
+      return out;
     } catch (_) {}
   }
   const newName = await promptInput(dialogTitle, `${nameLabel}：`, name || '');
@@ -1237,6 +1324,96 @@ function normalizeWorldBookEntries(wb, name = '') {
   return [];
 }
 
+/* ============================================================
+   世界书写入能力（共读模块反哺 / 通用）
+   ── getWorldBookEntries 读链路的镜像，只新增、不改读取。
+   ── ST 稳定写入路径=斜杠命令：/getchatbook（取或建聊天绑定世界书并绑定）、
+      /createentry（建带默认值的空条目，返回 UID）、/setentryfield（填字段）。
+      ST 内部会同步落盘 + 重载内存缓存，故无需手动 reload。
+   ============================================================ */
+
+// 执行一段斜杠命令脚本，返回管道末值（字符串）。优先 executeSlashCommandsWithOptions，兜底 executeSlashCommands。
+async function runSlash(command) {
+  const context = ctx();
+  try {
+    if (typeof context.executeSlashCommandsWithOptions === 'function') {
+      const r = await context.executeSlashCommandsWithOptions(command, { handleParserErrors: true, handleExecutionErrors: true });
+      return String(r?.pipe ?? '');
+    }
+  } catch (e) { console.warn(`[${MODULE_NAME}] executeSlashCommandsWithOptions failed`, command, e); }
+  try {
+    const exec = typeof context.executeSlashCommands === 'function'
+      ? context.executeSlashCommands.bind(context)
+      : (typeof globalThis.executeSlashCommands === 'function' ? globalThis.executeSlashCommands : null);
+    if (exec) {
+      const r = await exec(command);
+      return String(r?.pipe ?? '');
+    }
+  } catch (e) { console.warn(`[${MODULE_NAME}] executeSlashCommands failed`, command, e); }
+  return '';
+}
+
+// 取或建当前聊天绑定的世界书（Chat Lore），返回其名；无绑定则 ST 自动创建并绑定。
+async function getOrCreateChatBook() {
+  const name = await runSlash('/getchatbook');
+  return String(name || '').trim();
+}
+
+// 斜杠命令值转义：管道符 | 会终止命令，需转义；换行折叠为空格（共读总结本就精炼，避免破坏单条命令解析）。
+function escapeSlashValue(s) {
+  return String(s ?? '').replace(/\|/g, '\\|').replace(/\r?\n+/g, ' ').trim();
+}
+
+// 向指定世界书写入/更新一条目。opts: { book, uid?, comment?, content?, keys?:[], order?, position?, vectorized?, group? }
+// 传 uid 则更新该条，否则新建（ST 填默认值）。dedup（uid 映射）由调用方管理，本函数不做模糊查重以免误改别条。
+// 返回 uid 字符串（失败为 ''）。
+async function writeWorldEntry(opts = {}) {
+  const book = String(opts.book || '').trim();
+  if (!book) return '';
+  const fileArg = `file="${book.replace(/"/g, '')}"`;
+  let uid = String(opts.uid ?? '').trim();
+  if (!uid) {
+    const keyArg = Array.isArray(opts.keys) && opts.keys.length
+      ? `key=${opts.keys.map(escapeSlashValue).join(',')}` : '';
+    uid = String(await runSlash(`/createentry ${fileArg} ${keyArg}`.trim()) || '').trim();
+    if (!uid) return '';
+  }
+  const set = (field, val) => runSlash(`/setentryfield ${fileArg} uid=${uid} field=${field} ${val}`);
+  if (opts.comment != null) await set('comment', escapeSlashValue(opts.comment));
+  if (opts.content != null) await set('content', escapeSlashValue(opts.content));
+  if (Array.isArray(opts.keys) && opts.keys.length) await set('key', opts.keys.map(escapeSlashValue).join(','));
+  if (opts.order != null) await set('order', Number(opts.order));
+  if (opts.position != null) await set('position', Number(opts.position));
+  if (opts.vectorized != null) await set('vectorized', opts.vectorized ? 1 : 0);
+  if (opts.group != null) await set('group', escapeSlashValue(opts.group));
+  return uid;
+}
+
+// 删除世界书条目（按 uid）。
+async function deleteWorldEntry(book, uid) {
+  const b = String(book || '').trim();
+  const u = String(uid ?? '').trim();
+  if (!b || !u) return false;
+  await runSlash(`/setentryfield file="${b.replace(/"/g, '')}" uid=${u} field=content `);   // 先清空内容
+  await runSlash(`/setentryfield file="${b.replace(/"/g, '')}" uid=${u} field=disable 1`);   // 再禁用（ST 无标准删条斜杠，禁用即不参与召回）
+  return true;
+}
+
+// 临时验证钩子（1A-1）：在 ST 控制台执行 await qmTestWorldWrite() 应能往当前聊天 Chat Lore 写入一条「千幕共读·测试」。
+// 验证通过后将移除。
+globalThis.qmTestWorldWrite = async function () {
+  const book = await getOrCreateChatBook();
+  if (!book) return { ok: false, reason: '无法取得/创建聊天世界书（executeSlashCommands 不可用？）' };
+  const uid = await writeWorldEntry({
+    book,
+    comment: '千幕共读·测试',
+    content: '这是一条由千幕共读模块写入的测试条目，确认写入链路通畅。',
+    keys: ['千幕共读测试'],
+    order: 100,
+  });
+  return { ok: !!uid, book, uid };
+};
+
 async function listWorldBooks() {
   const names = [];
   try {
@@ -1336,6 +1513,24 @@ function maybeAutoScanContext() {
   if (contextScanCache.presetScannedAt && contextScanCache.worldScannedAt) { contextAutoScanned = true; return; }
   contextAutoScanned = true;   // 先置位，避免渲染→扫描→重渲染→再扫描的循环
   refreshContextSources(false).catch((error) => console.warn(`[${MODULE_NAME}] auto scan context failed`, error));
+}
+
+// 配音「人设参照」世界书懒加载补扫：ST 重进/刷新后 contextScanCache 空（仅内存），但选择存在 settings.tts。
+// 首开配音页时静默补扫一次——扫世界书名 + 拉「本聊天已选中的那些书」的条目，扫完重渲，让已选状态免刷新即显。
+function maybeAutoScanTtsExtract() {
+  if (ttsExtractAutoScanned) return;
+  const sel = ttsExtractWorldBooks();
+  if (!sel.length) { ttsExtractAutoScanned = true; return; }   // 没选过书就没什么要恢复的
+  // 已扫过（缓存里这些书的条目都在）则无需再扫
+  if (contextScanCache.worldScannedAt && sel.every((n) => Array.isArray(contextScanCache.worldBooks?.[n]))) { ttsExtractAutoScanned = true; return; }
+  ttsExtractAutoScanned = true;   // 先置位，避免渲染→扫描→重渲染循环
+  (async () => {
+    try {
+      await refreshWorldBooks(false);
+      for (const n of sel) { if (!Array.isArray(contextScanCache.worldBooks?.[n])) await coreadEnsureWorldEntries(n); }
+      rerenderIfOpen();
+    } catch (error) { console.warn(`[${MODULE_NAME}] auto scan tts extract failed`, error); }
+  })();
 }
 
 function getPresetNameStore() {
@@ -2479,11 +2674,14 @@ function openModal(tab = activeTab) {
   }
   modalJustOpened = true;   // 标记首帧需入场动画；renderModal 消费后即清，后续静默重渲染不再播
   modal.classList.add('open');
+  document.body.classList.add('sd-qm-modal-open');   // 压制 ST 快捷回复栏：搜索框聚焦不再牵出 QR 栏（CSS 端按此类隐藏）
   renderModal();
 }
 
 function closeModal() {
   document.getElementById(MODAL_ID)?.classList.remove('open');
+  document.body.classList.remove('sd-qm-modal-open');
+  unmountReaderPortal();   // 关模态连带收掉全屏阅读 portal
 }
 
 // 行内全屏文本编辑（编剧/幕后提示词/此幕指令共用）：在千幕界面内切换出编辑视图，沿用阅读页布局+吸顶返回/保存，
@@ -2713,6 +2911,7 @@ function renderModal() {
           <p>一蝶振翅&nbsp;&nbsp;万象入幕</p>
         </div>
         <div class="sd-header-actions">
+          ${COREAD_VISIBLE ? `<button class="sd-coread-shortcut ${activeTab === 'coread' ? 'active' : ''}" title="共读" aria-label="共读"><i class="fa-solid fa-book-open"></i></button>` : ''}
           <button class="sd-geo-shortcut ${activeTab === 'geopolitics' ? 'active' : ''}" title="世界格局" aria-label="世界格局"><i class="fa-solid fa-atom"></i></button>
           <button class="sd-plug-shortcut" title="API与日志"><i class="fa-solid fa-gear"></i></button>
           <div class="sd-theme-pick">
@@ -2739,6 +2938,7 @@ function renderModal() {
   modal.querySelector('.sd-close')?.addEventListener('click', closeModal);
   modal.querySelector('.sd-plug-shortcut')?.addEventListener('click', () => { activeTab = 'plug'; renderModal(); });
   modal.querySelector('.sd-geo-shortcut')?.addEventListener('click', () => { activeTab = 'geopolitics'; renderModal(); });
+  modal.querySelector('.sd-coread-shortcut')?.addEventListener('click', () => { activeTab = 'coread'; renderModal(); });
   const themePick = modal.querySelector('.sd-theme-pick');
   const themeMenu = themePick?.querySelector('.sd-theme-menu');
   modal.querySelector('.sd-theme-btn')?.addEventListener('click', (event) => {
@@ -2865,6 +3065,7 @@ function renderActiveTab() {
     case 'theater': return renderTheaterTab();
     case 'tts': return renderTtsTab();
     case 'geopolitics': return renderGeopoliticsTab();
+    case 'coread': return COREAD_VISIBLE ? renderCoreadTab() : renderDashboardTab();   // 隐藏时误入 coread 回落仪表盘
     case 'plug': return renderPlugTab();
     default: return renderDashboardTab();
   }
@@ -3796,6 +3997,47 @@ function renderLogEntry(log, index) {
   </details>`;
 }
 
+// 提取·世界书（取材式·独立于主线）：刷新→下拉多选书→选中书展开条目勾选。折叠态持久。
+function renderTtsExtractWorldBooks() {
+  const t = settings.tts || {};
+  const boundNames = contextScanCache.boundWorldBookNames || detectBoundWorldBookNames();
+  const allNames = uniqueClean([...boundNames, ...(contextScanCache.worldBookNames || [])]).filter(Boolean);
+  const selected = ttsExtractWorldBooks().filter((n) => allNames.includes(n));
+  if (ttsExtractWorldView && !allNames.includes(ttsExtractWorldView)) ttsExtractWorldView = '';
+  const viewName = ttsExtractWorldView || selected[selected.length - 1] || '';
+  const head = `<div class="sd-tts-extract-wb-head"><span>世界书</span><button type="button" class="sd-btn sd-mini-btn sd-tts-extract-wb-scan"><i class="fa-solid fa-rotate"></i> ${allNames.length ? '刷新' : '扫描'}</button></div>`;
+  if (!allNames.length) {
+    return `<div class="sd-tts-extract-wb">${head}</div>`;
+  }
+  const bookRows = allNames.map((name) => `
+    <div class="sd-tts-extract-wb-row${viewName === name ? ' sd-tts-extract-wb-viewing' : ''}">
+      <input type="checkbox" class="sd-tts-extract-wb-toggle" data-name="${htmlEscape(name)}"${selected.includes(name) ? ' checked' : ''} title="选中作为提取参照">
+      <button type="button" class="sd-tts-extract-wb-name" data-name="${htmlEscape(name)}"><span>${htmlEscape(name)}</span>${boundNames.includes(name) ? '<em class="sd-tts-extract-wb-tag">绑定</em>' : ''}</button>
+    </div>`).join('');
+  const items = viewName ? (contextScanCache.worldBooks?.[viewName] || []) : [];
+  let itemSelCount = 0;
+  const itemRows = items.map((item, index) => {
+    const id = getContextItemId(item, index);
+    const title = item.name || item.comment || (Array.isArray(item.key) ? item.key.join(', ') : item.key) || `条目 ${index + 1}`;
+    const checked = isTtsExtractWorldItemSelected(viewName, id, item.enabled);
+    if (checked) itemSelCount++;
+    return `<label class="sd-tts-extract-wb-item"><input type="checkbox" class="sd-tts-extract-wb-check" data-book="${htmlEscape(viewName)}" data-id="${htmlEscape(String(id))}"${checked ? ' checked' : ''}><span>${htmlEscape(title)}</span></label>`;
+  }).join('');
+  const headRight = selected.length >= 2 ? `${selected.length} 项` : (selected.length === 1 ? htmlEscape(selected[0]) : '未选择');
+  return `<div class="sd-tts-extract-wb">${head}
+    <details class="sd-tts-extract-wb-dropdown" data-fold="wb"${t.extractWbFoldOpen !== false ? ' open' : ''}>
+      <summary><span>选择</span><b>${headRight}</b></summary>
+      <div class="sd-tts-extract-wb-list">${bookRows}</div>
+    </details>
+    ${viewName
+      ? `<details class="sd-tts-extract-wb-itemfold" data-fold="items"${t.extractItemsFoldOpen !== false ? ' open' : ''}>
+          <summary><span>${htmlEscape(viewName)} · 条目</span><b>已选 ${itemSelCount}/${items.length}</b></summary>
+          <div class="sd-tts-extract-wb-items">${itemRows || '<span class="sd-muted" style="font-size:.82em">该世界书暂无条目。</span>'}</div>
+        </details>`
+      : '<span class="sd-muted" style="font-size:.78em">勾选或点击书名查看条目，再按需勾选要带的条目。</span>'}
+  </div>`;
+}
+
 function renderTtsVoiceMapRows(map, lib = []) {
   if (!map.length) return '<p class="sd-muted sd-hint-sm">尚未配置角色。点「添加角色」，下拉选音色库里的音色（或在库为空时手填 ID）；未配置的角色不会生成语音。</p>';
   const hasLib = Array.isArray(lib) && lib.length > 0;
@@ -3866,6 +4108,18 @@ function renderTtsTagRows(rules) {
     </div>`).join('');
 }
 
+// 发音词典行：原文 → 读音/替换。空列表给一空行引导。
+function renderTtsPronDictRows(dict) {
+  const list = dict.length ? dict : [{ from: '', to: '' }];
+  return list.map((e, index) => `
+    <div class="sd-tts-prondict-row" data-idx="${index}">
+      <input class="text_pole sd-tts-prondict-from" placeholder="原文，如 行" value="${htmlEscape(e.from || '')}">
+      <span class="sd-tts-prondict-arrow">→</span>
+      <input class="text_pole sd-tts-prondict-to" placeholder="读音，如 (hang2)" value="${htmlEscape(e.to || '')}">
+      <button type="button" class="sd-icon-btn sd-danger sd-tts-prondict-del" title="删除" aria-label="删除"><i class="fa-solid fa-xmark"></i></button>
+    </div>`).join('');
+}
+
 function ttsSchemeLibraryCfg() {
   return {
     ns: 'ttsscheme',
@@ -3923,6 +4177,16 @@ function renderTtsTab() {
       </details>
     </section>
     <section class="sd-card ${dis}">
+      <details class="sd-plain-fold" data-acc="tts-extract-ctx">
+        <summary><b>人设参照</b></summary>
+        <div class="sd-tts-extract-tags">
+          <span class="sd-reader-setup-tag"><i class="fa-solid fa-user"></i> 角色：${htmlEscape(getCharacterName() || '未选择')}</span>
+          <span class="sd-reader-setup-tag"><i class="fa-solid fa-circle-user"></i> 我：${htmlEscape(getPersonaName() || '未选择')}</span>
+        </div>
+        ${renderTtsExtractWorldBooks()}
+      </details>
+    </section>
+    <section class="sd-card ${dis}">
       <details class="sd-plain-fold" data-acc="tts-lib" open>
         <summary><b>音色库</b></summary>
         <label>试听台词</label><input class="text_pole sd-tts-test-text" placeholder="输入一句话，用于各音色试听" value="${htmlEscape(t.testText || '你好，这是一段试听。')}">
@@ -3932,7 +4196,7 @@ function renderTtsTab() {
     </section>
     <section class="sd-card ${dis}">
       <details class="sd-plain-fold" data-acc="tts-npc" open>
-        <summary><b>NPC 泛用音色</b><span class="sd-tts-sub">提取模型自动根据此合集为非主角色人物适配音色</span></summary>
+        <summary><b>泛用音色库</b><span class="sd-tts-sub">提取模型自动根据此库为非主角色人物适配音色</span></summary>
         <label class="checkbox_label"><input type="checkbox" class="sd-tts-npc-enabled" ${t.npcEnabled ? 'checked' : ''}> 启用</label>
         <div class="sd-tts-npc-list sd-scroll">${renderTtsNpcRows(Array.isArray(t.npcArchetypes) ? t.npcArchetypes : [])}</div>
         <div class="sd-button-row">
@@ -3953,11 +4217,38 @@ function renderTtsTab() {
       </details>
     </section>
     <section class="sd-card ${dis}">
+      <details class="sd-plain-fold" data-acc="tts-lang-fx">
+        <summary><b>语言增强/音效器</b></summary>
+        <label>语言增强</label>
+        <div class="sd-muted sd-hint-sm sd-tts-fx-hint">混合中英用自动即可；粤语须选粤语/广东话</div>
+        <select class="text_pole sd-tts-langboost">${MINIMAX_LANGUAGE_BOOST.map((o) => `<option value="${o.value}" ${(t.languageBoost || 'auto') === o.value ? 'selected' : ''}>${o.label}</option>`).join('')}</select>
+        <label style="margin-top:10px">音效</label>
+        <div class="sd-muted sd-hint-sm sd-tts-fx-hint">全局生效，慎用</div>
+        <select class="text_pole sd-tts-soundfx">${MINIMAX_SOUND_EFFECTS.map((o) => `<option value="${o.value}" ${(t.soundEffects || '') === o.value ? 'selected' : ''}>${o.label}</option>`).join('')}</select>
+        <label class="checkbox_label" style="margin-top:10px"><input type="checkbox" class="sd-tts-soundfx-auto" ${t.soundFxAuto ? 'checked' : ''}> 启用音效自动化</label>
+        <div class="sd-muted sd-hint-sm sd-tts-fx-hint">提取模型按语境为每句挑音效，与全局设置互斥</div>
+        <label style="margin-top:10px">音高（低沉↔明亮）<span class="sd-tts-vmpitch-val">${Number(t.vmPitch ?? 0)}</span></label>
+        <input type="range" class="sd-tts-vmpitch" min="-100" max="100" step="5" value="${Number(t.vmPitch ?? 0)}">
+        <label>强度（刚劲↔轻柔）<span class="sd-tts-vmintensity-val">${Number(t.vmIntensity ?? 0)}</span></label>
+        <input type="range" class="sd-tts-vmintensity" min="-100" max="100" step="5" value="${Number(t.vmIntensity ?? 0)}">
+        <label>音色（浑厚↔清脆）<span class="sd-tts-vmtimbre-val">${Number(t.vmTimbre ?? 0)}</span></label>
+        <input type="range" class="sd-tts-vmtimbre" min="-100" max="100" step="5" value="${Number(t.vmTimbre ?? 0)}">
+      </details>
+    </section>
+    <section class="sd-card ${dis}">
       <details class="sd-plain-fold" data-acc="tts-tags" open>
         <summary><b>标签规则</b></summary>
         <div class="sd-tts-tag-list">${renderTtsTagRows(Array.isArray(t.tagRules) ? t.tagRules : [])}</div>
         <div class="sd-button-row"><button type="button" class="sd-btn sd-mini-btn sd-tts-add-tag"><i class="fa-solid fa-plus"></i>添加标签</button></div>
         <label class="checkbox_label"><input type="checkbox" class="sd-tts-strip-html" ${t.stripHtml !== false ? 'checked' : ''}> 屏蔽裸 HTML 标签（状态栏/卡片等）</label>
+      </details>
+    </section>
+    <section class="sd-card ${dis}">
+      <details class="sd-plain-fold" data-acc="tts-prondict">
+        <summary><b>发音词典</b></summary>
+        <p class="sd-muted sd-hint-sm">矫正多音字/生僻音。「原文」填要改的词，「读音」填拼音(带声调数字 1-5，如 (chu3)(li3)。全局生效。</p>
+        <div class="sd-tts-prondict-list">${renderTtsPronDictRows(Array.isArray(t.pronunciationDict) ? t.pronunciationDict : [])}</div>
+        <div class="sd-button-row"><button type="button" class="sd-btn sd-mini-btn sd-tts-add-prondict"><i class="fa-solid fa-plus"></i>添加词条</button></div>
       </details>
     </section>
     <section class="sd-card ${dis}">
@@ -3997,6 +4288,7 @@ function renderTtsTab() {
 function bindTtsTabEvents(root) {
   if (activeTab !== 'tts') return;
   const t = settings.tts;
+  maybeAutoScanTtsExtract();   // 首开配音页：懒加载补扫世界书，让「人设参照」已选状态免手动刷新即显（重进/重启后）
 
   // 总开关
   root.querySelector('.sd-tts-enabled')?.addEventListener('change', (e) => {
@@ -4078,6 +4370,64 @@ function bindTtsTabEvents(root) {
   bindSlider('.sd-tts-speed', '.sd-tts-speed-val', 'defaultSpeed', (v) => Number(v).toFixed(2));
   bindSlider('.sd-tts-vol', '.sd-tts-vol-val', 'defaultVol', (v) => Number(v).toFixed(1));
   bindSlider('.sd-tts-pitch', '.sd-tts-pitch-val', 'defaultPitch', (v) => String(Math.round(v)));
+  // T3 音效器三滑块（音高/强度/音色 -100..100）
+  bindSlider('.sd-tts-vmpitch', '.sd-tts-vmpitch-val', 'vmPitch', (v) => String(Math.round(v)));
+  bindSlider('.sd-tts-vmintensity', '.sd-tts-vmintensity-val', 'vmIntensity', (v) => String(Math.round(v)));
+  bindSlider('.sd-tts-vmtimbre', '.sd-tts-vmtimbre-val', 'vmTimbre', (v) => String(Math.round(v)));
+  // T3 语言增强 / 音效 下拉
+  root.querySelector('.sd-tts-langboost')?.addEventListener('change', (e) => { t.languageBoost = e.target.value || ''; saveSettings(); });
+  root.querySelector('.sd-tts-soundfx')?.addEventListener('change', (e) => { t.soundEffects = e.target.value || ''; saveSettings(); });
+  root.querySelector('.sd-tts-soundfx-auto')?.addEventListener('change', (e) => { t.soundFxAuto = !!e.target.checked; saveSettings(); });
+
+  // 提取·世界书（取材式）：扫描 / 折叠记忆 / 书级多选 / 点书名切查看 / 条目勾选
+  root.querySelector('.sd-tts-extract-wb-scan')?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    const icon = btn.querySelector('i');
+    if (icon) icon.className = 'fa-solid fa-spinner fa-spin';
+    btn.disabled = true;
+    try { await refreshWorldBooks(false); } catch (_) {}
+    // 已选书按需补拉条目（主线只拉主线选中的书）
+    for (const n of ttsExtractWorldBooks()) { if (!Array.isArray(contextScanCache.worldBooks?.[n])) { try { await coreadEnsureWorldEntries(n); } catch (_) {} } }
+    renderModal();
+  });
+  // 两个折叠栏（下拉「选择」/ 条目列）持久化开合
+  root.querySelectorAll('.sd-tts-extract-wb-dropdown, .sd-tts-extract-wb-itemfold').forEach((d) => {
+    d.addEventListener('toggle', () => {
+      if (d.dataset.fold === 'wb') t.extractWbFoldOpen = d.open;
+      else if (d.dataset.fold === 'items') t.extractItemsFoldOpen = d.open;
+      saveSettings();
+    });
+  });
+  // 书级多选：勾选即切到该书查看条目 + 按需补拉
+  root.querySelectorAll('.sd-tts-extract-wb-toggle').forEach((cb) => {
+    cb.addEventListener('change', async (e) => {
+      const name = e.target.dataset.name;
+      toggleTtsExtractWorldBook(name, !!e.target.checked);
+      if (e.target.checked) { ttsExtractWorldView = name; if (!Array.isArray(contextScanCache.worldBooks?.[name])) { try { await coreadEnsureWorldEntries(name); } catch (_) {} } }
+      renderModal();
+    });
+  });
+  // 点书名：切到该书查看条目（不改选中态）+ 按需补拉
+  root.querySelectorAll('.sd-tts-extract-wb-name').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const name = btn.dataset.name;
+      ttsExtractWorldView = name;
+      if (!Array.isArray(contextScanCache.worldBooks?.[name])) { try { await coreadEnsureWorldEntries(name); } catch (_) {} }
+      renderModal();
+    });
+  });
+  // 条目勾选：存 + 即时更新条目列标题「已选 N/M」计数（不整体重渲）
+  root.querySelectorAll('.sd-tts-extract-wb-check').forEach((cb) => {
+    cb.addEventListener('change', (e) => {
+      setTtsExtractWorldItemSelected(e.target.dataset.book, e.target.dataset.id, !!e.target.checked);
+      const fold = e.target.closest('.sd-tts-extract-wb-itemfold');
+      const b = fold?.querySelector('summary b');
+      if (b) {
+        const checks = fold.querySelectorAll('.sd-tts-extract-wb-check');
+        b.textContent = `已选 ${Array.from(checks).filter((c) => c.checked).length}/${checks.length}`;
+      }
+    });
+  });
 
   // 角色映射：增 / 删 / 改（始终读写本聊天 store.ttsVoiceMap）
   root.querySelector('.sd-tts-add-voice')?.addEventListener('click', () => {
@@ -4124,10 +4474,12 @@ function bindTtsTabEvents(root) {
   root.querySelectorAll('.sd-tts-lib-edit').forEach((btn) => btn.addEventListener('click', async () => {
     const cur = (t.voiceLibrary || []).find((v) => v.id === btn.dataset.id);
     if (!cur) return;
-    const r = await promptVoiceLibEntry({ dialogTitle: '编辑音色', name: cur.name, voiceId: cur.voiceId, folder: cur.folder || '' });
+    const r = await promptVoiceLibEntry({ dialogTitle: '编辑音色', name: cur.name, voiceId: cur.voiceId, folder: cur.folder || '', withFx: true, fx: ttsVoiceFx(cur.voiceId) });
     if (!r) return;
     if (!r.name || !r.voiceId) { toast('音色名与 ID 都要填。', 'warning'); return; }
+    const oldVid = cur.voiceId;
     cur.name = r.name; cur.voiceId = r.voiceId; cur.folder = r.folder || '';
+    ttsSaveVoiceFx(oldVid, r.voiceId, r.fx);   // 存 per-voice 音效器（voiceId 变则迁移·全默认则清除）
     saveSettings();
     renderModal();
   }));
@@ -4216,6 +4568,33 @@ function bindTtsTabEvents(root) {
   root.querySelector('.sd-tts-strip-html')?.addEventListener('change', (e) => {
     t.stripHtml = !!e.target.checked;
     saveSettings();
+  });
+
+  // 发音词典：添加 / 编辑 / 删除
+  root.querySelector('.sd-tts-add-prondict')?.addEventListener('click', () => {
+    t.pronunciationDict = Array.isArray(t.pronunciationDict) ? t.pronunciationDict : [];
+    t.pronunciationDict.push({ from: '', to: '' });
+    saveSettings();
+    renderModal();
+  });
+  root.querySelectorAll('.sd-tts-prondict-row').forEach((rowEl) => {
+    const idx = Number(rowEl.dataset.idx);
+    t.pronunciationDict = Array.isArray(t.pronunciationDict) ? t.pronunciationDict : [];
+    rowEl.querySelector('.sd-tts-prondict-from')?.addEventListener('change', (e) => {
+      if (!t.pronunciationDict[idx]) t.pronunciationDict[idx] = { from: '', to: '' };
+      t.pronunciationDict[idx].from = e.target.value.trim();
+      saveSettings();
+    });
+    rowEl.querySelector('.sd-tts-prondict-to')?.addEventListener('change', (e) => {
+      if (!t.pronunciationDict[idx]) t.pronunciationDict[idx] = { from: '', to: '' };
+      t.pronunciationDict[idx].to = e.target.value.trim();
+      saveSettings();
+    });
+    rowEl.querySelector('.sd-tts-prondict-del')?.addEventListener('click', () => {
+      t.pronunciationDict.splice(idx, 1);
+      saveSettings();
+      renderModal();
+    });
   });
 
   // 台词提取提示词：保存 / 恢复默认 / 恢复上次 / 保存到方案库
@@ -4395,10 +4774,17 @@ async function ttsPreviewVoice(voiceId, text, btn) {
   if (icon) icon.className = 'fa-solid fa-spinner fa-spin';
   if (btn) btn.disabled = true;
   try {
+    const vfx = ttsVoiceFx(voiceId);   // per-voice 音效器覆盖（试听须与正文合成一致）
     const { blob } = await ttsSynthesize({
       apiKey: t.apiKey, text, voiceId, model: t.model,
       speed: Number(t.defaultSpeed ?? 1), vol: Number(t.defaultVol ?? 1), pitch: Number(t.defaultPitch ?? 0),
       format: t.format || 'mp3', endpoint: t.endpoint, proxyBase: t.proxyBase, groupId: t.groupId,
+      pronunciationTone: ttsPronunciationTone(),
+      languageBoost: t.languageBoost || '',
+      vmPitch: Number.isFinite(vfx?.vmPitch) ? vfx.vmPitch : Number(t.vmPitch ?? 0),
+      vmIntensity: Number.isFinite(vfx?.vmIntensity) ? vfx.vmIntensity : Number(t.vmIntensity ?? 0),
+      vmTimbre: Number.isFinite(vfx?.vmTimbre) ? vfx.vmTimbre : Number(t.vmTimbre ?? 0),
+      soundEffects: (vfx && vfx.soundEffects) ? vfx.soundEffects : (t.soundEffects || ''),
     });
     const url = URL.createObjectURL(blob);
     const audio = new Audio(url);
@@ -4457,18 +4843,58 @@ async function ttsRefreshFavorites(root) {
    ============================================================ */
 
 // 提取系统提示词：约束模型只产出严格 JSON，且只保留真台词。
-const TTS_EXTRACT_SYSTEM = `你是有声剧配音指导导演，负责从正文中提取角色实发声台词并完成配音前置标注，所有台词按原文出场顺序排列，最终输出纯JSON格式的标注结果。
+const TTS_EXTRACT_SYSTEM = `你是有声剧配音指导导演，需从小说正文中按台词出场顺序，提取角色真实发声的对话并完成配音前置标注，最终仅输出纯JSON格式结果。
 
-标注规则：
-1. 有效台词判定：仅提取角色真实开口说出的对话内容，以原文中的引号（「」『』“”、英文双引号""）为识别标识；无引号包裹的非口语表述一律不计入。
-2. 无效内容剔除：严格排除以下非台词类内容：书籍/作品名称、起强调作用的词语、角色未出声的心理活动/内心独白、专有名词引用、旁白叙述、动作神态描写、独立成句的拟声词。
-3. speaker（说话人）：结合上下文语境判断发言角色，填写角色本名；无法明确判定则统一填写「未知」，禁止将旁白叙事者标注为说话人。
-4. text（台词文本）：完整保留角色原句内容，包含嗯、哼、哈哈等语气助词；移除包裹台词的引号符号，删除台词前后附带的动作、神态补充描写。
-5. 情绪(emotion)：从 [happy, sad, angry, fearful, disgusted, surprised, calm, fluent, whisper] 中选最贴合的一个。判定情绪必须结合上下文语境，而非孤立地只看台词本身的字面——务必综合考量：①该句前后的旁白、动作、神态描写（如「她攥紧了拳头」「声音发颤」「冷笑」）；②说话人当前所处的情境与立场（冲突、安抚、试探、独处等）；③同一角色相邻台词的情绪走向与转折。同一句话在不同语境下情绪可能截然相反（如「你来了」可为 happy 重逢、亦可为 angry 质问或 sad 诀别），需据语境定夺。仅当上下文确无任何情绪线索、字面也中性时才填 "calm"；完全无从判断再填 "auto" 交给语音模型。优先依语境给出明确情绪，避免无脑套用 auto。
-6. 若整段没有任何真台词，返回 {"lines": []}
+### 一、有效台词判定
+1. 提取标准：仅提取被引号（「」『』“”、英文双引号""）包裹、角色实际开口说出的话语；无引号的非口语内容一律不计入。
+2. 剔除范围：书籍/作品名、表强调的词语、未出声的心理活动/内心独白、专有名词引用、旁白叙述、动作神态描写、独立成句的拟声词，全部排除。
+3. 全文无有效台词时，直接返回 \`{"lines": []}\`
 
-输出规范：仅输出纯JSON结构，不得添加任何解释文字、代码块标记、额外备注。标准格式参考：
-{"lines": [{"speaker": "角色名", "text": "台词原话", "emotion": "auto"}]}`;
+> 正误示例
+> 正例：林砚放下茶杯，缓声道：“此事不必再议。” → 提取台词：此事不必再议。
+> 反例：他攥紧掌心，暗自咬牙：「绝不能就此认输。」 → 属于内心活动，不提取
+
+### 二、说话人（speaker）判定
+**核心铁则**：说话人仅由「台词外部的归属描述」判定；台词内容里的“我/你/他”只是角色正常口语措辞，**绝对不参与说话人判定**。
+
+判定优先级从高到低：
+1. **显式归属优先**：台词紧邻处有明确姓名/身份提示（如「XX说」「XX冷笑道」），直接取对应角色名。
+   > 易错示例：张三皱眉道：“我不会同意的。” → speaker=张三
+   > 提醒：台词内的“我”是张三的自称，不能据此混淆说话人；说话人永远以台词外的归属描述为准。
+2. **人设还原次之**：仅当台词外的说话人以人称代词/泛称（我、你、老先生等）表述时，结合【角色定位】人设将其还原为角色本名（第一人称“我”通常是叙事主体角色、第二人称“你”通常是对话另一方）；禁止直接填写「我」「你」。
+   > 示例：我转过身道：“走吧。” + 【角色定位】指明叙事主体为沈清 → speaker=沈清
+3. 无法明确判定时填「未知」，严禁将旁白叙事者标注为说话人。
+
+### 三、台词文本（text）
+完整保留角色原话与语气助词（嗯、哼、哈哈等），移除包裹的引号符号，剔除台词外的动作、神态补充描写。
+
+### 四、情绪（emotion）标注
+可选值固定为：\`happy, sad, angry, fearful, disgusted, surprised, calm, fluent, whisper, auto\`
+
+判定优先级从高到低：
+1. **场景基调优先**：结合上下文整体语境判断，不孤立解读单句字面含义。
+2. **贴合角色人设**：情绪强度与表达方式须符合角色定位，避免脱离人设的OOC标注。
+   > 示例：高冷内敛角色即便心生愉悦，也标注为 calm/fluent，而非 happy
+3. **连贯抗跳变**：同一角色相邻台词情绪保持连续，仅当正文出现明确动作、神态或剧情转折信号时切换，无依据不随意变动。
+   > 错误示范：同角色相邻两句无任何剧情转折，前句标 happy、后句突然标 surprised
+4. **弱信号回落auto**：无清晰独立情绪线索时优先填 auto，交由语音模型自然处理。
+
+### 五、语速（speed，可选）
+数值型语速，仅在有明确理由时给出，否则省略该字段（默认 1.0 最泛用稳定，且语速效果与音色强绑定，无需逐句都填）。
+纪律（务必遵守，超范围的极端语速留给用户手动单条调）：
+- 常态填 1.0 或省略；确需调整时**只在 0.90 ~ 1.35 之间**微调，**严禁低于 0.90、严禁高于 1.35**。
+- 情绪激动/紧张/急促/娇喘等 → 略快，约 1.1 ~ 1.2（最佳区间在 1.2 附近）；沉稳/庄重/迟缓/低语 → 略慢，约 0.90 ~ 0.95。
+
+### 六、亲密场景细化（仅当正文为亲密/情欲场景时适用，其余场景忽略本节）
+此类场景中，语速与情绪按角色在互动中的**声线状态**（而非身份）细腻贴合，结合性别表现：
+- **承受方**（气息紊乱、语句破碎、被动回应者）：声线起伏大，语速通常略快更显生动（约 1.15 ~ 1.3），情绪多为 fearful/surprised/whisper/auto 随情境流动；女性此类声线尤常见气声、颤音，适度偏快。
+- **主导方**（掌控节奏、主动引导者）：声线克制，语速偏常态或略慢（约 0.90 ~ 1.05），情绪多为 calm/fluent/低沉，即便情动也相对收敛。
+- 结合角色性别与人设定位判断，避免把承受方判得过于平稳、把主导方判得过于慌乱；语速仍严守第五节的 0.90 ~ 1.35 上下限。
+
+### 输出规范
+仅输出纯JSON结构，不得添加任何解释文字、代码块标记、额外备注。
+标准格式示例：
+\`{"lines": [{"speaker": "角色名", "text": "台词原话", "emotion": "auto", "speed": 1.0}]}\`（speed 可省略）`;
 
 // 提取用 API 配置：优先 settings.tts.extractApiProfileId 指定的预设，否则用主 API（返回 null 表示走主 API/ST）
 function ttsExtractApiConfig() {
@@ -4499,9 +4925,41 @@ async function callTtsExtractModel(systemPrompt, userPrompt, cfg) {
 // TTS 专用标签清洗：提取台词前先剔除状态栏/思维链/HTML 等非台词噪音（省 token、提精度）。
 // 用 settings.tts.tagRules（与「取材」的规则独立）；extract 规则一旦存在则只保留其内容，否则按 remove 删除各标签段。
 // stripHtml 开则最后剥裸 HTML 标签。注释 <!-- --> 一律去除。
+// 用 ST 自己的正则引擎把文本处理成与显示层一致（治本·自动兼容用户所有正则）。
+// 能力探测 + 优雅回落：不同 ST 版本此 API 可能不存在或签名不同 → 任何异常/非串返回都回落原文，绝不炸。
+// placement=2（AI 输出层，与 horae/柏宝书 那类隐藏正则的 placement 对齐）；不同版本枚举差异不影响回落安全。
+function ttsApplyStRegex(text) {
+  const raw = String(text || '');
+  try {
+    const context = ctx();
+    const fn = (typeof context?.getRegexedString === 'function')
+      ? context.getRegexedString
+      : (typeof globalThis.getRegexedString === 'function' ? globalThis.getRegexedString : null);
+    if (!fn) return raw;
+    // 签名跨版本差异：多数为 (rawString, placement, options?)。placement 用数值 2（AI 输出）。
+    const out = fn(raw, 2, { isPrompt: false });
+    return (typeof out === 'string' && out.length) ? out : raw;   // 非串/空 → 回落原文（避免误删成空）
+  } catch (_) {
+    return raw;   // API 缺失/签名不符/抛错 → 回落原文，交下面的内置清单兜底
+  }
+}
+
 function ttsCleanText(text) {
   let value = String(text || '');
+  // 治本优先：调 ST 自己的正则引擎 getRegexedString，把原始消息处理成「与显示层逐字一致」的文本，
+  // 从源头消除「原文有、显示无」的幻影台词（用户装什么隐藏正则/新插件都自动兼容，无需我们维护标签清单）。
+  // 能力探测 + 优雅回落：不同 ST 版本可能没有此 API 或签名不同，故 try/catch，失败则走下面的内置标签清单（治标保命）。
+  value = ttsApplyStRegex(value);
   value = value.replace(/<!--[\s\S]*?-->/g, '');
+  // 内置状态/记忆块清理（回落兜底）：horae/柏宝书 等插件用「markdownOnly 正则」只从显示正文删掉这些块、却不动原始消息。
+  // getRegexedString 可用时这些块已被 ST 删过、此处多为空转；不可用时这里兜底。整块删（标签+内容），使提取所见与显示对齐。
+  const BUILTIN_STRIP_TAGS = ['horae', 'horaeevent', 'horaerpg', 'horaetable', 'bbs_start', 'bbs_end', 'bbs_items', 'statusblock', 'statusbar', 'mvu'];
+  for (const tag of BUILTIN_STRIP_TAGS) {
+    // 成对块（含冒号变体如 <horaetable：…>）：整块删
+    value = value.replace(new RegExp(`<${tag}\\b[^>]*>[\\s\\S]*?<\\/${tag}[^>]*>`, 'gi'), '');
+    // 残留的单个开/闭标签兜底删
+    value = value.replace(new RegExp(`<\\/?${tag}\\b[^>]*>`, 'gi'), '');
+  }
   const t = settings.tts || {};
   const rules = (Array.isArray(t.tagRules) ? t.tagRules : [])
     .map((r) => ({ name: String(r.name || '').trim().replace(/^<|>$/g, ''), action: r.action === 'extract' ? 'extract' : 'remove' }))
@@ -4536,6 +4994,9 @@ async function extractDialogue(text) {
   const cfg = ttsExtractApiConfig();
   const t = settings.tts || {};
   let sysPrompt = (t.extractPrompt || '').trim() || TTS_EXTRACT_SYSTEM;
+  // 提取上下文注入（治 OOC/情绪失准/人称锚定）：把角色人设 + user 人设（+选中的世界书条目）喂给提取模型，
+  // 让它判情绪有性格基线、据人设把「我/你」锚定到具体角色。取材式——从 ST 现成读取器拉，与主线共享同源。
+  sysPrompt += ttsBuildExtractContext();
   // NPC 泛用音色开启且配了原型：追加归类指令，让模型给非主角台词标一个最贴的原型标签
   const archetypes = (Array.isArray(t.npcArchetypes) ? t.npcArchetypes : []).filter((a) => a.label && a.voiceId);
   const npcOn = t.npcEnabled && archetypes.length > 0;
@@ -4548,6 +5009,10 @@ async function extractDialogue(text) {
     }).join('\n');
     sysPrompt += `\n\n【NPC 音色归类】对每句台词额外判断说话人最贴合的人物原型，填入字段 "npc"，只能从下列原型名中选一个：[${labels}]。每个原型附带关键词描述（年龄、气质、声线特征等），请结合说话人在正文中的身份、年龄、性格与情境，对照关键词描述选出最贴的那个；没有特别贴合的，就按大致声线（性别 / 年龄段 / 气质）挑最接近的一个，不要留空、也不要新造原型名。主角 / 已知重要角色（通常已单独配音色）可留空 ""。\n原型清单：\n${archLines}\n输出格式扩展为：{"lines": [{"speaker": "角色名", "text": "台词", "emotion": "auto", "npc": "原型名或空"}]}`;
   }
+  // 音效自动化（可选·靠模型判断·默认关）：开则让模型给「确需空间感/失真感」的句子挑一个音效标签，填 "fx"。
+  if (t.soundFxAuto) {
+    sysPrompt += `\n\n【音效 fx（可选·按语境·宁缺毋滥）】仅当某句台词所处场景明显需要空间/介质感时，才给一个 "fx" 字段，从这四个里选一个：spacious_echo(空旷回音·如空谷/大厅)、auditorium_echo(礼堂广播·如扩音喇叭/舞台)、lofi_telephone(电话失真·如电话/无线电通话)、robotic(电音·如机器人/AI/机械音)。绝大多数正常对话都不需要音效——没有明确场景需求就不要给 fx（省略或留空 ""）。切忌滥用。`;
+  }
   const userPrompt = `【正文】\n${passage}`;
   const raw = await callTtsExtractModel(sysPrompt, userPrompt, cfg);
   const content = String(raw || '').trim();
@@ -4557,13 +5022,25 @@ async function extractDialogue(text) {
   catch (_) { throw new Error('台词提取结果无法解析'); }
   const lines = Array.isArray(parsed?.lines) ? parsed.lines : (Array.isArray(parsed) ? parsed : []);
   const validEmotions = new Set(['happy', 'sad', 'angry', 'fearful', 'disgusted', 'surprised', 'calm', 'fluent', 'whisper']);
+  const fxOn = !!t.soundFxAuto;
+  const validFx = new Set(['spacious_echo', 'auditorium_echo', 'lofi_telephone', 'robotic']);
   return lines
-    .map((l) => ({
-      speaker: String(l?.speaker || '').trim() || '未知',
-      text: String(l?.text || '').trim(),
-      emotion: validEmotions.has(l?.emotion) ? l.emotion : 'auto',
-      npc: npcOn ? String(l?.npc || '').trim() : '',   // 模型判定的 NPC 原型标签（仅 npcOn 时有意义）
-    }))
+    .map((l) => {
+      const text = String(l?.text || '').trim();
+      // 模型给的语速：仅接受 0.90~1.35 范围内且非默认 1.0 的值（超范围/非法/=1 → 省略，回落角色/全局默认）。
+      // 用户手动单条覆盖走另路(popup)可 0.5~2 全域，不受此限。
+      const rawSpeed = Number(l?.speed);
+      const speed = (Number.isFinite(rawSpeed) && rawSpeed >= 0.9 && rawSpeed <= 1.35 && Math.abs(rawSpeed - 1) > 0.001) ? Math.round(rawSpeed * 100) / 100 : undefined;
+      const out = {
+        speaker: String(l?.speaker || '').trim() || '未知',
+        text,
+        emotion: validEmotions.has(l?.emotion) ? l.emotion : 'auto',
+        npc: npcOn ? String(l?.npc || '').trim() : '',   // 模型判定的 NPC 原型标签（仅 npcOn 时有意义）
+        fx: fxOn && validFx.has(l?.fx) ? l.fx : '',      // 音效自动化：模型判的 per-line 音效（仅 fxOn 且在白名单内才留）
+      };
+      if (speed !== undefined) out.speed = speed;        // 模型给的合规语速（受方情动略快等）；缺省不填
+      return out;
+    })
     .filter((l) => l.text);
 }
 
@@ -4574,6 +5051,7 @@ async function extractDialogue(text) {
    ============================================================ */
 
 const TTS_BAR_CLASS = 'sd-tts-bar';
+const TTS_INTERCLIP_GAP_MS = 520;  // 连播句间停顿(ms)：略长于纯断句，留出自然换气感、不粘连也不拖沓
 let ttsChatBound = false;          // #chat 委托/观察者是否已挂
 let ttsChatObserver = null;
 let ttsScanTimer = null;           // 扫描防抖：观察者短时间多次触发只在安定后扫一次，避免插在 ST 半渲染态里
@@ -4650,6 +5128,7 @@ let ttsCurrentUrl = '';            // 当前 objectURL（播完撤销）
 let ttsSeqToken = 0;               // 连播序列令牌：自增即令旧连播失效（停止/重启）
 let ttsPlayCleanup = null;         // 当前 ttsPlayBlob 的收尾回调：停止时主动调，令 await 的播放 Promise 立即 resolve、旧连播循环得以解开（不被暂停的音频卡死）
 let ttsPopupEl = null;             // 快捷窗 DOM
+let ttsExtractWorldView = '';      // 提取卡：当前查看条目的世界书名
 
 // 当前生效的角色→音色映射：始终绑定当前聊天，取本聊天 store.ttsVoiceMap（类比推演按聊天）。
 // 未打开聊天时 store 为临时对象、映射为空，故界面显示为空。返回真实数组引用（增删改后调 ttsSaveVoiceMap 落盘）。
@@ -4657,6 +5136,71 @@ function ttsActiveVoiceMap() {
   const store = getChatStore();
   if (!Array.isArray(store.ttsVoiceMap)) store.ttsVoiceMap = [];
   return store.ttsVoiceMap;
+}
+
+// 配音「人设参照」世界书选择：**按聊天存**（绑当前聊天·类比 ttsVoiceMap）。不同聊天各自记住绑哪些书/条目。
+// 未打开聊天时 store 为临时对象，选择为空、界面显示未选。返回真实引用（改后 saveMetadata 落盘）。
+function ttsExtractWorldItemsStore() {
+  const store = getChatStore();
+  if (!isPlainObject(store.ttsExtractWorldItems)) store.ttsExtractWorldItems = {};
+  return store.ttsExtractWorldItems;
+}
+// 书级多选（按聊天）。
+function ttsExtractWorldBooks() {
+  const store = getChatStore();
+  if (!Array.isArray(store.ttsExtractWorldBooks)) store.ttsExtractWorldBooks = [];
+  return store.ttsExtractWorldBooks;
+}
+function toggleTtsExtractWorldBook(name, selected) {
+  if (!name) return;
+  const arr = ttsExtractWorldBooks();
+  const i = arr.indexOf(name);
+  const want = typeof selected === 'boolean' ? selected : i < 0;
+  if (want && i < 0) arr.push(name);
+  else if (!want && i >= 0) arr.splice(i, 1);
+  saveMetadata();
+}
+function isTtsExtractWorldItemSelected(book, itemId, fallbackEnabled) {
+  const store = ttsExtractWorldItemsStore()[book];
+  if (store && typeof store[itemId] === 'boolean') return store[itemId];
+  return fallbackEnabled !== false;
+}
+function setTtsExtractWorldItemSelected(book, itemId, selected) {
+  const store = ttsExtractWorldItemsStore();
+  if (!isPlainObject(store[book])) store[book] = {};
+  store[book][itemId] = !!selected;
+  saveMetadata();
+}
+
+// 组装提取上下文块（角色/persona 人设 + 选中的世界书条目），追加进提取系统提示词。
+// 人设默认注入（治 OOC/情绪/人称）；世界书只注入用户勾选的条目。都空则返回空串。世界书用主线扫描缓存 contextScanCache（同源）。
+function ttsBuildExtractContext() {
+  const blocks = [];
+  // 人设：默认注入（AI 角色 + user 人设）。取材式，从 ST 现成读取器拉。
+  const charName = getCharacterName();
+  const charDesc = getCharacterDescription();
+  const userName = getPersonaName();
+  const userDesc = getPersonaDescription();
+  const plines = [];
+  if (charName) plines.push(`- AI 角色：${charName}${charDesc ? `\n  人设：${clipLog(charDesc, 800)}` : ''}`);
+  if (userName) plines.push(`- 用户（user）：${userName}${userDesc && userDesc !== '{{persona}}' ? `\n  人设：${clipLog(userDesc, 500)}` : ''}`);
+  if (plines.length) blocks.push(`【角色定位】判断说话人身份与情绪时，须结合以下人设基线（性格决定情绪的表达方式与上限，勿判成脱离性格的 OOC 情绪；正文用第一/第二人称叙事时据此把"我/你"还原到对应角色本名）：\n${plines.join('\n')}`);
+  // 世界书：只注入「书级选中 且 条目勾选」的条目（独立于主线选择）。
+  const wb = contextScanCache?.worldBooks || {};
+  const selectedBooks = ttsExtractWorldBooks();
+  const chunks = [];
+  for (const name of selectedBooks) {
+    const entries = Array.isArray(wb[name]) ? wb[name] : [];
+    entries.forEach((it, index) => {
+      const id = getContextItemId(it, index);
+      if (!isTtsExtractWorldItemSelected(name, id, it?.enabled)) return;
+      const c = cleanContextText(it?.content || it?.prompt || '');
+      if (c) chunks.push(c);
+    });
+  }
+  const joined = chunks.join('\n').trim();
+  if (joined) blocks.push(`【世界设定参考】辅助理解专有名词、角色关系与情境（仅参考，不影响台词判定规则）：\n${clipLog(joined, 2000)}`);
+  return blocks.length ? `\n\n${blocks.join('\n\n')}` : '';
 }
 
 // 落盘当前映射：写本聊天元数据
@@ -4727,9 +5271,10 @@ function ttsBuildParams(line) {
   // 语速：单句显式 → 角色默认 → 全局默认
   const speed = Number.isFinite(line.speed) ? line.speed
     : (Number.isFinite(voice.speed) ? voice.speed : Number(t.defaultSpeed ?? 1));
+  const vfx = ttsVoiceFx(voice.voiceId);   // per-voice 音效器覆盖（无则 null，回落全局 T3）
   return {
     apiKey: t.apiKey,
-    text: line.text,
+    text: line.text,   // 合成用干净台词原文（多音字矫正交 T1 全局发音词典·synth 合成态已移除）
     voiceId: voice.voiceId,
     model: t.model,
     speed,
@@ -4740,7 +5285,48 @@ function ttsBuildParams(line) {
     endpoint: t.endpoint,
     proxyBase: t.proxyBase,
     groupId: t.groupId,
+    pronunciationTone: ttsPronunciationTone(),
+    languageBoost: t.languageBoost || '',
+    // 音效器：per-voice(按 voiceId)覆盖全局 T3；音效另受自动化 per-line fx 更高优先
+    vmPitch: Number.isFinite(vfx?.vmPitch) ? vfx.vmPitch : Number(t.vmPitch ?? 0),
+    vmIntensity: Number.isFinite(vfx?.vmIntensity) ? vfx.vmIntensity : Number(t.vmIntensity ?? 0),
+    vmTimbre: Number.isFinite(vfx?.vmTimbre) ? vfx.vmTimbre : Number(t.vmTimbre ?? 0),
+    soundEffects: (t.soundFxAuto && line.fx) ? line.fx : (vfx && vfx.soundEffects ? vfx.soundEffects : (t.soundEffects || '')),   // 自动化per-line ＞ per-voice ＞ 全局
   };
+}
+
+// 取某音色的 per-voice 音效器覆盖（无则 null）。
+function ttsVoiceFx(voiceId) {
+  const map = settings.tts?.voiceFxById;
+  if (!voiceId || !isPlainObject(map)) return null;
+  const v = map[voiceId];
+  return isPlainObject(v) ? v : null;
+}
+
+// 存 per-voice 音效器：全默认(全 0 且无音效)则清除该条(不留空壳)；voiceId 改动则从旧键迁到新键。
+function ttsSaveVoiceFx(oldVoiceId, newVoiceId, fx) {
+  const t = settings.tts || (settings.tts = {});
+  if (!isPlainObject(t.voiceFxById)) t.voiceFxById = {};
+  if (oldVoiceId && oldVoiceId !== newVoiceId) delete t.voiceFxById[oldVoiceId];
+  const f = isPlainObject(fx) ? fx : {};
+  const allDefault = !Number(f.vmPitch) && !Number(f.vmIntensity) && !Number(f.vmTimbre) && !f.soundEffects;
+  if (!newVoiceId || allDefault) { if (newVoiceId) delete t.voiceFxById[newVoiceId]; return; }
+  t.voiceFxById[newVoiceId] = {
+    vmPitch: Number(f.vmPitch) || 0,
+    vmIntensity: Number(f.vmIntensity) || 0,
+    vmTimbre: Number(f.vmTimbre) || 0,
+    soundEffects: String(f.soundEffects || ''),
+  };
+}
+
+// 全局发音词典 → MiniMax pronunciation_dict.tone 数组（["处理/(chu3)(li3)", …]）。
+// 过滤空项、去掉用户误填的斜杠（from/to 各自不该含 /，否则破坏 "原文/替换" 语义）。
+function ttsPronunciationTone() {
+  const dict = Array.isArray(settings.tts?.pronunciationDict) ? settings.tts.pronunciationDict : [];
+  return dict
+    .map((e) => ({ from: String(e?.from || '').replace(/\//g, '').trim(), to: String(e?.to || '').replace(/\//g, '').trim() }))
+    .filter((e) => e.from && e.to)
+    .map((e) => `${e.from}/${e.to}`);
 }
 
 // 带缓存合成：命中 IndexedDB 直接取，否则调 API 并存缓存。force=true 跳过缓存（重生成）。
@@ -4886,11 +5472,7 @@ function ttsSetPlayingState(mesEl, playing) {
     const iconCls = playing ? 'fa-solid fa-circle-stop' : 'fa-regular fa-circle-play';
     // 工具栏与内联钮均仅图标（去文案）
     b.innerHTML = `<i class="${iconCls}"></i>`;
-    if (b.classList.contains('sd-tts-playall')) {
-      b.title = playing ? '停止播放' : '连续播放本条全部台词';
-    } else {
-      b.title = playing ? '停止播放' : '连续播放本条全部台词';
-    }
+    b.title = playing ? '停止播放' : '连续播放本条全部台词';
   });
 }
 
@@ -5096,7 +5678,7 @@ function ttsRenderLines(bar, lines) {
   const rows = lines.map((l, i) => {
     const voiced = !!ttsResolveVoice(l.speaker);
     return `
-      <div class="sd-tts-line${voiced ? '' : ' sd-tts-novoice'}" data-idx="${i}" data-speaker="${htmlEscape(l.speaker)}" data-text="${htmlEscape(l.text)}" data-emotion="${htmlEscape(l.emotion || 'auto')}">
+      <div class="sd-tts-line${voiced ? '' : ' sd-tts-novoice'}" data-idx="${i}" data-speaker="${htmlEscape(l.speaker)}" data-text="${htmlEscape(l.text)}" data-emotion="${htmlEscape(l.emotion || 'auto')}"${Number.isFinite(l.speed) ? ` data-speed="${l.speed}"` : ''}>
         <button type="button" class="sd-tts-play" title="${voiced ? '播放（双击设置语速/情绪并重生成）' : '该角色未配置音色'}" ${voiced ? '' : 'disabled'}><i class="fa-solid fa-headphones"></i></button>
         <span class="sd-tts-spk">${htmlEscape(l.speaker)}</span>
         <span class="sd-tts-txt">${htmlEscape(l.text)}</span>
@@ -5175,39 +5757,78 @@ function ttsInjectInlineIcons(mesEl, lines) {
     return { norm: out, map };
   };
   const stripEdges = (s) => s.replace(/^[\s“”"「」『』,，。.!！?？、…—\-]+|[\s“”"「」『』,，。.!！?？、…—\-]+$/g, '');
+  // 第四档「深度归一」兜底：模型返回文本常与正文中段差一个空格 / 全角半角标点错位（，↔,、？↔?）/ 多空白，
+  // 前三档（精确/去首尾/去引号）都按字节比中段，差一个就全句落空→正文无图标（列表却有，因列表不需定位）。
+  // 这一档把双方都「去全部空白 + 去引号 + 全角标点折半角(仅标点·绝不碰正文字)」再找，带位置映射回原文真实下标。
+  const PUNCT_FOLD = { '，': ',', '。': '.', '！': '!', '？': '?', '；': ';', '：': ':', '（': '(', '）': ')', '、': ',', '—': '-', '～': '~' };
+  const deepNormWithMap = (s) => {
+    let out = '';
+    const map = [];
+    for (let i = 0; i < s.length; i++) {
+      let c = s[i];
+      if (/\s/.test(c)) continue;                       // 去全部空白
+      QUOTES.lastIndex = 0;
+      if (QUOTES.test(c)) { QUOTES.lastIndex = 0; continue; }   // 去引号
+      if (PUNCT_FOLD[c]) c = PUNCT_FOLD[c];             // 全角标点→半角（仅标点）
+      map.push(i);
+      out += c;
+    }
+    map.push(s.length);
+    return { norm: out, map };
+  };
+  const deepNorm = (s) => deepNormWithMap(s).norm;
 
-  let cursor = 0;        // 全文位置游标，逐句前移
-  let firstIcon = null;
+  let cursor = 0;        // 全文位置游标，逐句前移（提取顺序≈正文顺序时走这条快路）
+  const usedStarts = new Set();   // 已落点的起始位，防全文兜底时把同一处重复命中
+  // 从 from 起在 full 里找 needle，返回 {start,end} 或 null。四档：1)精确 2)去首尾标点 3)双方去引号+位置回映 4)深度归一(去空白+引号+全角标点折半角)+位置回映
+  const findFrom = (full, needle, from) => {
+    let i = full.indexOf(needle, from);
+    if (i >= 0) return { start: i, end: i + needle.length };
+    const core = stripEdges(needle);
+    if (core.length >= 2 && core !== needle) {
+      i = full.indexOf(core, from);
+      if (i >= 0) return { start: i, end: i + core.length };
+    }
+    const needleNQ = stripQuotes(needle.trim());
+    if (needleNQ.length >= 2) {
+      const { norm, map } = normalizeWithMap(full);
+      let ncursor = 0;
+      while (ncursor < map.length - 1 && map[ncursor] < from) ncursor++;
+      const ni = norm.indexOf(needleNQ, ncursor);
+      if (ni >= 0) return { start: map[Math.min(ni, map.length - 1)], end: map[Math.min(ni + needleNQ.length, map.length - 1)] };
+    }
+    // 第四档：深度归一（去空白+引号+全角标点折半角）——吃掉「中段差一个空格/全半角标点错位」这类最常见失配
+    const needleDeep = deepNorm(needle);
+    if (needleDeep.length >= 2) {
+      const { norm, map } = deepNormWithMap(full);
+      let dcursor = 0;
+      while (dcursor < map.length - 1 && map[dcursor] < from) dcursor++;
+      const di = norm.indexOf(needleDeep, dcursor);
+      if (di >= 0) return { start: map[Math.min(di, map.length - 1)], end: map[Math.min(di + needleDeep.length, map.length - 1)] };
+    }
+    return null;
+  };
   for (const { line, idx: lineIdx } of voicedLines) {
     const needle = line.text.trim();
     if (needle.length < 2) continue;
     const { full, segs } = collect();
-    // 三档定位：1) 精确 2) 去首尾标点 3) 双方去引号 + 位置回映
-    let endPos = -1;
-    let i = full.indexOf(needle, cursor);
-    if (i >= 0) endPos = i + needle.length;
-    if (endPos < 0) {
-      const core = stripEdges(needle);
-      if (core.length >= 2 && core !== needle) {
-        i = full.indexOf(core, cursor);
-        if (i >= 0) endPos = i + core.length;
-      }
+    // 先从游标前向找（提取顺序==正文顺序时最快、且天然按序去重）；
+    // 找不到再从 0 全文兜底——根治「提取顺序≠正文顺序」时靠前的句被游标甩过→正文无图标（列表却有）。
+    let hit = findFrom(full, needle, cursor);
+    if (!hit || usedStarts.has(hit.start)) {
+      let scan = findFrom(full, needle, 0);
+      while (scan && usedStarts.has(scan.start)) scan = findFrom(full, needle, scan.end);   // 跳过已用，找下一处
+      if (scan) hit = scan;
     }
-    if (endPos < 0) {
-      const needleNQ = stripQuotes(needle.trim());
-      if (needleNQ.length >= 2) {
-        const { norm, map } = normalizeWithMap(full);
-        // cursor 在归一串里的等价起点：找第一个映射 >= cursor 的归一位
-        let ncursor = 0;
-        while (ncursor < map.length - 1 && map[ncursor] < cursor) ncursor++;
-        const ni = norm.indexOf(needleNQ, ncursor);
-        if (ni >= 0) {
-          const nEnd = ni + needleNQ.length;
-          endPos = map[Math.min(nEnd, map.length - 1)];   // 归一末位 → 原文位置
-        }
-      }
+    if (!hit) {
+      // 诊断：5 档全失（同位置确定性丢失时排查真因用）。打出未定位台词 + 渲染后正文片段，
+      // 用户复现后把这行发来即可精准定位是正则改写/文本插入/其他，而非再盲加匹配档。
+      try { console.warn(`[${MODULE_NAME}] 内联🔊未定位 · 台词="${needle.slice(0, 60)}" · 归一后="${deepNorm(needle).slice(0, 60)}" · 正文归一片段="${deepNorm(full).slice(0, 200)}"`); } catch (_) {}
+      continue;   // 五档全失：跳过内联，列表里仍有该句
     }
-    if (endPos < 0) continue;   // 三档都不中：跳过内联，列表里仍有该句
+    usedStarts.add(hit.start);
+    let endPos = hit.end;
+    if (hit.start >= cursor) cursor = endPos;   // 仅前向命中才推进游标，保持快路单调
     // 若插入点紧跟着闭合引号（"」'』等），顺势越过去——视觉上挂在台词整体外缘更自然
     while (endPos < full.length && QUOTES.test(full[endPos])) { QUOTES.lastIndex = 0; endPos++; }
     QUOTES.lastIndex = 0;
@@ -5227,21 +5848,22 @@ function ttsInjectInlineIcons(mesEl, lines) {
     icon.dataset.speaker = line.speaker || '未知';
     icon.dataset.text = line.text || '';
     icon.dataset.emotion = line.emotion || 'auto';
+    if (Number.isFinite(line.speed)) icon.dataset.speed = String(line.speed);   // 提取注入的语速快照：快捷窗回落 dataset 时也能显出确切值（与情绪同款）
     icon.innerHTML = '<i class="fa-solid fa-headphones"></i>';
     if (after) after.parentNode.insertBefore(icon, after);
     else target.parentNode.appendChild(icon);
-    if (!firstIcon) firstIcon = icon;
-    cursor = endPos;
   }
-  // 在第一条台词的小喇叭前，插一个「连续播放本条」钮
-  if (firstIcon) {
+  // 在正文最靠前的小喇叭前插「连续播放本条」钮。注意：因有乱序兜底，插入顺序≠DOM 顺序，
+  // 故取 DOM 中实际第一个内联图标作锚点（而非最先创建的那个），保证连播钮真在最前。
+  const domFirstIcon = textEl.querySelector('.sd-tts-inline');
+  if (domFirstIcon) {
     const playAll = document.createElement('button');
     playAll.type = 'button';
     playAll.className = 'sd-tts-inline sd-tts-inline-playall';
     playAll.title = '连续播放本条全部台词';
     playAll.setAttribute('aria-label', '连续播放本条');
     playAll.innerHTML = '<i class="fa-regular fa-circle-play"></i>';
-    firstIcon.parentNode.insertBefore(playAll, firstIcon);
+    domFirstIcon.parentNode.insertBefore(playAll, domFirstIcon);
   }
 }
 
@@ -5303,9 +5925,14 @@ async function ttsHandlePlayAll(btn, force = false) {
     }
 
     // 阶段二：顺序播放，列表项 + 对应正文内联图标同步高亮
-    for (const job of ready) {
+    for (let bi = 0; bi < ready.length; bi++) {
       if (myToken !== ttsSeqToken) break;
+      const job = ready[bi];
       await ttsPlayBlob(job.blob, ttsHighlightEls(mesEl, job.idx));
+      // 句间留一个舒适的小停顿（不粘连、也不拖沓）；末句后不停；被抢占则不停
+      if (bi < ready.length - 1 && myToken === ttsSeqToken) {
+        await new Promise((r) => setTimeout(r, TTS_INTERCLIP_GAP_MS));
+      }
     }
   } catch (err) {
     toast(`配音失败：${err?.message || err}`, 'error');
@@ -5313,6 +5940,9 @@ async function ttsHandlePlayAll(btn, force = false) {
     // 仅当本次调用仍是最新（未被新的连播/重生抢占）时才复位播放态——
     // 否则被抢占的旧调用会把新调用刚切上的「停止」外观打回「播放」。被抢占时新调用自己会负责复位。
     if (myToken === ttsSeqToken) ttsSetPlayingState(mesEl, false);
+    // 自愈：连播中/后 ST 可能重渲 .mes_text 内部、抹掉内联图标（子树变动·顶层 childList 观察器看不到→不会自动补）。
+    // 这里幂等补一次：图标还在则 ttsAutoRestore 内部即返回，被抹了则按缓存重注入。根治「连播后小图标全消失、重进才回」。
+    if (mesEl) ttsAutoRestore(mesEl);
   }
 }
 
@@ -5324,11 +5954,17 @@ function ttsOpenQuickPopup(btn) {
   const curEmotion = (line.emotion && line.emotion !== 'auto') ? line.emotion : 'auto';
   const emotions = ['auto', 'happy', 'sad', 'angry', 'fearful', 'disgusted', 'surprised', 'calm', 'fluent', 'whisper'];
   const emoLabel = { auto: '自动 (auto)', happy: '高兴 (happy)', sad: '悲伤 (sad)', angry: '愤怒 (angry)', fearful: '害怕 (fearful)', disgusted: '厌恶 (disgusted)', surprised: '惊讶 (surprised)', calm: '中性 (calm)', fluent: '生动 (fluent)', whisper: '低语 (whisper)' };
+  // 当前模型：whisper 仅 2.6、fluent 仅 2.6/2.8。不支持的情绪直接不显示在列表里（而非置灰），列表更干净。
+  const curModel = MINIMAX_MODELS.includes(settings.tts?.model) ? settings.tts.model : 'speech-2.8-hd';
+  const emoOptions = emotions
+    .filter((em) => emotionAllowedForModel(em, curModel))
+    .map((em) => `<option value="${em}" ${em === curEmotion ? 'selected' : ''}>${emoLabel[em]}</option>`)
+    .join('');
   const pop = document.createElement('div');
   pop.className = `sd-tts-popup sd-theme-${THEME_KEYS.includes(settings.theme) ? settings.theme : 'light'}`;
   pop.innerHTML = `
     <div class="sd-tts-popup-row"><span>语速</span><input type="range" class="sd-tts-pop-speed" min="0.5" max="2" step="0.05" value="${curSpeed}"><b class="sd-tts-pop-speed-val">${curSpeed.toFixed(2)}</b></div>
-    <div class="sd-tts-popup-row"><span>情绪</span><select class="sd-tts-pop-emotion">${emotions.map((em) => `<option value="${em}" ${em === curEmotion ? 'selected' : ''}>${emoLabel[em]}</option>`).join('')}</select></div>
+    <div class="sd-tts-popup-row"><span>情绪</span><select class="sd-tts-pop-emotion">${emoOptions}</select></div>
     <div class="sd-tts-popup-actions">
       <button type="button" class="sd-tts-pop-icon sd-tts-pop-regen" title="按当前语速/情绪重新生成并播放"><i class="fa-solid fa-rotate"></i></button>
       <button type="button" class="sd-tts-pop-icon sd-tts-pop-download" title="下载这句"><i class="fa-solid fa-download"></i></button>
@@ -5536,6 +6172,7 @@ function bindActiveTabEvents(root) {
   bindTheaterTabEvents(root);
   bindGeopoliticsTabEvents(root);
   bindTtsTabEvents(root);
+  bindCoreadTabEvents(root);
   // 展开编辑：把目标 textarea 拉进行内全屏编辑视图，保存时按 target 直写数据模型
   root.querySelectorAll('.sd-expand-editor').forEach((el) => el.addEventListener('click', (e) => {
     e.preventDefault(); e.stopPropagation();   // 按钮可能位于 <summary> 内，阻止顺带折叠
@@ -6285,6 +6922,1302 @@ async function importTemplates(event) {
   } finally {
     event.target.value = '';
   }
+}
+
+/* ============================================================
+   共读 · 电子书陪读模块（阶段 1A：书架 + 阅读器骨架）
+   ── 独立模块，sd-reader-* 命名空间，零侵入推演主流程。
+   ── 重数据（正文/封面/会话/检索日志）在 IndexedDB(blobStore)；settings.coread 只存轻量书目索引 + 阅读偏好。
+   ── 阅读器是模态内全屏子视图（仿 theaterView，由 readerView 模块级状态驱动）。
+   ============================================================ */
+
+// 全屏 portal 需从模态复制的主题变量（避免 CSS 重复声明，永远跟随千幕当前主题）
+const READER_PORTAL_VARS = ['--sd-text', '--sd-muted', '--sd-border', '--sd-hairline', '--sd-glass', '--sd-glass-weak', '--sd-card', '--sd-folder-head', '--sd-input-bg', '--sd-accent', '--sd-primary', '--sd-primary-text', '--sd-window-bg', '--sd-pre', '--sd-font'];
+// 全屏 portal 不透明底色（按主题给实色，避免透出下方 ST 页面）
+const READER_PORTAL_BG = { light: '#f3efe7', dark: '#1c1e22', summer: '#e9f5ee', candy: '#faf0f4', kraft: '#f1e7cf', dream: '#f0eff8' };
+
+// 打开阅读器时把该书正文载入此缓存（重数据不进 settings/DOM 反复读）；关闭阅读器即清。
+let readerContentCache = null;   // { bookId, fullText, chapters:[{title,content}], sig }
+let readerScrollSaveTimer = null;
+let companionWorldView = '';     // 伴读设定浮层中：当前查看条目的世界书名
+
+function coread() {
+  if (!isPlainObject(settings.coread)) settings.coread = clone(DEFAULT_SETTINGS.coread);
+  return settings.coread;
+}
+
+// 伴读设定（1B）：书友身份 + 取材式独立勾选（复用主线拉取/呈现，但选择存 companion·互不影响）。
+function coreadCompanion() {
+  const c = coread();
+  if (!isPlainObject(c.companion)) c.companion = clone(DEFAULT_SETTINGS.coread.companion);
+  if (!Array.isArray(c.companion.worldBooks)) c.companion.worldBooks = [];
+  if (!isPlainObject(c.companion.worldItems)) c.companion.worldItems = {};
+  return c.companion;
+}
+
+// 共读世界书「书」级选中（独立于主线）。
+function coreadToggleCompanionWorldBook(name, selected) {
+  if (!name) return;
+  const cp = coreadCompanion();
+  const i = cp.worldBooks.indexOf(name);
+  const want = typeof selected === 'boolean' ? selected : i < 0;
+  if (want && i < 0) cp.worldBooks.push(name);
+  else if (!want && i >= 0) cp.worldBooks.splice(i, 1);
+  saveSettings();
+}
+function isCompanionWorldItemSelected(book, itemId, fallbackEnabled) {
+  const store = coreadCompanion().worldItems[book];
+  if (store && typeof store[itemId] === 'boolean') return store[itemId];
+  return fallbackEnabled !== false;
+}
+function setCompanionWorldItemSelected(book, itemId, selected) {
+  const cp = coreadCompanion();
+  if (!isPlainObject(cp.worldItems[book])) cp.worldItems[book] = {};
+  cp.worldItems[book][itemId] = !!selected;
+  saveSettings();
+}
+
+// 扫描世界书（复用主线 refreshWorldBooks→contextScanCache，含条目数据），扫完重渲设定浮层。
+async function coreadSetupScanWorldBooks(overlay) {
+  const body = overlay?.querySelector('.sd-reader-setup-body');
+  const scanBtn = body?.querySelector('.sd-reader-cwb-scan');
+  if (scanBtn) scanBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 扫描中';
+  try { await refreshWorldBooks(false); } catch (_) {}
+  if (body) body.innerHTML = renderCompanionSetupBody();
+}
+
+// 懒加载某世界书条目到 contextScanCache（refreshWorldBooks 只为「主线选中」的书拉条目，
+// 共读独立选择的书不在其列→需按需补拉，否则面板永远「暂无条目」）。
+async function coreadEnsureWorldEntries(name) {
+  if (!name) return;
+  const cache = contextScanCache.worldBooks || (contextScanCache.worldBooks = {});
+  if (Array.isArray(cache[name])) return;   // 已有缓存不重复拉
+  try { cache[name] = await getWorldBookEntries(name); } catch (_) { cache[name] = []; }
+}
+
+function coreadBookMeta(bookId) {
+  return (coread().books || []).find((b) => b.id === bookId) || null;
+}
+
+// 网格封面（无图时）：书名 + 作者，长名自动省略不出框。
+function readerCoverPlaceholder(title, author) {
+  return `<div class="sd-reader-cover-ph">
+    <span class="sd-reader-cover-title">${htmlEscape(title || '未命名')}</span>
+    ${author ? `<span class="sd-reader-cover-author">${htmlEscape(author)}</span>` : ''}
+  </div>`;
+}
+
+/* ── 导入（一期：上传文件，集成在导入按钮；TXT 走编码嗅探，其余格式后续接） ── */
+
+async function coreadImportText(rawText, title = '', author = '') {
+  const text = String(rawText || '').trim();
+  if (!text) { toast('内容为空，无法导入。', 'warning'); return null; }
+  if (!blobStore.blobStoreAvailable()) { toast('当前环境不支持本地存储（IndexedDB），无法导入书籍。', 'error'); return null; }
+  const finalTitle = String(title || '').trim() || text.split('\n')[0].slice(0, 24).trim() || '未命名书籍';
+  const chapters = reader.splitChapters(text, { fallbackCharCount: coread().fallbackChapterChars });
+  const charCount = reader.totalChars(chapters);
+  const sig = reader.contentSignature(text);
+  const bookId = uid('book');
+  try {
+    await blobStore.putBook(bookId, { meta: { title: finalTitle, author }, fullText: text, chapters, sig });
+  } catch (e) {
+    console.warn(`[${MODULE_NAME}] putBook failed`, e);
+    toast('写入本地存储失败。', 'error');
+    return null;
+  }
+  coread().books.unshift({
+    id: bookId, title: finalTitle, author: String(author || ''),
+    addedAt: Date.now(), chapterCount: chapters.length, charCount,
+    tags: [], boundChar: '', progress: 0, lastChapterIndex: 0, lastScrollRatio: 0, ragEnabled: false,
+  });
+  saveSettings();
+  toast(`已导入《${finalTitle}》：${chapters.length} 章 · ${charCount.toLocaleString()} 字。`, 'success');
+  return bookId;
+}
+
+// 把正文补写进一本「已在书目、本机缺正文」的书（跨端迁移后用同名 TXT 补全）。
+async function coreadRefillBook(bookId, rawText) {
+  const meta = coreadBookMeta(bookId);
+  if (!meta) return false;
+  const text = String(rawText || '').trim();
+  if (!text) { toast('内容为空。', 'warning'); return false; }
+  if (!blobStore.blobStoreAvailable()) { toast('当前环境不支持本地存储（IndexedDB）。', 'error'); return false; }
+  const chapters = reader.splitChapters(text, { fallbackCharCount: coread().fallbackChapterChars });
+  const charCount = reader.totalChars(chapters);
+  const sig = reader.contentSignature(text);
+  try {
+    await blobStore.putBook(bookId, { meta: { title: meta.title, author: meta.author }, fullText: text, chapters, sig });
+  } catch (e) {
+    console.warn(`[${MODULE_NAME}] refill putBook failed`, e);
+    toast('写入本地存储失败。', 'error');
+    return false;
+  }
+  meta.chapterCount = chapters.length;
+  meta.charCount = charCount;
+  meta.lastChapterIndex = Math.min(meta.lastChapterIndex || 0, chapters.length - 1);
+  saveSettings();
+  toast(`已补全《${meta.title}》正文：${chapters.length} 章。`, 'success');
+  return true;
+}
+
+// 触发文件选择（集成在导入按钮）。一期实际解析 TXT；其余常见格式占位提示后续支持。
+// refillBookId 非空 → 补写到既有书（跨端缺正文），否则新建。
+function coreadTriggerImport(refillBookId = '') {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.txt,.text,text/plain';
+  input.style.display = 'none';
+  document.body.appendChild(input);
+  input.addEventListener('change', async () => {
+    const file = input.files?.[0];
+    input.remove();
+    if (!file) return;
+    const isTxt = /\.(txt|text)$/i.test(file.name) || file.type === 'text/plain';
+    if (!isTxt) { toast('当前仅支持 TXT；EPUB 等格式即将支持。', 'warning'); return; }
+    const name = String(file.name || '').replace(/\.(txt|text)$/i, '').trim();
+    try {
+      const buf = await file.arrayBuffer();
+      const text = reader.decodeTxtBuffer(buf);
+      if (refillBookId) {
+        const ok = await coreadRefillBook(refillBookId, text);
+        if (ok) coreadOpenBook(refillBookId);
+      } else {
+        const id = await coreadImportText(text, name);
+        if (id) renderModal();
+      }
+    } catch (e) {
+      console.warn(`[${MODULE_NAME}] import file failed`, e);
+      toast('读取文件失败。', 'error');
+    }
+  });
+  input.click();
+}
+
+async function coreadDeleteBook(bookId) {
+  const meta = coreadBookMeta(bookId);
+  if (!meta) return;
+  coread().books = coread().books.filter((b) => b.id !== bookId);
+  saveSettings();
+  try { await blobStore.deleteBook(bookId); } catch (_) {}
+  toast(`已删除《${meta.title}》。`, 'info');
+}
+
+/* ── 进入/退出阅读器 ───────────────────────────────────── */
+
+async function coreadOpenBook(bookId) {
+  const meta = coreadBookMeta(bookId);
+  if (!meta) { toast('找不到这本书。', 'error'); return; }
+  let rec = null;
+  try { rec = await blobStore.getBook(bookId); } catch (_) {}
+  // 跨端：书目索引（settings，会同步）在，但正文 blob 在 IndexedDB（不跨端）→ 本机没有，友好提示而非报错弹窗
+  if (!rec || !Array.isArray(rec.chapters)) {
+    const redo = await confirmDialog(
+      `《${meta.title}》的正文未在本设备缓存`,
+      '书目信息会随千幕配置同步，但书籍正文存放在本机本地存储，不随设备迁移。可重新导入同名 TXT 补全，或用「导入/导出」迁移阅读数据。是否现在重新导入？'
+    );
+    if (redo) coreadTriggerImport(bookId);   // 带 bookId：补全到这本，而非新建
+    return;
+  }
+  readerContentCache = { bookId, fullText: rec.fullText || '', chapters: rec.chapters, sig: rec.sig || '' };
+  const startCh = Number.isInteger(meta.lastChapterIndex) ? meta.lastChapterIndex : 0;
+  readerView = {
+    bookId, chapterIndex: Math.max(0, Math.min(startCh, rec.chapters.length - 1)),
+    scrollRatio: meta.lastScrollRatio || 0, barHidden: false,
+    sessionStart: nowMs(),
+  };
+  // 阅读器始终走 body portal（逃离模态 backdrop-filter 包含块；窄屏/移动端真·全页，不被 .sd-window 裁切）
+  renderModal();        // 模态内此 tab 转为占位
+  refreshReaderPortal();
+}
+
+function coreadCloseReader() {
+  coreadSaveProgress();   // 落进度 + 累计阅读时长
+  unmountReaderPortal();
+  readerView = null;
+  readerContentCache = null;
+  renderModal();
+}
+
+// 当前毫秒（Date.now 在某些受限上下文被禁用时降级到 performance.now 基准）
+function nowMs() {
+  try { return Date.now(); } catch (_) { return Math.floor(performance.now()); }
+}
+
+// 保存阅读进度（章节 + 滚动比例 + 累计阅读时长 → 轻量索引）。
+function coreadSaveProgress() {
+  if (!readerView || !readerContentCache) return;
+  const meta = coreadBookMeta(readerView.bookId);
+  if (!meta) return;
+  meta.lastChapterIndex = readerView.chapterIndex;
+  meta.lastScrollRatio = readerView.scrollRatio || 0;
+  const total = readerContentCache.chapters.length || 1;
+  meta.progress = Math.round(((readerView.chapterIndex + (readerView.scrollRatio || 0)) / total) * 100);
+  // 累计本书阅读总时长（毫秒）；分段结算，避免长时间挂着算一坨
+  if (readerView.sessionStart) {
+    const delta = nowMs() - readerView.sessionStart;
+    if (delta > 0 && delta < 6 * 3600 * 1000) meta.readMs = (meta.readMs || 0) + delta;
+    readerView.sessionStart = nowMs();
+  }
+  saveSettings();
+}
+
+/* ── 全屏 portal（覆盖整个 ST 页面，逃离模态 backdrop-filter 形成的包含块） ── */
+
+function unmountReaderPortal() {
+  document.getElementById('sd-reader-portal')?.remove();
+}
+
+// 重建 portal 内容并重绑事件（章节切换/划线等局部刷新统一走这里，不动模态）
+function refreshReaderPortal() {
+  if (!readerView) { unmountReaderPortal(); return; }
+  const portal = mountReaderPortal(buildReaderStage());
+  bindReaderStageEvents(portal);
+}
+
+function mountReaderPortal(innerHtml) {
+  unmountReaderPortal();
+  const modal = document.getElementById(MODAL_ID);
+  const portal = document.createElement('div');
+  portal.id = 'sd-reader-portal';
+  portal.className = 'sd-reader-portal';
+  // 复制当前主题 CSS 变量到 portal，免重复声明、永远与千幕主题一致
+  if (modal) {
+    const cs = getComputedStyle(modal);
+    for (const v of READER_PORTAL_VARS) {
+      const val = cs.getPropertyValue(v);
+      if (val) portal.style.setProperty(v, val.trim());
+    }
+  }
+  // 不透明实色底（按主题），避免透出下方 ST 页面
+  const themeKey = THEME_KEYS.includes(settings.theme) ? settings.theme : 'light';
+  portal.style.background = READER_PORTAL_BG[themeKey] || READER_PORTAL_BG.light;
+  portal.innerHTML = innerHtml;
+  document.body.appendChild(portal);
+  return portal;
+}
+
+/* ── 渲染：书架 / 阅读器分派 ───────────────────────────── */
+
+function renderCoreadTab() {
+  // 阅读器永远走 body portal（逃离模态包含块，窄屏不裁切）；模态内此 tab 仅占位
+  if (readerView) {
+    return `<div class="sd-reader-fs-placeholder"><i class="fa-solid fa-book-open-reader"></i><p>阅读中…<br><button class="sd-reader-resume sd-btn">回到阅读</button></p></div>`;
+  }
+  return renderLibraryView();
+}
+
+function sortedLibraryBooks() {
+  const books = [...(coread().books || [])];
+  const [field, dir] = String(coread().libSort || 'addedAt-desc').split('-');
+  const mul = dir === 'asc' ? 1 : -1;
+  const val = (b) => {
+    switch (field) {
+      case 'title': return b.title || '';
+      case 'author': return b.author || '';
+      case 'progress': return b.progress || 0;
+      case 'length': return b.charCount || 0;
+      default: return b.addedAt || 0;
+    }
+  };
+  books.sort((a, b) => {
+    const va = val(a), vb = val(b);
+    if (typeof va === 'string') return mul * va.localeCompare(vb, 'zh');
+    return mul * (va - vb);
+  });
+  const tags = coread().libTags || [];
+  return tags.length ? books.filter((b) => tags.every((t) => (b.tags || []).includes(t))) : books;
+}
+
+function allLibraryTags() {
+  const set = new Set();
+  for (const b of coread().books || []) for (const t of (b.tags || [])) set.add(t);
+  return [...set];
+}
+
+function renderLibraryView() {
+  const c = coread();
+  const books = sortedLibraryBooks();
+  const tags = allLibraryTags();
+  const viewMode = c.libViewMode === 'list' ? 'list' : 'grid';
+  const cards = books.map((b) => {
+    const prog = Math.max(0, Math.min(100, b.progress || 0));
+    if (viewMode === 'list') {
+      // 纯文字行：无封面
+      return `
+        <div class="sd-reader-row" data-book="${htmlEscape(b.id)}">
+          <div class="sd-reader-row-main">
+            <span class="sd-reader-row-title" title="${htmlEscape(b.title)}">${htmlEscape(b.title)}</span>
+            <span class="sd-reader-row-sub">${b.author ? htmlEscape(b.author) + ' · ' : ''}${(b.chapterCount || 0)}章 · ${(b.charCount || 0).toLocaleString()}字</span>
+          </div>
+          <span class="sd-reader-row-prog">${prog}%</span>
+          <button class="sd-reader-card-del" data-book="${htmlEscape(b.id)}" title="删除"><i class="fa-solid fa-trash"></i></button>
+        </div>`;
+    }
+    return `
+      <div class="sd-reader-card" data-book="${htmlEscape(b.id)}">
+        <div class="sd-reader-card-cover">${readerCoverPlaceholder(b.title, b.author)}
+          <div class="sd-reader-prog"><span>${prog}%</span></div>
+        </div>
+        <div class="sd-reader-card-meta">
+          <div class="sd-reader-card-title" title="${htmlEscape(b.title)}">${htmlEscape(b.title)}</div>
+          <div class="sd-reader-card-sub">${(b.chapterCount || 0)}章 · ${(b.charCount || 0).toLocaleString()}字</div>
+        </div>
+        <button class="sd-reader-card-del" data-book="${htmlEscape(b.id)}" title="删除"><i class="fa-solid fa-trash"></i></button>
+      </div>`;
+  }).join('');
+
+  return `
+    <div class="sd-reader-lib sd-reader-lib-${viewMode}">
+      <div class="sd-reader-lib-bar">
+        <button class="sd-reader-view-toggle" title="切换视图"><i class="fa-solid ${viewMode === 'grid' ? 'fa-list' : 'fa-table-cells-large'}"></i></button>
+        <input type="search" class="sd-reader-search" placeholder="搜索书名 / 作者" />
+        <select class="sd-reader-sort" title="排序">
+          <option value="addedAt-desc"${c.libSort === 'addedAt-desc' ? ' selected' : ''}>最近添加</option>
+          <option value="addedAt-asc"${c.libSort === 'addedAt-asc' ? ' selected' : ''}>最早添加</option>
+          <option value="title-asc"${c.libSort === 'title-asc' ? ' selected' : ''}>书名 A→Z</option>
+          <option value="progress-desc"${c.libSort === 'progress-desc' ? ' selected' : ''}>进度高→低</option>
+        </select>
+        <button class="sd-reader-import sd-btn" title="导入书籍"><i class="fa-solid fa-plus"></i> 导入</button>
+      </div>
+      ${tags.length ? `<div class="sd-reader-tags">${tags.map((t) => `<button class="sd-reader-tag ${(c.libTags || []).includes(t) ? 'active' : ''}" data-tag="${htmlEscape(t)}">${htmlEscape(t)}</button>`).join('')}</div>` : ''}
+      ${books.length ? `<div class="sd-reader-grid">${cards}</div>` : `<div class="sd-reader-empty"><i class="fa-solid fa-book-open"></i><p>书架还是空的。点「导入」添加第一本书，开始和角色共读。</p></div>`}
+    </div>`;
+}
+
+// 章节正文 → 段落 HTML。自动判定分段；hiList=本章划线对象 [{id,text,hlStyle,color}]，命中处包带样式 <mark>。
+function buildReaderParagraphs(text, hiList) {
+  const s = String(text || '');
+  const hasBlankLines = /\n\s*\n/.test(s);
+  const blocks = hasBlankLines
+    ? s.split(/\n\s*\n/).map((b) => b.replace(/\n+/g, ' ').trim())
+    : s.split('\n').map((l) => l.trim());
+  // 长文本优先，避免短串先命中把长串切断
+  const hi = (hiList || [])
+    .filter((h) => h && String(h.text || '').trim().length >= 2)
+    .map((h) => ({ id: h.id, text: String(h.text).trim(), style: h.hlStyle || 'mark', color: sanitizeHexColor(h.color) }))
+    .sort((a, b) => b.text.length - a.text.length);
+  const out = blocks.filter(Boolean).map((p) => {
+    if (!hi.length) return `<p>${htmlEscape(p)}</p>`;
+    // 在「纯文本」上定位匹配区间（绝不在已注入的 HTML 标签/属性里误命中）；
+    // 长串优先占位、贪心跳过重叠 → 杜绝嵌套 <mark> 与属性串被短划线击穿。
+    const ranges = [];
+    for (const h of hi) {
+      let from = 0, idx;
+      while ((idx = p.indexOf(h.text, from)) !== -1) {
+        ranges.push({ start: idx, end: idx + h.text.length, h });
+        from = idx + h.text.length;
+      }
+    }
+    if (!ranges.length) return `<p>${htmlEscape(p)}</p>`;
+    ranges.sort((a, b) => a.start - b.start || (b.end - b.start) - (a.end - a.start));
+    let cursor = 0, html = '';
+    for (const r of ranges) {
+      if (r.start < cursor) continue;   // 与已占位区间重叠 → 跳过
+      html += htmlEscape(p.slice(cursor, r.start));
+      const styleAttr = r.h.color ? ` style="--hl-color:${r.h.color}"` : '';
+      html += `<mark class="sd-reader-hl sd-reader-hl-${r.h.style}" data-note="${htmlEscape(r.h.id)}"${styleAttr}>${htmlEscape(p.slice(r.start, r.end))}</mark>`;
+      cursor = r.end;
+    }
+    html += htmlEscape(p.slice(cursor));
+    return `<p>${html}</p>`;
+  }).join('');
+  return out || '<p class="sd-reader-blank">（本章无正文）</p>';
+}
+
+// 颜色白名单：只接受 #rgb / #rrggbb，挡注入。空/非法 → ''（回落主题色）。
+function sanitizeHexColor(c) {
+  const s = String(c || '').trim();
+  return /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(s) ? s : '';
+}
+
+// 阅读时长格式化（ms → 「Xh Ym」/「Y 分钟」/「不足 1 分钟」）
+function formatReadDuration(ms) {
+  const m = Math.floor((ms || 0) / 60000);
+  if (m < 1) return '不足 1 分钟';
+  if (m < 60) return `${m} 分钟`;
+  return `${Math.floor(m / 60)} 时 ${m % 60} 分`;
+}
+
+// 页宽(rem) → 正文左右内边距(%)。窄屏/移动端 max-width 顶不到时，靠内边距给出可见的「页宽」效果。
+// 宽设置→小边距(更宽列)；窄设置→大边距(更窄列)。28→14% … 66→0%。
+function widthToPad(widthRem) {
+  const w = Math.max(28, Math.min(66, widthRem || 42));
+  return ((66 - w) / 38 * 14).toFixed(1);
+}
+
+// 构建阅读器舞台 HTML（始终在 body portal 内）。手机阅读 APP 式：点正文切换上下操作栏。
+function buildReaderStage() {
+  const cache = readerContentCache;
+  const meta = coreadBookMeta(readerView.bookId);
+  if (!cache || !meta) return '';
+  const total = cache.chapters.length;
+  const ci = Math.max(0, Math.min(readerView.chapterIndex, total - 1));
+  const chapter = cache.chapters[ci] || { title: '', content: '' };
+  const c = coread();
+  const notes = Array.isArray(meta.notes) ? meta.notes : [];
+  const chHi = notes.filter((n) => n.kind === 'highlight' && n.chapterIndex === ci).map((n) => ({ id: n.id, text: n.text, hlStyle: n.hlStyle, color: n.color }));
+  const bookmarked = notes.some((n) => n.kind === 'bookmark' && n.chapterIndex === ci);
+  const bodyStyle = `font-size:${c.fontSizePx || 19}px;line-height:${c.lineHeight || 1.9};text-align:${c.justify ? 'justify' : 'left'};--sd-rd-para:${c.paraSpacing || 1}em;--sd-rd-px:${widthToPad(Math.max(28, Math.min(66, c.contentWidthRem || 42)))}%;`;
+  const paras = buildReaderParagraphs(chapter.content, chHi);
+  const widthRem = Math.max(28, Math.min(66, c.contentWidthRem || 42));
+  const barHidden = readerView.barHidden ? ' sd-reader-bar-hidden' : '';
+  const pct = Math.max(0, Math.min(100, meta.progress || 0));
+  const preset = c.spacingPreset || 'normal';
+  const customOpen = preset === 'custom' ? ' open' : '';
+  const hlColor = sanitizeHexColor(c.hlColor) || '#d8a657';
+  const drawerH = Math.max(180, Math.min(520, c.dialogHeight || 300));
+  const pinned = readerView.dialogPinned ? ' sd-reader-dialog-pinned' : '';
+
+  return `
+    <div class="sd-reader-stage${barHidden}${pinned}" style="--sd-rd-dialogh:${drawerH}px">
+      <!-- 顶栏（固定不抽回）：书签 / 书名 / 返回(右) -->
+      <div class="sd-reader-topbar">
+        <button class="sd-reader-mark-btn ${bookmarked ? 'active' : ''}" title="书签"><i class="fa-${bookmarked ? 'solid' : 'regular'} fa-bookmark"></i></button>
+        <div class="sd-reader-chtitle">${htmlEscape(chapter.title || meta.title)}</div>
+        <button class="sd-reader-back" title="返回书架"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+
+      <!-- 正文：点空白切换底栏显隐 -->
+      <div class="sd-reader-body" style="${bodyStyle}">
+        <article class="sd-reader-article" style="max-width:${widthRem}rem">
+          <h2 class="sd-reader-h2">${htmlEscape(chapter.title || '')}</h2>
+          ${paras}
+        </article>
+      </div>
+
+      <!-- 划线工具浮窗（选区/点划线后弹·跟随选区定位·父级 划线|笔记，划线展开样式+取色） -->
+      <div class="sd-reader-hltools" hidden>
+        <div class="sd-reader-hltools-lv sd-reader-hltools-main">
+          <button data-act="highlight"><i class="fa-solid fa-highlighter"></i><span>划线</span></button>
+          <button data-act="note"><i class="fa-solid fa-pen"></i><span>笔记</span></button>
+        </div>
+        <div class="sd-reader-hltools-lv sd-reader-hltools-styles" hidden>
+          <button data-back title="返回"><i class="fa-solid fa-chevron-left"></i></button>
+          <button data-style="wavy" title="波浪线"><i class="fa-solid fa-wave-square"></i></button>
+          <button data-style="underline" title="下划线"><i class="fa-solid fa-underline"></i></button>
+          <button data-style="mark" title="荧光（自动半透明）"><i class="fa-solid fa-highlighter"></i></button>
+          <label class="sd-reader-hlcolor" title="划线颜色"><input type="color" class="sd-reader-hlcolor-input" value="${hlColor}"><span style="background:${hlColor}"></span></label>
+        </div>
+        <div class="sd-reader-hltools-lv sd-reader-hltools-exist" hidden>
+          <button data-act="note"><i class="fa-solid fa-pen"></i><span>笔记</span></button>
+          <button data-act="remove"><i class="fa-solid fa-eraser"></i><span>取消划线</span></button>
+        </div>
+      </div>
+
+      <!-- 底栏（可抽回）：目录 / 进度 / 对话 / 语音条 / 设置 -->
+      <div class="sd-reader-bottombar">
+        <button class="sd-reader-bb sd-reader-toc-btn"><i class="fa-solid fa-list-ul"></i><span>目录</span></button>
+        <button class="sd-reader-bb sd-reader-progress-btn"><i class="fa-solid fa-gauge-simple"></i><span>${pct}%</span></button>
+        <button class="sd-reader-bb sd-reader-dialog-btn"><i class="fa-solid fa-comments"></i><span>对话</span></button>
+        <button class="sd-reader-bb sd-reader-voice-btn"><i class="fa-solid fa-comment-dots"></i><span>语音条</span></button>
+        <button class="sd-reader-bb sd-reader-typo-btn"><i class="fa-solid fa-gear"></i><span>设置</span></button>
+      </div>
+
+      <!-- 目录 / 笔记 / 书签 抽屉（笔记编辑直接在「笔记」页内切换·不再独立抽屉） -->
+      <div class="sd-reader-panel sd-reader-toc">
+        <div class="sd-reader-panel-grip"></div>
+        <div class="sd-reader-panel-tabs">
+          <button class="active" data-ptab="toc">目录</button>
+          <button data-ptab="notes">笔记</button>
+          <button data-ptab="marks">书签</button>
+        </div>
+        <div class="sd-reader-panel-body">
+          <div class="sd-reader-ptab sd-reader-ptab-toc">
+            ${cache.chapters.map((ch, i) => `<button class="sd-reader-toc-item ${i === ci ? 'active' : ''}" data-ch="${i}">${htmlEscape(ch.title || ('第 ' + (i + 1) + ' 节'))}</button>`).join('')}
+          </div>
+          <div class="sd-reader-ptab sd-reader-ptab-notes" hidden>
+            <div class="sd-reader-notes-view">${renderReaderNotes(meta)}</div>
+          </div>
+          <div class="sd-reader-ptab sd-reader-ptab-marks" hidden>${renderReaderMarks(meta)}</div>
+        </div>
+      </div>
+
+      <!-- 对话抽屉（共读书友·1B 接入；现为占位·可拖拽调高·可图钉固定） -->
+      <div class="sd-reader-panel sd-reader-dialog${readerView.dialogPinned ? ' open' : ''}" style="height:${drawerH}px">
+        <div class="sd-reader-panel-grip sd-reader-dialog-grip"></div>
+        <div class="sd-reader-dialog-head">
+          <span><i class="fa-solid fa-comments"></i> 共读对话</span>
+          <div class="sd-reader-dialog-head-btns">
+            <button class="sd-reader-dialog-setup" title="伴读设定（书友 / 取材 / 上下文）"><i class="fa-solid fa-gear"></i></button>
+            <button class="sd-reader-dialog-pin ${readerView.dialogPinned ? 'active' : ''}" title="固定对话框（固定后正文照常滚动）"><i class="fa-solid fa-thumbtack"></i></button>
+          </div>
+        </div>
+        <div class="sd-reader-dialog-body">
+          <div class="sd-reader-panel-empty">共读书友功能即将接入（1B）。届时这里是与角色就「读到此处」实时讨论的对话流，讨论会被蒸馏后反哺主线。</div>
+        </div>
+        <div class="sd-reader-dialog-input">
+          <textarea class="sd-reader-dialog-ta" placeholder="共读对话即将开放……" disabled rows="1"></textarea>
+          <button class="sd-reader-dialog-send" disabled title="发送"><i class="fa-solid fa-paper-plane"></i></button>
+        </div>
+      </div>
+
+      <!-- 语音条抽屉 -->
+      <div class="sd-reader-panel sd-reader-voice">
+        <div class="sd-reader-panel-grip"></div>
+        <div class="sd-reader-panel-tabs"><button class="active">共读语音条</button></div>
+        <div class="sd-reader-panel-body">${renderReaderVoiceClips(meta)}</div>
+      </div>
+
+      <!-- 进度抽屉：上行左右半（百分比 | 已读时长）；下行 当前/全文；再下滑块 -->
+      <div class="sd-reader-panel sd-reader-progress">
+        <div class="sd-reader-panel-grip"></div>
+        <div class="sd-reader-prog-inner">
+          <div class="sd-reader-prog-halves">
+            <div class="sd-reader-prog-half"><div class="sd-reader-prog-pct">${pct}<small>%</small></div><div class="sd-reader-prog-cap">已读</div></div>
+            <div class="sd-reader-prog-half"><div class="sd-reader-prog-dur">${formatReadDuration(meta.readMs)}</div><div class="sd-reader-prog-cap">阅读时长</div></div>
+          </div>
+          <div class="sd-reader-prog-page">${ci + 1} / ${total}</div>
+          <div class="sd-reader-prog-ctl">
+            <button class="sd-reader-prev" ${ci <= 0 ? 'disabled' : ''} title="上一章"><i class="fa-solid fa-backward-step"></i></button>
+            <input type="range" class="sd-reader-prog-slider" min="0" max="${Math.max(0, total - 1)}" value="${ci}">
+            <button class="sd-reader-next" ${ci >= total - 1 ? 'disabled' : ''} title="下一章"><i class="fa-solid fa-forward-step"></i></button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 设置抽屉：字号 / 间距预设(+自定义) / 两端对齐 / 语音缓存 / 导入导出 -->
+      <div class="sd-reader-panel sd-reader-typo">
+        <div class="sd-reader-panel-grip"></div>
+        <div class="sd-reader-typo-inner">
+          <div class="sd-reader-typo-row"><span>字号</span><input type="range" class="sd-reader-font" min="14" max="30" step="1" value="${c.fontSizePx || 19}"><b class="sd-reader-font-val">${c.fontSizePx || 19}</b></div>
+          <div class="sd-reader-typo-row sd-reader-preset-row">
+            <span>间距</span>
+            <div class="sd-reader-preset-seg">
+              <button data-preset="compact" class="${preset === 'compact' ? 'active' : ''}">紧凑</button>
+              <button data-preset="normal" class="${preset === 'normal' ? 'active' : ''}">适中</button>
+              <button data-preset="loose" class="${preset === 'loose' ? 'active' : ''}">宽松</button>
+            </div>
+            <button class="sd-reader-preset-custom ${preset === 'custom' ? 'active' : ''}" title="自定义间距"><i class="fa-solid fa-sliders"></i></button>
+          </div>
+          <div class="sd-reader-custom-wrap${customOpen}">
+            <div class="sd-reader-typo-row"><span>行距</span><input type="range" class="sd-reader-lh" min="1.4" max="2.6" step="0.1" value="${c.lineHeight || 1.9}"><b class="sd-reader-lh-val">${(c.lineHeight || 1.9).toFixed(1)}</b></div>
+            <div class="sd-reader-typo-row"><span>段距</span><input type="range" class="sd-reader-para" min="0.4" max="2.4" step="0.1" value="${c.paraSpacing || 1}"><b class="sd-reader-para-val">${(c.paraSpacing || 1).toFixed(1)}</b></div>
+            <div class="sd-reader-typo-row"><span>页宽</span><input type="range" class="sd-reader-width" min="28" max="66" step="1" value="${widthRem}"><b class="sd-reader-width-val">${widthRem}</b></div>
+          </div>
+          <div class="sd-reader-typo-row sd-reader-typo-checks"><label><input type="checkbox" class="sd-reader-justify"${c.justify ? ' checked' : ''}> <span>两端对齐</span></label></div>
+          <div class="sd-reader-typo-row"><span style="width:auto">语音条缓存上限</span><input type="number" class="sd-reader-voicelimit" min="10" max="2000" step="10" value="${c.voiceCacheLimit || 100}"><span style="width:auto;color:var(--sd-muted)">条</span></div>
+          <div class="sd-reader-typo-io">
+            <button class="sd-reader-export sd-btn"><i class="fa-solid fa-file-export"></i> 导出阅读数据</button>
+            <button class="sd-reader-import-data sd-btn"><i class="fa-solid fa-file-import"></i> 导入阅读数据</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 笔记编辑浮层（脱离五抽屉体系·居中浮层·自带 z-index·永不牵出抽屉/底栏） -->
+      <div class="sd-reader-noteoverlay" hidden>
+        <div class="sd-reader-noteoverlay-card">
+          <div class="sd-reader-noteoverlay-head"><i class="fa-solid fa-pen"></i> 笔记</div>
+          <div class="sd-reader-noteedit-quote"></div>
+          <textarea class="sd-reader-noteedit-input" placeholder="写下你的想法（留空＝仅作摘录）……"></textarea>
+          <div class="sd-reader-noteedit-actions">
+            <button class="sd-btn sd-reader-noteedit-cancel">取消</button>
+            <button class="sd-btn sd-primary sd-reader-noteedit-ok">保存</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 伴读设定浮层（1B-1·与笔记浮层同范式·脱抽屉·居中·取材式独立勾选） -->
+      <div class="sd-reader-setupoverlay" hidden>
+        <div class="sd-reader-setupoverlay-card">
+          <div class="sd-reader-noteoverlay-head"><i class="fa-solid fa-gear"></i> 伴读设定</div>
+          <div class="sd-reader-setup-body">${renderCompanionSetupBody()}</div>
+          <div class="sd-reader-noteedit-actions">
+            <button class="sd-btn sd-reader-setup-close">完成</button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+
+// 伴读设定浮层内容：身份直显(标签·联动 ST 当前)+世界书取材式选择(书/条目独立)+可见正文范围。
+// 人设走「千幕已有取材注入逻辑」一种方式，无需在此重复勾选；轨道A 的对话记忆条数挪到 1C 蒸馏设置(短信体按条算·100-200 触发总结·此处版面不放)。
+function renderCompanionSetupBody() {
+  const cp = coreadCompanion();
+  const stChar = getCharacterName() || '未选择';
+  const stUser = getPersonaName() || '未选择';
+  // 复用主线扫描缓存（点「扫描」会 refreshWorldBooks 填充 contextScanCache·与取材同源）
+  const boundNames = contextScanCache.boundWorldBookNames || detectBoundWorldBookNames();
+  const allNames = uniqueClean([...boundNames, ...(contextScanCache.worldBookNames || [])]).filter(Boolean);
+  const cpSelected = cp.worldBooks.filter((n) => allNames.includes(n));
+  if (companionWorldView && !allNames.includes(companionWorldView)) companionWorldView = '';
+  const viewName = companionWorldView || cpSelected[cpSelected.length - 1] || '';
+  const bookRows = allNames.map((name) => `
+    <div class="sd-reader-cwb-row${viewName === name ? ' sd-reader-cwb-viewing' : ''}">
+      <input type="checkbox" class="sd-reader-cwb-toggle" data-name="${htmlEscape(name)}"${cpSelected.includes(name) ? ' checked' : ''} title="选中作为共读引用">
+      <button type="button" class="sd-reader-cwb-name" data-name="${htmlEscape(name)}"><span>${htmlEscape(name)}</span>${boundNames.includes(name) ? '<em class="sd-reader-cwb-tag">当前绑定</em>' : ''}</button>
+    </div>`).join('');
+  const items = viewName ? (contextScanCache.worldBooks?.[viewName] || []) : [];
+  const itemRows = items.map((item, index) => {
+    const id = getContextItemId(item, index);
+    const title = item.name || item.comment || (Array.isArray(item.key) ? item.key.join(', ') : item.key) || `条目 ${index + 1}`;
+    const content = item.content || item.prompt || '';
+    const checked = isCompanionWorldItemSelected(viewName, id, item.enabled);
+    return `<details class="sd-reader-cwb-item" data-acc="ci-cwb-${htmlEscape(String(viewName))}-${htmlEscape(String(id))}">
+      <summary><label class="sd-reader-cwb-itemlab"><input type="checkbox" class="sd-reader-cwb-itemcheck" data-book="${htmlEscape(viewName)}" data-id="${htmlEscape(String(id))}"${checked ? ' checked' : ''}><span>${htmlEscape(title)}</span></label></summary>
+      <pre>${htmlEscape(cleanContextText(content).slice(0, 2000))}</pre>
+    </details>`;
+  }).join('');
+  // 下拉右上角：多选→数量；单选→书名；未选→未选择
+  const headRight = cpSelected.length >= 2 ? `${cpSelected.length} 项` : (cpSelected.length === 1 ? htmlEscape(cpSelected[0]) : '未选择');
+  return `
+    <div class="sd-reader-setup-row">
+      <div class="sd-reader-setup-tags">
+        <span class="sd-reader-setup-tag"><i class="fa-solid fa-user"></i> 书友：${htmlEscape(stChar)}</span>
+        <span class="sd-reader-setup-tag"><i class="fa-solid fa-circle-user"></i> 我：${htmlEscape(stUser)}</span>
+      </div>
+    </div>
+    <div class="sd-reader-setup-row">
+      <div class="sd-reader-cwb-head">
+        <span><label class="sd-reader-setup-lab">共读世界书</label><em class="sd-muted" style="font-size:.78em">独立于主线选择</em></span>
+        <button class="sd-btn sd-reader-cwb-scan"><i class="fa-solid fa-rotate"></i> ${allNames.length ? '刷新' : '扫描'}</button>
+      </div>
+      ${allNames.length
+        ? `<details class="sd-reader-cwb-dropdown" data-fold="wb"${cp.foldWbOpen !== false ? ' open' : ''}>
+            <summary><span>选择</span><b>${headRight}</b></summary>
+            <div class="sd-reader-cwb-list">${bookRows}</div>
+          </details>
+          ${viewName
+            ? `<details class="sd-reader-cwb-itemfold" data-fold="items"${cp.foldItemsOpen !== false ? ' open' : ''}>
+                <summary><span>${htmlEscape(viewName)} · 条目</span><b>${items.length}</b></summary>
+                <div class="sd-reader-cwb-items">${itemRows || '<span class="sd-muted" style="font-size:.82em">该世界书暂无条目。</span>'}</div>
+              </details>`
+            : '<span class="sd-muted" style="font-size:.78em">勾选或点击书名查看其条目，再按需勾选共读引用。</span>'}`
+        : '<span class="sd-muted" style="font-size:.82em">点「扫描」从 ST 当前聊天读取可选世界书。</span>'}
+    </div>
+    <div class="sd-reader-setup-row">
+      <label class="sd-reader-setup-lab">书友可读范围（字数）</label>
+      <input type="number" class="sd-reader-setup-visible" min="200" max="4000" step="100" value="${Number(cp.visibleCharsBefore) || 800}">
+    </div>`;
+}
+
+// 共读语音条列表（1B 对话接入后由 reader_voice 填充；当前为占位空态）
+function renderReaderVoiceClips(meta) {
+  const clips = Array.isArray(meta.voiceClips) ? meta.voiceClips : [];
+  if (!clips.length) return '<div class="sd-reader-panel-empty">还没有共读语音条。开启与角色的共读对话后，生成的短信体语音会按时间排列在这里。</div>';
+  return clips.slice().reverse().map((v) => `
+    <div class="sd-reader-voice-item" data-clip="${htmlEscape(v.id)}">
+      <button class="sd-reader-voice-play" data-clip="${htmlEscape(v.id)}" title="播放"><i class="fa-solid fa-circle-play"></i></button>
+      <div class="sd-reader-voice-main">
+        <div class="sd-reader-voice-text">${htmlEscape(v.text || '')}</div>
+        <div class="sd-reader-voice-time">${v.at ? new Date(v.at).toLocaleString() : ''}</div>
+      </div>
+    </div>`).join('');
+}
+
+// 笔记列表。meta.notes=[{id,chapterIndex,text,annotation,kind,hlStyle,at}]，kind: highlight | bookmark
+// 划线有批注 → 「笔记」标签；仅划线无批注 → 「摘录」标签。点条目可定位回正文。
+function renderReaderNotes(meta) {
+  const notes = (meta.notes || []).filter((n) => n.kind === 'highlight');
+  if (!notes.length) return '<div class="sd-reader-panel-empty">还没有笔记。点顶部划线钮，选中正文即可划线；划线后可补笔记。</div>';
+  return notes.slice().reverse().map((n) => {
+    const isNote = !!(n.annotation && n.annotation.trim());
+    return `
+    <div class="sd-reader-note-item" data-note="${htmlEscape(n.id)}" data-ch="${n.chapterIndex}">
+      <div class="sd-reader-note-head"><span class="sd-reader-note-kind ${isNote ? 'sd-reader-kind-note' : ''}">${isNote ? '笔记' : '摘录'}</span>
+        <button class="sd-reader-note-jump" data-ch="${n.chapterIndex}" title="定位到正文">第${(n.chapterIndex || 0) + 1}节</button>
+        <button class="sd-reader-note-edit" data-note="${htmlEscape(n.id)}" title="${isNote ? '编辑笔记' : '加笔记'}"><i class="fa-solid fa-pen"></i></button>
+        <button class="sd-reader-note-del" data-note="${htmlEscape(n.id)}" title="删除"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="sd-reader-note-text">${htmlEscape(n.text || '')}</div>
+      ${isNote ? `<div class="sd-reader-note-anno">${htmlEscape(n.annotation)}</div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+function renderReaderMarks(meta) {
+  const marks = (meta.notes || []).filter((n) => n.kind === 'bookmark');
+  if (!marks.length) return '<div class="sd-reader-panel-empty">还没有书签。阅读时点右上角书签图标添加。</div>';
+  return marks.slice().reverse().map((n) => `
+    <div class="sd-reader-note-item" data-note="${htmlEscape(n.id)}">
+      <div class="sd-reader-note-head">
+        <button class="sd-reader-note-jump" data-ch="${n.chapterIndex}" title="跳转"><i class="fa-solid fa-bookmark"></i> 第${(n.chapterIndex || 0) + 1}节</button>
+        <button class="sd-reader-note-del" data-note="${htmlEscape(n.id)}" title="删除"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      ${n.text ? `<div class="sd-reader-note-text">${htmlEscape(n.text)}</div>` : ''}
+    </div>`).join('');
+}
+
+/* ── 事件绑定 ─────────────────────────────────────────── */
+
+function bindCoreadTabEvents(root) {
+  if (activeTab !== 'coread') { unmountReaderPortal(); return; }
+  if (readerView) {
+    // portal 由 coreadOpenBook/refreshReaderPortal 维护；切回 tab 时确保它在
+    if (!document.getElementById('sd-reader-portal')) refreshReaderPortal();
+    root.querySelector('.sd-reader-resume')?.addEventListener('click', () => refreshReaderPortal());
+    return;
+  }
+  unmountReaderPortal();
+  bindLibraryViewEvents(root);
+}
+
+function bindLibraryViewEvents(root) {
+  root.querySelector('.sd-reader-import')?.addEventListener('click', coreadTriggerImport);
+  root.querySelector('.sd-reader-view-toggle')?.addEventListener('click', () => {
+    coread().libViewMode = coread().libViewMode === 'list' ? 'grid' : 'list';
+    saveSettings(); renderModal();
+  });
+  root.querySelector('.sd-reader-sort')?.addEventListener('change', (e) => {
+    coread().libSort = e.target.value; saveSettings(); renderModal();
+  });
+  root.querySelectorAll('.sd-reader-tag').forEach((el) => el.addEventListener('click', () => {
+    const t = el.dataset.tag;
+    const arr = coread().libTags || (coread().libTags = []);
+    const i = arr.indexOf(t);
+    if (i >= 0) arr.splice(i, 1); else arr.push(t);
+    saveSettings(); renderModal();
+  }));
+  // 实时搜索（纯 DOM 过滤）；阻断事件冒泡 + 抢占 focusin，避免触发 ST 输入框快捷栏
+  const search = root.querySelector('.sd-reader-search');
+  if (search) {
+    ['focusin', 'focus', 'click', 'pointerdown', 'mousedown', 'touchstart', 'keydown', 'keyup', 'keypress', 'input'].forEach((ev) =>
+      search.addEventListener(ev, (e) => e.stopPropagation()));
+    search.addEventListener('input', (e) => {
+      const q = String(e.target.value || '').trim().toLowerCase();
+      root.querySelectorAll('.sd-reader-card, .sd-reader-row').forEach((card) => {
+        const b = coreadBookMeta(card.dataset.book);
+        const hit = !q || (b && ((b.title || '').toLowerCase().includes(q) || (b.author || '').toLowerCase().includes(q)));
+        card.style.display = hit ? '' : 'none';
+      });
+    });
+  }
+  root.querySelectorAll('.sd-reader-card, .sd-reader-row').forEach((card) => card.addEventListener('click', (e) => {
+    if (e.target.closest('.sd-reader-card-del')) return;
+    coreadOpenBook(card.dataset.book);
+  }));
+  root.querySelectorAll('.sd-reader-card-del').forEach((el) => el.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    const id = el.dataset.book;
+    const b = coreadBookMeta(id);
+    if (b && await confirmDialog(`确定删除《${b.title}》？正文与阅读进度都会清除（不影响已写入聊天世界书的共读记忆）。`)) {
+      await coreadDeleteBook(id); renderModal();
+    }
+  }));
+}
+
+// 在 stageRoot（portal）内绑定阅读器事件。
+function bindReaderStageEvents(stageRoot) {
+  if (!stageRoot) return;
+  const q = (sel) => stageRoot.querySelector(sel);
+  const stage = q('.sd-reader-stage');
+  // 收抽屉：图钉固定的对话抽屉不收
+  const closePanels = () => stageRoot.querySelectorAll('.sd-reader-panel').forEach((p) => {
+    if (readerView.dialogPinned && p.classList.contains('sd-reader-dialog')) return;
+    p.classList.remove('open');
+  });
+  const togglePanel = (sel) => {
+    const target = q(sel);
+    const wasOpen = target?.classList.contains('open');
+    closePanels();
+    if (target && !wasOpen) target.classList.add('open');
+    syncBottombar();
+  };
+  // 任一抽屉打开 → 底栏收回（含对话抽屉）；全关 → 底栏复位
+  const syncBottombar = () => {
+    const open = !!stageRoot.querySelector('.sd-reader-panel.open');
+    readerView.barHidden = open;
+    stage?.classList.toggle('sd-reader-bar-hidden', open);
+  };
+  q('.sd-reader-back')?.addEventListener('click', () => coreadCloseReader());
+
+  // 底栏五抽屉互斥开合
+  q('.sd-reader-toc-btn')?.addEventListener('click', () => togglePanel('.sd-reader-toc'));
+  q('.sd-reader-voice-btn')?.addEventListener('click', () => togglePanel('.sd-reader-voice'));
+  q('.sd-reader-progress-btn')?.addEventListener('click', () => togglePanel('.sd-reader-progress'));
+  q('.sd-reader-typo-btn')?.addEventListener('click', () => togglePanel('.sd-reader-typo'));
+
+  // 抽屉内 目录/笔记/书签 切页（切走「笔记」时退出编辑态）
+  stageRoot.querySelectorAll('.sd-reader-toc .sd-reader-panel-tabs button').forEach((btn) => btn.addEventListener('click', () => {
+    const tab = btn.dataset.ptab;
+    stageRoot.querySelectorAll('.sd-reader-toc .sd-reader-panel-tabs button').forEach((b) => b.classList.toggle('active', b === btn));
+    stageRoot.querySelector('.sd-reader-ptab-toc').hidden = tab !== 'toc';
+    stageRoot.querySelector('.sd-reader-ptab-notes').hidden = tab !== 'notes';
+    stageRoot.querySelector('.sd-reader-ptab-marks').hidden = tab !== 'marks';
+    exitNoteEdit(stageRoot);
+  }));
+  // 目录跳章
+  stageRoot.querySelectorAll('.sd-reader-toc-item').forEach((el) => el.addEventListener('click', () => {
+    readerView.chapterIndex = Number(el.dataset.ch) || 0;
+    readerView.scrollRatio = 0;
+    coreadSaveProgress(); refreshReaderPortal();
+  }));
+  // 笔记/书签：定位 + 编辑 + 删除（事件委托·列表重渲后仍生效·原地不关抽屉）
+  stageRoot.querySelectorAll('.sd-reader-ptab-notes, .sd-reader-ptab-marks').forEach((panel) => panel.addEventListener('click', (e) => {
+    const jump = e.target.closest('.sd-reader-note-jump');
+    const edit = e.target.closest('.sd-reader-note-edit');
+    const del = e.target.closest('.sd-reader-note-del');
+    if (jump) { readerView.chapterIndex = Number(jump.dataset.ch) || 0; readerView.scrollRatio = 0; coreadSaveProgress(); refreshReaderPortal(); return; }
+    if (edit) { e.stopPropagation(); openReaderNoteDialog(edit.dataset.note); return; }
+    if (del) { e.stopPropagation(); coreadDeleteNote(del.dataset.note); del.closest('.sd-reader-note-item')?.remove(); updateReaderArticle(stageRoot); return; }
+  }));
+  // 笔记编辑浮层：保存 / 取消 / 点遮罩空白关闭（脱离抽屉体系·不牵出底栏）
+  q('.sd-reader-noteedit-cancel')?.addEventListener('click', () => exitNoteEdit(stageRoot));
+  q('.sd-reader-noteedit-ok')?.addEventListener('click', () => saveNoteEdit(stageRoot));
+  q('.sd-reader-noteoverlay')?.addEventListener('click', (e) => {
+    if (e.target === e.currentTarget) exitNoteEdit(stageRoot);   // 仅点遮罩本身关闭，点卡片内不关
+  });
+  // 书签开关（顶栏）
+  q('.sd-reader-mark-btn')?.addEventListener('click', () => coreadToggleBookmark(stageRoot));
+
+  // 进度滑块（按章）+ 上下章
+  const slider = q('.sd-reader-prog-slider');
+  slider?.addEventListener('input', (e) => {
+    const label = q('.sd-reader-prog-page');
+    if (label) label.textContent = `${Number(e.target.value) + 1} / ${readerContentCache?.chapters.length || 1}`;
+  });
+  slider?.addEventListener('change', (e) => {
+    readerView.chapterIndex = Number(e.target.value) || 0; readerView.scrollRatio = 0; coreadSaveProgress(); refreshReaderPortal();
+  });
+  q('.sd-reader-prev')?.addEventListener('click', () => { if (readerView.chapterIndex > 0) { readerView.chapterIndex--; readerView.scrollRatio = 0; coreadSaveProgress(); refreshReaderPortal(); } });
+  q('.sd-reader-next')?.addEventListener('click', () => { if (readerContentCache && readerView.chapterIndex < readerContentCache.chapters.length - 1) { readerView.chapterIndex++; readerView.scrollRatio = 0; coreadSaveProgress(); refreshReaderPortal(); } });
+
+  // ── 排版调节（即时作用于正文，不重渲染） ──
+  const bodyEl = q('.sd-reader-body');
+  const article = q('.sd-reader-article');
+  q('.sd-reader-font')?.addEventListener('input', (e) => {
+    coread().fontSizePx = Number(e.target.value) || 19; saveSettings();
+    if (bodyEl) bodyEl.style.fontSize = `${coread().fontSizePx}px`;
+    const v = q('.sd-reader-font-val'); if (v) v.textContent = String(coread().fontSizePx);
+  });
+  q('.sd-reader-lh')?.addEventListener('input', (e) => {
+    coread().lineHeight = Number(e.target.value) || 1.9; coread().spacingPreset = 'custom'; saveSettings();
+    if (bodyEl) bodyEl.style.lineHeight = String(coread().lineHeight);
+    const v = q('.sd-reader-lh-val'); if (v) v.textContent = coread().lineHeight.toFixed(1);
+  });
+  q('.sd-reader-para')?.addEventListener('input', (e) => {
+    coread().paraSpacing = Number(e.target.value) || 1; coread().spacingPreset = 'custom'; saveSettings();
+    if (bodyEl) bodyEl.style.setProperty('--sd-rd-para', `${coread().paraSpacing}em`);
+    const v = q('.sd-reader-para-val'); if (v) v.textContent = coread().paraSpacing.toFixed(1);
+  });
+  q('.sd-reader-width')?.addEventListener('input', (e) => {
+    const w = Number(e.target.value) || 42;
+    coread().contentWidthRem = w; saveSettings();
+    if (article) article.style.maxWidth = `${w}rem`;
+    if (bodyEl) bodyEl.style.setProperty('--sd-rd-px', `${widthToPad(w)}%`);   // 窄屏靠内边距生效
+    const v = q('.sd-reader-width-val'); if (v) v.textContent = String(w);
+  });
+  q('.sd-reader-justify')?.addEventListener('change', (e) => {
+    coread().justify = !!e.target.checked; saveSettings();
+    if (bodyEl) bodyEl.style.textAlign = coread().justify ? 'justify' : 'left';
+  });
+  // 间距预设：紧凑 / 适中 / 宽松 → 一键套行距+段距；自定义钮展开独立滑块
+  stageRoot.querySelectorAll('.sd-reader-preset-seg button').forEach((btn) => btn.addEventListener('click', () => {
+    applySpacingPreset(btn.dataset.preset, stageRoot);
+  }));
+  q('.sd-reader-preset-custom')?.addEventListener('click', () => {
+    const wrap = q('.sd-reader-custom-wrap');
+    const open = wrap?.classList.toggle('open');
+    coread().spacingPreset = open ? 'custom' : (coread().spacingPreset === 'custom' ? 'normal' : coread().spacingPreset);
+    q('.sd-reader-preset-custom')?.classList.toggle('active', !!open);
+    if (!open) applySpacingPreset(coread().spacingPreset, stageRoot);
+    saveSettings();
+  });
+  // 语音条缓存上限
+  q('.sd-reader-voicelimit')?.addEventListener('change', (e) => {
+    const n = Math.max(10, Math.min(2000, Number(e.target.value) || 100));
+    coread().voiceCacheLimit = n; e.target.value = n; saveSettings();
+  });
+  // 阅读数据导入 / 导出
+  q('.sd-reader-export')?.addEventListener('click', () => coreadExportData());
+  q('.sd-reader-import-data')?.addEventListener('click', () => coreadImportData());
+
+  // 对话抽屉：开合 + 拖拽调高 + 图钉固定（占位·1B 接入对话内容）
+  q('.sd-reader-dialog-btn')?.addEventListener('click', () => togglePanel('.sd-reader-dialog'));
+  bindDialogGrip(q('.sd-reader-dialog'), q('.sd-reader-dialog-grip'));
+  q('.sd-reader-dialog-pin')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    readerView.dialogPinned = !readerView.dialogPinned;
+    stage?.classList.toggle('sd-reader-dialog-pinned', readerView.dialogPinned);
+    q('.sd-reader-dialog-pin')?.classList.toggle('active', readerView.dialogPinned);
+    if (readerView.dialogPinned) q('.sd-reader-dialog')?.classList.add('open');
+    syncBottombar();
+  });
+
+  // ── 伴读设定浮层（1B-1·复用取材拉取/呈现·选择 companion 独立·脱抽屉居中） ──
+  const setupOverlay = q('.sd-reader-setupoverlay');
+  // 重渲后恢复折叠开合：两大容器从 settings 持久化(跨重开书不丢)；条目项用 accState(本会话)
+  const rerenderSetup = () => { const body = setupOverlay?.querySelector('.sd-reader-setup-body'); if (body) { body.innerHTML = renderCompanionSetupBody(); applyAccState(setupOverlay); } };
+  const openSetup = async () => {
+    if (!setupOverlay) return;
+    rerenderSetup();
+    setupOverlay.hidden = false;
+    // 已有选中的书（上次会话留存）→ 首开就按需补拉其条目，避免「暂无条目」假象
+    const cp = coreadCompanion();
+    const pre = companionWorldView || cp.worldBooks[cp.worldBooks.length - 1] || '';
+    if (pre) { await coreadEnsureWorldEntries(pre); rerenderSetup(); }
+  };
+  const closeSetup = () => { if (setupOverlay) setupOverlay.hidden = true; };
+  // details 开合记忆：data-fold 两大容器→持久化 settings(跨重开书)；data-acc 条目项→accState(本会话)
+  setupOverlay?.addEventListener('toggle', (e) => {
+    const d = e.target;
+    if (d?.dataset?.fold === 'wb') { coreadCompanion().foldWbOpen = d.open; saveSettings(); }
+    else if (d?.dataset?.fold === 'items') { coreadCompanion().foldItemsOpen = d.open; saveSettings(); }
+    else if (d?.dataset?.acc) accState[d.dataset.acc] = d.open;
+  }, true);
+  q('.sd-reader-dialog-setup')?.addEventListener('click', (e) => { e.stopPropagation(); openSetup(); });
+  setupOverlay?.addEventListener('click', (e) => { if (e.target === e.currentTarget) closeSetup(); });
+  // 文本/数字输入委托（浮层内容重渲后仍生效）
+  setupOverlay?.addEventListener('input', (e) => {
+    const vis = e.target.closest('.sd-reader-setup-visible');
+    if (vis) { coreadCompanion().visibleCharsBefore = Math.max(200, Math.min(4000, Number(vis.value) || 800)); saveSettings(); return; }
+  });
+  // 勾选委托：书级 + 条目级
+  setupOverlay?.addEventListener('change', async (e) => {
+    const bk = e.target.closest('.sd-reader-cwb-toggle');
+    if (bk) {
+      coreadToggleCompanionWorldBook(bk.dataset.name, !!bk.checked);
+      if (bk.checked) { companionWorldView = bk.dataset.name; await coreadEnsureWorldEntries(bk.dataset.name); }   // 选中即切到该书并按需补拉条目
+      rerenderSetup();
+      return;
+    }
+    const it = e.target.closest('.sd-reader-cwb-itemcheck');
+    if (it) { setCompanionWorldItemSelected(it.dataset.book, it.dataset.id, !!it.checked); return; }
+  });
+  // 点击委托：完成 / 扫描 / 点书名切查看
+  setupOverlay?.addEventListener('click', async (e) => {
+    if (e.target.closest('.sd-reader-setup-close')) { closeSetup(); return; }
+    const scan = e.target.closest('.sd-reader-cwb-scan');
+    if (scan) { await coreadSetupScanWorldBooks(setupOverlay); return; }
+    const nameBtn = e.target.closest('.sd-reader-cwb-name');
+    if (nameBtn) { companionWorldView = nameBtn.dataset.name; await coreadEnsureWorldEntries(nameBtn.dataset.name); rerenderSetup(); return; }
+  });
+
+  // ── 划线工具浮窗：选中正文 / 点已划线 → 跟随定位弹出（父级 划线|笔记） ──
+  const tools = q('.sd-reader-hltools');
+  const anyPanelOpen = () => !!stageRoot.querySelector('.sd-reader-panel.open');
+  const hideTools = () => { if (tools) tools.hidden = true; };
+  let pendingText = '';   // 新选区文本
+  let pendingMark = '';   // 已划线 noteId
+  if (bodyEl && tools) {
+    const lvMain = tools.querySelector('.sd-reader-hltools-main');
+    const lvStyles = tools.querySelector('.sd-reader-hltools-styles');
+    const lvExist = tools.querySelector('.sd-reader-hltools-exist');
+    const showLevel = (lv) => {
+      lvMain.hidden = lv !== 'main'; lvStyles.hidden = lv !== 'styles'; lvExist.hidden = lv !== 'exist';
+    };
+    // 跟随选区/划线定位：优先上方，顶部不够则下方；左右夹到舞台内
+    const showTools = (rect, level) => {
+      showLevel(level);
+      tools.hidden = false;
+      requestAnimationFrame(() => {
+        const host = stageRoot.getBoundingClientRect();
+        const w = tools.offsetWidth || 160, h = tools.offsetHeight || 44;
+        let top = rect.top - host.top - h - 10;
+        if (top < 58) top = rect.bottom - host.top + 10;   // 顶部空间不足 → 选区下方
+        top = Math.min(top, host.height - h - 80);
+        let left = rect.left - host.left + rect.width / 2 - w / 2;
+        left = Math.max(8, Math.min(left, host.width - w - 8));
+        tools.style.left = `${left}px`; tools.style.top = `${Math.max(8, top)}px`;
+      });
+    };
+    // 选中正文 → 父级
+    const onSelect = () => {
+      const sel = window.getSelection?.();
+      const text = sel ? String(sel).trim() : '';
+      if (!text) return;
+      pendingText = text; pendingMark = '';
+      try { showTools(sel.getRangeAt(0).getBoundingClientRect(), 'main'); } catch (_) {}
+    };
+    bodyEl.addEventListener('mouseup', () => setTimeout(onSelect, 0));
+    bodyEl.addEventListener('touchend', () => setTimeout(onSelect, 0));
+    // 父级：划线 → 展开样式级；笔记 → 建划线(荧光默认)并即开笔记
+    lvMain.querySelector('[data-act="highlight"]').onclick = () => showLevel('styles');
+    lvMain.querySelector('[data-act="note"]').onclick = () => {
+      const text = pendingText; hideTools();
+      window.getSelection?.()?.removeAllRanges?.();
+      if (text) { const id = coreadAddHighlight(text, 'mark'); updateReaderArticle(stageRoot); if (id) openReaderNoteDialog(id); }
+    };
+    // 样式级：返回箭头 / 三样式 / 取色（荧光自动半透明由 CSS color-mix 负责）
+    lvStyles.querySelector('[data-back]').onclick = () => showLevel('main');
+    lvStyles.querySelector('.sd-reader-hlcolor-input')?.addEventListener('input', (e) => {
+      const col = sanitizeHexColor(e.target.value);
+      coread().hlColor = col; saveSettings();
+      const sw = lvStyles.querySelector('.sd-reader-hlcolor span'); if (sw) sw.style.background = col || '#d8a657';
+    });
+    lvStyles.querySelectorAll('button[data-style]').forEach((btn) => btn.addEventListener('click', () => {
+      const text = pendingText; hideTools();
+      window.getSelection?.()?.removeAllRanges?.();
+      showLevel('main');   // 划线后自动返回上一级
+      if (text) { coreadAddHighlight(text, btn.dataset.style || 'mark'); updateReaderArticle(stageRoot); }
+    }));
+    // 已划线级：笔记 / 取消划线
+    lvExist.querySelector('[data-act="note"]').onclick = () => { const id = pendingMark; hideTools(); if (id) openReaderNoteDialog(id); };
+    lvExist.querySelector('[data-act="remove"]').onclick = () => {
+      const id = pendingMark; hideTools();
+      if (id) { coreadDeleteNote(id); updateReaderArticle(stageRoot); }   // 原地更新·不重渲不跳动
+    };
+    // 点正文里的划线 → 已划线级
+    bodyEl.addEventListener('click', (e) => {
+      const mark = e.target.closest('.sd-reader-hl');
+      if (!mark) return;
+      e.stopPropagation();
+      pendingMark = mark.dataset.note; pendingText = '';
+      showTools(mark.getBoundingClientRect(), 'exist');
+    });
+  }
+
+  // ── 正文空白点击：两段式收栏（先收浮窗 → 再收抽屉 → 再收底栏） ──
+  bodyEl?.addEventListener('click', (e) => {
+    if (e.target.closest('.sd-reader-hl')) return;   // 划线已由上面处理
+    const sel = window.getSelection?.();
+    if (sel && String(sel).trim()) return;
+    if (tools && !tools.hidden) { hideTools(); return; }
+    if (anyPanelOpen()) { closePanels(); syncBottombar(); return; }
+    readerView.barHidden = !readerView.barHidden;
+    stage?.classList.toggle('sd-reader-bar-hidden', readerView.barHidden);
+  });
+
+  // 滚动位置恢复（仅 portal 重建时：开书/换章用·停在记忆位置；划线等原地更新不触发） + 保存
+  if (bodyEl) {
+    if (readerView.scrollRatio > 0) {
+      requestAnimationFrame(() => { bodyEl.scrollTop = readerView.scrollRatio * (bodyEl.scrollHeight - bodyEl.clientHeight); });
+    }
+    bodyEl.addEventListener('scroll', () => {
+      const denom = bodyEl.scrollHeight - bodyEl.clientHeight;
+      readerView.scrollRatio = denom > 0 ? bodyEl.scrollTop / denom : 0;
+      clearTimeout(readerScrollSaveTimer);
+      readerScrollSaveTimer = setTimeout(coreadSaveProgress, 600);
+    });
+  }
+}
+
+// 拖拽对话抽屉高度（grip 上下拖）。保存到 coread().dialogHeight。
+function bindDialogGrip(panel, grip) {
+  if (!panel || !grip) return;
+  let startY = 0, startH = 0, dragging = false;
+  const onMove = (e) => {
+    if (!dragging) return;
+    const y = e.touches ? e.touches[0].clientY : e.clientY;
+    const h = Math.max(180, Math.min(520, startH + (startY - y)));
+    panel.style.height = `${h}px`;
+  };
+  const onUp = () => {
+    if (!dragging) return;
+    dragging = false;
+    const h = Math.max(180, Math.min(520, parseInt(panel.style.height) || 300));
+    coread().dialogHeight = h; saveSettings();
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    document.removeEventListener('touchmove', onMove);
+    document.removeEventListener('touchend', onUp);
+  };
+  const onDown = (e) => {
+    dragging = true;
+    startY = e.touches ? e.touches[0].clientY : e.clientY;
+    startH = panel.offsetHeight;
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    document.addEventListener('touchmove', onMove, { passive: false });
+    document.addEventListener('touchend', onUp);
+    e.preventDefault();
+  };
+  grip.addEventListener('mousedown', onDown);
+  grip.addEventListener('touchstart', onDown, { passive: false });
+}
+
+// 间距预设 → 行距/段距数值；同步滑块与正文（不重建 portal）
+function applySpacingPreset(preset, stageRoot) {
+  const map = { compact: { lh: 1.5, para: 0.6 }, normal: { lh: 1.9, para: 1.0 }, loose: { lh: 2.3, para: 1.6 } };
+  const p = map[preset]; if (!p) return;
+  const c = coread();
+  c.spacingPreset = preset; c.lineHeight = p.lh; c.paraSpacing = p.para; saveSettings();
+  const bodyEl = stageRoot.querySelector('.sd-reader-body');
+  if (bodyEl) { bodyEl.style.lineHeight = String(p.lh); bodyEl.style.setProperty('--sd-rd-para', `${p.para}em`); }
+  stageRoot.querySelectorAll('.sd-reader-preset-seg button').forEach((b) => b.classList.toggle('active', b.dataset.preset === preset));
+  stageRoot.querySelector('.sd-reader-preset-custom')?.classList.remove('active');
+  stageRoot.querySelector('.sd-reader-custom-wrap')?.classList.remove('open');
+  const lh = stageRoot.querySelector('.sd-reader-lh'); if (lh) lh.value = String(p.lh);
+  const pa = stageRoot.querySelector('.sd-reader-para'); if (pa) pa.value = String(p.para);
+  const lhv = stageRoot.querySelector('.sd-reader-lh-val'); if (lhv) lhv.textContent = p.lh.toFixed(1);
+  const pav = stageRoot.querySelector('.sd-reader-para-val'); if (pav) pav.textContent = p.para.toFixed(1);
+}
+
+// 原地更新正文 <mark> + 笔记/书签列表（不重建 portal·不丢滚动位置·划线/取消/记笔记后调用）
+function updateReaderArticle(stageRoot) {
+  const root = stageRoot || document.getElementById('sd-reader-portal');
+  if (!root || !readerContentCache) return;
+  const meta = coreadBookMeta(readerView.bookId);
+  if (!meta) return;
+  const ci = Math.max(0, Math.min(readerView.chapterIndex, readerContentCache.chapters.length - 1));
+  const chapter = readerContentCache.chapters[ci] || { title: '', content: '' };
+  const notes = Array.isArray(meta.notes) ? meta.notes : [];
+  const chHi = notes.filter((n) => n.kind === 'highlight' && n.chapterIndex === ci).map((n) => ({ id: n.id, text: n.text, hlStyle: n.hlStyle, color: n.color }));
+  const article = root.querySelector('.sd-reader-article');
+  if (article) article.innerHTML = `<h2 class="sd-reader-h2">${htmlEscape(chapter.title || '')}</h2>${buildReaderParagraphs(chapter.content, chHi)}`;
+  // 笔记/书签列表同步（若抽屉开着，内容不至于过时）
+  const nv = root.querySelector('.sd-reader-notes-view'); if (nv) nv.innerHTML = renderReaderNotes(meta);
+  const mk = root.querySelector('.sd-reader-ptab-marks'); if (mk) mk.innerHTML = renderReaderMarks(meta);
+}
+
+// 新增划线（带样式 + 颜色快照）。text + style:'mark'|'wavy'|'underline'。返回新 noteId（供「笔记」接力打开批注）。
+// 不在此重建/更新 DOM，由调用方 updateReaderArticle 原地刷新（不跳动）。
+function coreadAddHighlight(text, style) {
+  const meta = coreadBookMeta(readerView.bookId);
+  if (!meta) return '';
+  if (!Array.isArray(meta.notes)) meta.notes = [];
+  const id = uid('note');
+  meta.notes.push({
+    id, kind: 'highlight', chapterIndex: readerView.chapterIndex,
+    text: String(text || '').slice(0, 400), hlStyle: style || 'mark',
+    color: sanitizeHexColor(coread().hlColor), annotation: '', at: nowMs(),
+  });
+  saveSettings();
+  toast('已划线', 'success');
+  return id;
+}
+
+function coreadDeleteNote(noteId) {
+  const meta = coreadBookMeta(readerView.bookId);
+  if (!meta || !Array.isArray(meta.notes)) return;
+  meta.notes = meta.notes.filter((n) => n.id !== noteId);
+  saveSettings();
+}
+
+// 切换当前章书签。
+function coreadToggleBookmark(stageRoot) {
+  const meta = coreadBookMeta(readerView.bookId);
+  if (!meta) return;
+  if (!Array.isArray(meta.notes)) meta.notes = [];
+  const ci = readerView.chapterIndex;
+  const existing = meta.notes.find((n) => n.kind === 'bookmark' && n.chapterIndex === ci);
+  if (existing) {
+    meta.notes = meta.notes.filter((n) => n !== existing);
+    toast('已移除书签', 'info');
+  } else {
+    const ch = readerContentCache?.chapters[ci];
+    meta.notes.push({ id: uid('mark'), kind: 'bookmark', chapterIndex: ci, text: ch?.title || '', at: nowMs() });
+    toast('已添加书签', 'success');
+  }
+  saveSettings();
+  // 原地更新顶栏书签图标 + 书签列表，不重渲染
+  const btn = stageRoot.querySelector('.sd-reader-mark-btn');
+  const on = meta.notes.some((n) => n.kind === 'bookmark' && n.chapterIndex === ci);
+  if (btn) { btn.classList.toggle('active', on); const i = btn.querySelector('i'); if (i) i.className = `fa-${on ? 'solid' : 'regular'} fa-bookmark`; }
+  const mk = stageRoot.querySelector('.sd-reader-ptab-marks'); if (mk) mk.innerHTML = renderReaderMarks(meta);
+}
+
+// 笔记批注：复用「目录」抽屉的「笔记」页·list↔edit 内部切换（窄屏移动端不出界·不叠层）。
+function openReaderNoteDialog(noteId) {
+  const meta = coreadBookMeta(readerView.bookId);
+  const note = meta?.notes?.find((n) => n.id === noteId);
+  const portal = document.getElementById('sd-reader-portal');
+  const overlay = portal?.querySelector('.sd-reader-noteoverlay');
+  if (!note || !overlay) return;
+  readerView.editingNoteId = noteId;
+  // 纯浮层：不开任何抽屉、不动底栏；居中浮于一切之上
+  const text = String(note.text || '');
+  overlay.querySelector('.sd-reader-noteedit-quote').textContent = text.slice(0, 200) + (text.length > 200 ? '…' : '');
+  const ta = overlay.querySelector('.sd-reader-noteedit-input');
+  ta.value = note.annotation || '';
+  overlay.hidden = false;
+  setTimeout(() => ta.focus(), 60);
+}
+
+// 关闭笔记编辑浮层
+function exitNoteEdit(stageRoot) {
+  readerView.editingNoteId = '';
+  const root = stageRoot || document.getElementById('sd-reader-portal');
+  const overlay = root?.querySelector('.sd-reader-noteoverlay');
+  if (overlay) overlay.hidden = true;
+}
+
+// 保存笔记编辑
+function saveNoteEdit(stageRoot) {
+  const meta = coreadBookMeta(readerView.bookId);
+  const note = meta?.notes?.find((n) => n.id === readerView.editingNoteId);
+  const ta = stageRoot.querySelector('.sd-reader-noteedit-input');
+  if (note && ta) {
+    note.annotation = String(ta.value || '').trim();
+    saveSettings();
+    toast(note.annotation ? '已记笔记' : '已保存', 'success');
+  }
+  exitNoteEdit(stageRoot);
+  updateReaderArticle(stageRoot);   // 同步列表标签（摘录↔笔记）
+}
+
+/* ── 阅读数据导入 / 导出（整模块：书目索引 + 正文 + 封面 + 笔记 + 会话；语音 1B 接入后并入） ── */
+
+async function coreadExportData() {
+  if (!blobStore.blobStoreAvailable()) { toast('当前环境不支持本地存储，无法导出。', 'error'); return; }
+  const books = [];
+  for (const meta of coread().books || []) {
+    let rec = null;
+    try { rec = await blobStore.getBook(meta.id); } catch (_) {}
+    let coverB64 = '';
+    try {
+      const cover = await blobStore.getCover(meta.id);
+      if (cover) coverB64 = await blobToBase64(cover);
+    } catch (_) {}
+    books.push({ meta, fullText: rec?.fullText || '', chapters: rec?.chapters || [], sig: rec?.sig || '', coverB64 });
+  }
+  const payload = {
+    type: 'qianmu-coread', version: 1, exportedAt: new Date().toISOString(),
+    prefs: { ...coread(), books: undefined },   // 偏好（不含书目，书目随 books 走）
+    books,
+  };
+  delete payload.prefs.books;
+  const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `qianmu-coread-${fileStamp()}.json`;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+  toast(`已导出阅读数据：${books.length} 本书。`, 'success');
+}
+
+function coreadImportData() {
+  const input = document.createElement('input');
+  input.type = 'file'; input.accept = 'application/json,.json'; input.style.display = 'none';
+  document.body.appendChild(input);
+  input.addEventListener('change', async () => {
+    const file = input.files?.[0]; input.remove();
+    if (!file) return;
+    let data;
+    try {
+      data = JSON.parse(await file.text());
+      if (data.type !== 'qianmu-coread' || !Array.isArray(data.books)) throw new Error('格式不符');
+    } catch (_) { toast('导入失败：不是有效的千幕阅读数据文件。', 'error'); return; }
+    if (!blobStore.blobStoreAvailable()) { toast('当前环境不支持本地存储，无法导入。', 'error'); return; }
+    if (!await confirmDialog('导入阅读数据', `将导入 ${data.books.length} 本书的正文、笔记与阅读进度。同 id 的书会被覆盖，是否继续？`)) return;
+    let ok = 0;
+    for (const b of data.books) {
+      if (!b?.meta?.id) continue;
+      try {
+        await blobStore.putBook(b.meta.id, { meta: { title: b.meta.title, author: b.meta.author }, fullText: b.fullText || '', chapters: b.chapters || [], sig: b.sig || '' });
+        if (b.coverB64) { try { await blobStore.putCover(b.meta.id, base64ToBlob(b.coverB64)); } catch (_) {} }
+        const idx = (coread().books || []).findIndex((x) => x.id === b.meta.id);
+        if (idx >= 0) coread().books[idx] = b.meta; else coread().books.unshift(b.meta);
+        ok++;
+      } catch (e) { console.warn(`[${MODULE_NAME}] import book failed`, e); }
+    }
+    // 偏好并入（保留本机书目，不被覆盖）
+    if (isPlainObject(data.prefs)) {
+      for (const k of Object.keys(data.prefs)) {
+        if (k === 'books' || k === 'enabled') continue;
+        coread()[k] = data.prefs[k];
+      }
+    }
+    saveSettings();
+    toast(`已导入 ${ok} 本书。`, 'success');
+    renderModal();
+  });
+  input.click();
+}
+
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result || '').split(',')[1] || '');
+    r.onerror = reject;
+    r.readAsDataURL(blob);
+  });
+}
+
+function base64ToBlob(b64, mime = 'image/*') {
+  const bin = atob(b64);
+  const arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return new Blob([arr], { type: mime });
 }
 
 /* ============================================================
@@ -7166,6 +9099,7 @@ function bindEvents() {
     contextScanCache.worldScannedAt = '';
     contextScanCache.boundWorldBookNames = [];
     contextAutoScanned = false;
+    ttsExtractAutoScanned = false;   // 切聊天：配音「人设参照」也重新按新聊天补扫一次
     ttsLineCache.clear();      // 切聊天：旧消息台词缓存失效
     renderFloatButton();
     renderInputMenuEntry();
